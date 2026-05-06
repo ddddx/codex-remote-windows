@@ -1278,12 +1278,18 @@ body {
   border-radius: 18px;
   background: var(--select-menu-bg);
   box-shadow: var(--select-menu-shadow);
+  overflow-y: auto;
 }
 
 .select-shell.open .select-menu {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.select-shell.open-upward .select-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 
 .select-option {

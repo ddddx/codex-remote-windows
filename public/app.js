@@ -278,6 +278,12 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+window.addEventListener('resize', () => {
+  if (activeCustomSelect) {
+    positionCustomSelectMenu(activeCustomSelect);
+  }
+});
+
 const state = {
   tabs: [],
   activeThreadId: null,
@@ -555,9 +561,27 @@ function closeActiveCustomSelect() {
   if (!activeCustomSelect) {
     return;
   }
+  activeCustomSelect.wrapper.classList.remove('open-upward');
   activeCustomSelect.wrapper.classList.remove('open');
   activeCustomSelect.trigger.setAttribute('aria-expanded', 'false');
   activeCustomSelect = null;
+}
+
+function positionCustomSelectMenu(controller) {
+  const { wrapper, trigger, menu } = controller;
+  wrapper.classList.remove('open-upward');
+  menu.style.maxHeight = '';
+
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuHeight = Math.max(menu.scrollHeight, 120);
+  const viewportPadding = 16;
+  const spaceBelow = window.innerHeight - triggerRect.bottom - viewportPadding;
+  const spaceAbove = triggerRect.top - viewportPadding;
+  const openUpward = menuHeight > spaceBelow && spaceAbove > spaceBelow;
+  const availableSpace = Math.max(120, openUpward ? spaceAbove : spaceBelow);
+
+  wrapper.classList.toggle('open-upward', openUpward);
+  menu.style.maxHeight = `${Math.max(120, availableSpace)}px`;
 }
 
 function openCustomSelect(controller) {
@@ -566,6 +590,7 @@ function openCustomSelect(controller) {
   }
   controller.wrapper.classList.add('open');
   controller.trigger.setAttribute('aria-expanded', 'true');
+  positionCustomSelectMenu(controller);
   activeCustomSelect = controller;
 }
 
