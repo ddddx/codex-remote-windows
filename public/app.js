@@ -738,12 +738,35 @@ function formatElapsed(ms) {
   return `${seconds}秒`;
 }
 
+function formatShortElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+  }
+  return `${seconds}s`;
+}
+
 function getTurnElapsedLabel(threadId) {
   const startedAt = state.turnStartedAtByThread.get(threadId);
   if (!startedAt) {
     return '';
   }
   return `已执行 ${formatElapsed(Date.now() - startedAt)}`;
+}
+
+function getTurnWorkingLabel(threadId) {
+  const startedAt = state.turnStartedAtByThread.get(threadId);
+  if (!startedAt) {
+    return '';
+  }
+  return `Working ${formatShortElapsed(Date.now() - startedAt)}`;
 }
 
 function findItemIndexById(threadId, itemId) {
@@ -886,6 +909,139 @@ function getFileChangeOutput(item) {
 
 function getFileChangePatch(item) {
   return String(item?.patch || item?.aggregatedPatch || '').trim();
+}
+
+function getNormalizedFileChangeKind(kind) {
+  const normalized = String(kind || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'update';
+  }
+  if (['add', 'added', 'create', 'created', 'new'].includes(normalized)) {
+    return 'add';
+  }
+  if (['delete', 'deleted', 'remove', 'removed'].includes(normalized)) {
+    return 'delete';
+  }
+  if (['update', 'updated', 'modify', 'modified', 'rename', 'renamed', 'move', 'moved'].includes(normalized)) {
+    return 'update';
+  }
+  return 'update';
+}
+
+function dedupeFileChanges(changes) {
+  const seen = new Set();
+  const result = [];
+  for (const change of changes) {
+    const path = String(change?.path || '').trim();
+    if (!path) {
+      continue;
+    }
+    const kind = getNormalizedFileChangeKind(change.kind);
+    const key = `${kind}:${path}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({ path, kind });
+  }
+  return result;
+}
+
+function parseFileChangesFromPatch(patch) {
+  const text = String(patch || '');
+  if (!text.trim()) {
+    return [];
+  }
+
+  const changes = [];
+  const lines = text.split(/\r?\n/);
+  let currentDiffPath = '';
+
+  for (const line of lines) {
+    let match = line.match(/^\*\*\* Add File: (.+)$/);
+    if (match) {
+      changes.push({ kind: 'add', path: match[1].trim() });
+      continue;
+    }
+
+    match = line.match(/^\*\*\* Delete File: (.+)$/);
+    if (match) {
+      changes.push({ kind: 'delete', path: match[1].trim() });
+      continue;
+    }
+
+    match = line.match(/^\*\*\* Update File: (.+)$/);
+    if (match) {
+      changes.push({ kind: 'update', path: match[1].trim() });
+      continue;
+    }
+
+    match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    if (match) {
+      currentDiffPath = (match[2] || match[1] || '').trim();
+      if (currentDiffPath) {
+        changes.push({ kind: 'update', path: currentDiffPath });
+      }
+      continue;
+    }
+
+    match = line.match(/^rename to (.+)$/);
+    if (match) {
+      changes.push({ kind: 'update', path: match[1].trim() });
+      continue;
+    }
+
+    if (line.startsWith('new file mode ') && currentDiffPath) {
+      changes.push({ kind: 'add', path: currentDiffPath });
+      continue;
+    }
+
+    if (line.startsWith('deleted file mode ') && currentDiffPath) {
+      changes.push({ kind: 'delete', path: currentDiffPath });
+    }
+  }
+
+  return dedupeFileChanges(changes);
+}
+
+function normalizeFileChanges(changes, patch = '') {
+  const normalized = dedupeFileChanges(
+    (Array.isArray(changes) ? changes : []).map((change) => ({
+      path: change?.path || change?.filePath || change?.file || '',
+      kind: change?.kind || change?.type || '',
+    }))
+  );
+  if (normalized.length) {
+    return normalized;
+  }
+  return parseFileChangesFromPatch(patch);
+}
+
+function summarizeFileChanges(changes) {
+  const counts = { add: 0, update: 0, delete: 0 };
+  for (const change of changes) {
+    counts[getNormalizedFileChangeKind(change.kind)] += 1;
+  }
+
+  const parts = [];
+  if (counts.add) {
+    parts.push(`新增 ${counts.add}`);
+  }
+  if (counts.update) {
+    parts.push(`修改 ${counts.update}`);
+  }
+  if (counts.delete) {
+    parts.push(`删除 ${counts.delete}`);
+  }
+  return parts.join(' · ');
+}
+
+function isItemInActiveTurn(threadId, item) {
+  if (!state.turnActiveByThread.get(threadId)) {
+    return false;
+  }
+  const activeTurnId = state.currentTurnIdByThread.get(threadId);
+  return !activeTurnId || !item?._turnId || item._turnId === activeTurnId;
 }
 
 function assignPendingUserMessageToTurn(threadId, turnId) {
@@ -1778,6 +1934,7 @@ function buildSemanticTimelineEntries(threadId) {
   const groupEntries = groups.map((group, index) => ({
     key: `timeline:${group.key}`,
     kind: 'turn',
+    threadId,
     index: index + 1,
     userEntry: group.userEntry,
     timelineEntries: group.timelineEntries,
@@ -1820,11 +1977,13 @@ function hasLiveEntryActivity(entry) {
   return false;
 }
 
-function createThinkingEntry(key = '__thinking__') {
+function createThinkingEntry(key = '__thinking__', threadId = '') {
+  const workingLabel = threadId ? getTurnWorkingLabel(threadId) : '';
   return {
     key,
     kind: 'thinking',
-    signature: `thinking:${key}`,
+    workingLabel,
+    signature: JSON.stringify(['thinking', key, workingLabel]),
   };
 }
 
@@ -1889,22 +2048,29 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const pendingRequest = findPendingRequestForItem(threadId, item.id);
     const status = pendingRequest ? 'pendingApproval' : (item.status || '');
     const output = getCommandOutput(item);
+    const workingLabel = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
+      ? getTurnWorkingLabel(threadId)
+      : '';
     return {
       key,
       kind: 'command',
       command: typeof command === 'string' ? command : JSON.stringify(command),
       status,
       output,
-      signature: JSON.stringify(['command', key, command, status, output]),
+      workingLabel,
+      signature: JSON.stringify(['command', key, command, status, output, workingLabel]),
     };
   }
 
   if (item.type === 'fileChange') {
     const pendingRequest = findPendingRequestForItem(threadId, item.id);
     const status = pendingRequest ? 'pendingApproval' : (item.status || '');
-    const changes = Array.isArray(item.changes) ? item.changes : [];
     const output = getFileChangeOutput(item);
     const patch = getFileChangePatch(item);
+    const changes = normalizeFileChanges(item.changes, patch);
+    const workingLabel = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
+      ? getTurnWorkingLabel(threadId)
+      : '';
     return {
       key,
       kind: 'fileChange',
@@ -1912,7 +2078,8 @@ function buildEntryFromItem(threadId, item, partials, index) {
       changes,
       output,
       patch,
-      signature: JSON.stringify(['fileChange', key, status, JSON.stringify(changes), output, patch]),
+      workingLabel,
+      signature: JSON.stringify(['fileChange', key, status, JSON.stringify(changes), output, patch, workingLabel]),
     };
   }
 
@@ -2050,7 +2217,7 @@ function populateCommandEntry(node, entry) {
 
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(entry.command, 110) || '命令执行'}`));
-  summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}`));
+  summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}${entry.workingLabel ? ` · ${entry.workingLabel}` : ''}`));
   details.appendChild(summary);
 
   const body = createDetailContent();
@@ -2072,22 +2239,25 @@ function populateFileChangeEntry(node, entry) {
   details.className = 'timeline-inline-detail-row';
   details.open = entry.status === 'pendingApproval' || entry.status === 'running';
 
+  const summaryText = summarizeFileChanges(entry.changes) || '文件修改';
   const preview = entry.changes.slice(0, 3).map((change) => basenamePath(change.path) || change.path).filter(Boolean);
-  const summaryText = preview.length ? preview.join(' · ') : '文件修改';
-  const extraCount = entry.changes.length > 3 ? ` · 另 ${entry.changes.length - 3} 项` : '';
+  const extraCount = entry.changes.length > 3 ? ` · ${preview.length} / ${entry.changes.length}` : '';
 
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(summaryText, 110)}${extraCount}`));
-  summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}`));
+  summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}${entry.workingLabel ? ` · ${entry.workingLabel}` : ''}`));
   details.appendChild(summary);
 
   const body = createDetailContent();
+  if (preview.length) {
+    body.appendChild(createTimelineMeta(preview.join(' · ')));
+  }
   const changes = document.createElement('div');
   changes.className = 'file-change-list';
   for (const change of entry.changes) {
     const line = document.createElement('div');
-    line.className = 'file-change-entry';
-    line.textContent = `${formatFileChangeKind(change.kind)} ${change.path}`;
+    line.className = `file-change-entry kind-${getNormalizedFileChangeKind(change.kind)}`;
+    line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}`;
     changes.appendChild(line);
   }
   body.appendChild(changes);
@@ -2116,10 +2286,13 @@ function populateReasoningEntry(node, entry) {
   node.appendChild(createMessageBody(renderMarkdown(entry.text)));
 }
 
-function populateThinkingEntry(node) {
+function populateThinkingEntry(node, entry) {
   node.className = 'timeline-card timeline-card-thinking';
   const title = createTimelineTitle('思考中…');
   node.appendChild(title);
+  if (entry?.workingLabel) {
+    node.appendChild(createTimelineMeta(entry.workingLabel));
+  }
   const dots = document.createElement('div');
   dots.className = 'thinking-inline';
   dots.appendChild(createDot());
@@ -2159,6 +2332,10 @@ function populateMessageNode(node, entry) {
     }
     if (entry.isActive) {
       meta.appendChild(createTurnBadge('进行中', 'active'));
+      const workingLabel = entry.threadId ? getTurnWorkingLabel(entry.threadId) : '';
+      if (workingLabel) {
+        meta.appendChild(createTurnBadge(workingLabel, 'active working'));
+      }
     } else if (entry.finalEntry || entry.timelineEntries.length) {
       meta.appendChild(createTurnBadge('已完成', 'done'));
     }
@@ -2179,7 +2356,7 @@ function populateMessageNode(node, entry) {
         stack.appendChild(createTimelineEvent(timelineEntry));
       }
       if (entry.isActive && !entry.finalEntry) {
-        stack.appendChild(createTimelineEvent(createThinkingEntry(`${entry.key}:thinking`)));
+        stack.appendChild(createTimelineEvent(createThinkingEntry(`${entry.key}:thinking`, entry.threadId || '')));
       }
       if (stack.childNodes.length) {
         assistantRow.body.appendChild(stack);
@@ -2194,7 +2371,7 @@ function populateMessageNode(node, entry) {
   }
 
   if (entry.kind === 'thinking') {
-    populateThinkingEntry(node);
+    populateThinkingEntry(node, entry);
     return;
   }
 
@@ -2279,6 +2456,17 @@ function formatFileChangeKind(kind) {
     return '修改';
   }
   return '变更';
+}
+
+function formatFileChangePrefix(kind) {
+  const normalized = getNormalizedFileChangeKind(kind);
+  if (normalized === 'add') {
+    return '+ 新增';
+  }
+  if (normalized === 'delete') {
+    return '- 删除';
+  }
+  return '~ 修改';
 }
 
 function populateServerRequestNode(node, request) {
@@ -3290,5 +3478,8 @@ function handleMessage(msg) {
 window.setInterval(() => {
   if (state.creatingTab || Array.from(state.turnActiveByThread.values()).some(Boolean)) {
     renderHeader();
+    if (state.activeThreadId && state.turnActiveByThread.get(state.activeThreadId)) {
+      renderMessages();
+    }
   }
 }, 1000);

@@ -826,6 +826,13 @@ body {
   color: rgba(23, 102, 88, 0.82);
 }
 
+.turn-badge.working {
+  background: rgba(33, 116, 101, 0.06);
+  border-color: rgba(33, 116, 101, 0.12);
+  color: rgba(23, 102, 88, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+
 .turn-badge.done {
   background: rgba(136, 116, 91, 0.08);
   border-color: rgba(136, 116, 91, 0.14);
@@ -1105,10 +1112,23 @@ body {
 .file-change-entry {
   font-size: 12px;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .file-change-entry.muted {
   color: var(--muted);
+}
+
+.file-change-entry.kind-add {
+  color: #1d7a48;
+}
+
+.file-change-entry.kind-update {
+  color: #8a6330;
+}
+
+.file-change-entry.kind-delete {
+  color: #b03d3d;
 }
 
 /* Tool calls banner */
