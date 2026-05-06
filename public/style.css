@@ -1825,8 +1825,18 @@ body {
   }
 
   .composer-input-row {
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: flex-end;
+  }
+
+  .composer-input-row .prompt-stack {
+    flex: 1;
+  }
+
+  .composer-input-row .btn[type="submit"] {
+    flex: 0 0 auto;
+    min-width: 68px;
+    white-space: nowrap;
   }
 }
 
