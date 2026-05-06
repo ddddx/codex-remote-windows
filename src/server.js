@@ -1,6 +1,9 @@
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const express = require('express');
 const { WebSocketServer } = require('ws');
@@ -16,8 +19,10 @@ const PORT = Number.parseInt(process.env.PORT || '8787', 10);
 const WS_TOKEN = process.env.WS_TOKEN || '';
 const MAX_CLIENT_MESSAGE_BYTES = parsePositiveInteger(process.env.MAX_CLIENT_MESSAGE_BYTES) || 65536;
 const MAX_TURN_INPUT_LENGTH = parsePositiveInteger(process.env.MAX_TURN_INPUT_LENGTH) || 20000;
+const MAX_TURN_ATTACHMENTS = parsePositiveInteger(process.env.MAX_TURN_ATTACHMENTS) || 8;
 const MAX_TAB_NAME_LENGTH = parsePositiveInteger(process.env.MAX_TAB_NAME_LENGTH) || 120;
 const MAX_WORKSPACE_PATH_LENGTH = parsePositiveInteger(process.env.MAX_WORKSPACE_PATH_LENGTH) || 2048;
+const MAX_IMAGE_UPLOAD_BYTES = parsePositiveInteger(process.env.MAX_IMAGE_UPLOAD_BYTES) || (15 * 1024 * 1024);
 const BOOTSTRAP_THREAD_LIMIT = parsePositiveInteger(process.env.BOOTSTRAP_THREAD_LIMIT) || 100;
 const WINDOW_STATUS_REFRESH_MS = parsePositiveInteger(process.env.WINDOW_STATUS_REFRESH_MS) || 5000;
 const THREAD_ID_REGEX = /^[0-9a-f]{8,12}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,6 +37,15 @@ const STREAM_ITEM_DELTA_METHODS = new Set([
   'item/reasoning/summaryPartAdded',
   'item/reasoning/textDelta',
 ]);
+const IMAGE_CONTENT_TYPES = new Map([
+  ['image/png', '.png'],
+  ['image/jpeg', '.jpg'],
+  ['image/jpg', '.jpg'],
+  ['image/webp', '.webp'],
+  ['image/gif', '.gif'],
+  ['image/bmp', '.bmp'],
+]);
+const UPLOAD_ROOT = path.join(process.cwd(), '.codex-remote-uploads');
 
 const app = express();
 app.use(express.json({ limit: '32kb' }));
@@ -101,6 +115,55 @@ app.post('/api/workspace/create-directory', (req, res) => {
     res.json({ path: createdPath });
   } catch (error) {
     res.status(400).json({ message: getErrorMessage(error) || '无法创建工作区目录' });
+  }
+});
+
+app.post('/api/uploads/image', express.raw({ type: 'image/*', limit: MAX_IMAGE_UPLOAD_BYTES }), async (req, res) => {
+  if (!isAuthorizedHttpRequest(req)) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const contentType = normalizeImageContentType(req.headers['content-type']);
+    const originalName = decodeUploadFileName(req.headers['x-upload-filename']);
+    const savedName = buildUploadFileName(originalName, contentType);
+    const filePath = path.join(UPLOAD_ROOT, savedName);
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!body.length) {
+      throw new Error('图片内容为空');
+    }
+
+    fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
+    await fsp.writeFile(filePath, body);
+
+    res.json({
+      id: savedName,
+      name: originalName || savedName,
+      contentType,
+      filePath,
+      url: `/api/uploads/${encodeURIComponent(savedName)}`,
+    });
+  } catch (error) {
+    res.status(400).json({ message: getErrorMessage(error) || '图片上传失败' });
+  }
+});
+
+app.get('/api/uploads/:fileName', (req, res) => {
+  if (!isAuthorizedHttpRequest(req)) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const resolved = resolveUploadedFile(req.params.fileName);
+    if (!fs.existsSync(resolved)) {
+      res.status(404).json({ message: '图片不存在' });
+      return;
+    }
+    res.sendFile(resolved);
+  } catch (error) {
+    res.status(400).json({ message: getErrorMessage(error) || '无法读取图片' });
   }
 });
 
@@ -176,6 +239,65 @@ function isAuthorizedHttpRequest(req) {
     ? req.headers['x-codex-remote-token']
     : '';
   return queryToken === WS_TOKEN || headerToken === WS_TOKEN;
+}
+
+function decodeUploadFileName(value) {
+  if (Array.isArray(value)) {
+    return decodeUploadFileName(value[0]);
+  }
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function normalizeImageContentType(value) {
+  if (Array.isArray(value)) {
+    return normalizeImageContentType(value[0]);
+  }
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase().split(';', 1)[0] : '';
+  if (!IMAGE_CONTENT_TYPES.has(normalized)) {
+    throw new Error('不支持的图片类型');
+  }
+  return normalized;
+}
+
+function sanitizeUploadBaseName(fileName) {
+  const parsed = path.parse(String(fileName || '').trim());
+  const stem = parsed.name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return stem || 'image';
+}
+
+function buildUploadFileName(originalName, contentType) {
+  const extension = IMAGE_CONTENT_TYPES.get(contentType) || '.bin';
+  const safeBase = sanitizeUploadBaseName(originalName);
+  return `${Date.now()}-${crypto.randomBytes(5).toString('hex')}-${safeBase}${extension}`;
+}
+
+function isPathInsideRoot(rootPath, targetPath) {
+  const root = path.resolve(rootPath);
+  const target = path.resolve(targetPath);
+  return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
+function resolveUploadedFile(fileName) {
+  const normalized = path.basename(String(fileName || '').trim());
+  if (!normalized) {
+    throw new Error('invalid upload file');
+  }
+  const resolved = path.resolve(UPLOAD_ROOT, normalized);
+  if (!isPathInsideRoot(UPLOAD_ROOT, resolved)) {
+    throw new Error('invalid upload path');
+  }
+  return resolved;
 }
 
 function parsePositiveInteger(value) {
@@ -570,7 +692,8 @@ function normalizeClientMessage(raw) {
       return {
         type: 'turn_send',
         threadId: normalizeThreadId(message.threadId),
-        text: normalizeRequiredString(message.text, MAX_TURN_INPUT_LENGTH, 'text'),
+        text: normalizeOptionalTurnText(message.text),
+        attachments: normalizeTurnAttachments(message.attachments),
         clientMessageId: normalizeOptionalClientMessageId(message.clientMessageId),
         model: normalizeOptionalModel(message.model),
         effort: normalizeOptionalReasoningEffort(message.effort),
@@ -612,6 +735,20 @@ function normalizeOptionalString(value, maxLength) {
   const normalized = value.trim();
   if (normalized.length > maxLength) {
     throw new Error(`field too long (max ${maxLength})`);
+  }
+  return normalized;
+}
+
+function normalizeOptionalTurnText(value) {
+  if (value == null || value === '') {
+    return '';
+  }
+  if (typeof value !== 'string') {
+    throw new Error('invalid text');
+  }
+  const normalized = value.trim();
+  if (normalized.length > MAX_TURN_INPUT_LENGTH) {
+    throw new Error(`text too long (max ${MAX_TURN_INPUT_LENGTH})`);
   }
   return normalized;
 }
@@ -676,6 +813,40 @@ function normalizeOptionalSandboxMode(value) {
     throw new Error('invalid sandbox mode');
   }
   return normalized;
+}
+
+function normalizeTurnAttachments(value) {
+  if (value == null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('attachments must be an array');
+  }
+  if (value.length > MAX_TURN_ATTACHMENTS) {
+    throw new Error(`too many attachments (max ${MAX_TURN_ATTACHMENTS})`);
+  }
+  return value.map((entry) => normalizeTurnAttachment(entry));
+}
+
+function normalizeTurnAttachment(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('invalid attachment');
+  }
+  const attachmentPath = normalizeWorkspaceInput(value.path);
+  if (!attachmentPath) {
+    throw new Error('attachment path required');
+  }
+  const resolved = path.resolve(attachmentPath);
+  if (!isPathInsideRoot(UPLOAD_ROOT, resolved)) {
+    throw new Error('attachment path out of range');
+  }
+  if (!fs.existsSync(resolved)) {
+    throw new Error('attachment file not found');
+  }
+  return {
+    path: resolved,
+    name: normalizeOptionalString(value.name, 255) || path.basename(resolved),
+  };
 }
 
 function toTurnSandboxPolicy(sandboxMode) {
@@ -1113,9 +1284,20 @@ wss.on('connection', (ws, request) => {
       }
 
       if (message.type === 'turn_send') {
+        if (!message.text && !message.attachments.length) {
+          send(ws, {
+            type: 'error',
+            op: 'turn_start',
+            threadId: message.threadId,
+            clientMessageId: message.clientMessageId,
+            message: '消息内容不能为空。',
+          });
+          return;
+        }
         try {
           await ensureWindowForThread(message.threadId);
           await codex.startTurn(message.threadId, message.text, {
+            attachments: message.attachments,
             model: message.model || null,
             effort: message.effort || null,
             approvalPolicy: message.approvalPolicy || null,

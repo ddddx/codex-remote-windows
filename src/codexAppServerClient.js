@@ -143,19 +143,34 @@ class CodexAppServerClient extends EventEmitter {
   }
 
   async startTurn(threadId, text, options = {}) {
+    const input = [];
+    if (typeof text === 'string' && text.trim()) {
+      input.push({
+        type: 'text',
+        text: text.trim(),
+        text_elements: [],
+      });
+    }
+    for (const attachment of Array.isArray(options.attachments) ? options.attachments : []) {
+      if (!attachment?.path) {
+        continue;
+      }
+      input.push({
+        type: 'localImage',
+        path: attachment.path,
+      });
+    }
+    if (!input.length) {
+      throw new Error('turn input required');
+    }
+
     const result = await this.request('turn/start', {
       threadId,
       model: options.model || null,
       effort: options.effort || null,
       approvalPolicy: options.approvalPolicy || null,
       sandboxPolicy: options.sandboxPolicy || null,
-      input: [
-        {
-          type: 'text',
-          text,
-          text_elements: [],
-        },
-      ],
+      input,
     });
     return result.turn;
   }

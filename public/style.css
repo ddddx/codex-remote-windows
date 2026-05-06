@@ -959,6 +959,41 @@ body {
   border-color: var(--bubble-user-border);
 }
 
+.user-message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.message-image-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-image-thumb {
+  width: 100%;
+  max-height: 320px;
+  border-radius: 14px;
+  object-fit: cover;
+  background: var(--surface-ghost);
+  border: 1px solid var(--line);
+}
+
+.message-image-name {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .msg-bubble-assistant {
   background: var(--bubble-assistant-bg);
   border-color: var(--bubble-assistant-border);
@@ -1346,6 +1381,7 @@ body {
   align-items: flex-start;
 }
 
+.composer-attach-btn,
 .composer-input-row > .btn[type="submit"] {
   height: 45px;
   min-height: 45px;
@@ -1356,10 +1392,76 @@ body {
   box-sizing: border-box;
 }
 
+.composer-attach-btn {
+  min-width: 68px;
+  white-space: nowrap;
+}
+
 .prompt-stack {
   position: relative;
   flex: 1;
   min-width: 0;
+}
+
+.composer-attachment-list {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.composer-attachment-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(100%, 280px);
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.composer-attachment-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface-ghost);
+  border: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.composer-attachment-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.composer-attachment-name {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.composer-attachment-remove {
+  width: fit-content;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.composer-attachment-remove:hover,
+.composer-attachment-remove:focus-visible {
+  color: var(--accent);
+  outline: none;
 }
 
 .session-creating-overlay {
@@ -1847,10 +1949,15 @@ body {
     flex: 1;
   }
 
+  .composer-input-row .composer-attach-btn,
   .composer-input-row .btn[type="submit"] {
     flex: 0 0 auto;
     min-width: 68px;
     white-space: nowrap;
+  }
+
+  .composer-attachment-card {
+    max-width: 220px;
   }
 }
 

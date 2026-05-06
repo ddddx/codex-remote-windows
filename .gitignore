@@ -1,5 +1,6 @@
 node_modules/
 .codex-home/
+.codex-remote-uploads/
 .npm-cache/
 tmp-bindings/
 *.log

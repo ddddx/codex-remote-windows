@@ -93,6 +93,16 @@ function getWebSocketToken() {
   }
 }
 
+function withAuthTokenQuery(url) {
+  const token = getWebSocketToken();
+  if (!token) {
+    return url;
+  }
+  const resolved = new URL(url, window.location.origin);
+  resolved.searchParams.set('token', token);
+  return `${resolved.pathname}${resolved.search}`;
+}
+
 function setWebSocketToken(token) {
   const normalized = typeof token === 'string' ? token.trim() : '';
   try {
@@ -231,6 +241,9 @@ const reasoningEffortSelect = document.getElementById('reasoningEffortSelect');
 const approvalPolicySelect = document.getElementById('approvalPolicySelect');
 const sandboxModeSelect = document.getElementById('sandboxModeSelect');
 const promptInput = document.getElementById('promptInput');
+const attachImageBtn = document.getElementById('attachImageBtn');
+const imageInput = document.getElementById('imageInput');
+const composerAttachmentList = document.getElementById('composerAttachmentList');
 const slashMenu = document.getElementById('slashMenu');
 const composerSubmitBtn = composer.querySelector('button[type="submit"]');
 const activeTitle = document.getElementById('activeTitle');
@@ -340,6 +353,8 @@ const state = {
   turnActiveByThread: new Map(),
   currentTurnIdByThread: new Map(),
   turnStartedAtByThread: new Map(),
+  composerAttachmentsByThread: new Map(),
+  composerUploadsInFlightByThread: new Map(),
   unreadThreadIds: new Set(),
   pendingUserMessages: new Map(),
   serverRequests: [],
@@ -402,6 +417,181 @@ async function apiFetchJson(url, options = {}) {
     throw new Error(data.message || `HTTP ${response.status}`);
   }
   return data;
+}
+
+function getAttachmentFileName(value) {
+  const normalized = String(value || '').replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+  const parts = normalized.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function buildUploadPreviewUrl(fileName) {
+  const normalized = getAttachmentFileName(fileName);
+  if (!normalized) {
+    return '';
+  }
+  return withAuthTokenQuery(`/api/uploads/${encodeURIComponent(normalized)}`);
+}
+
+function normalizeUserMessageContent(item) {
+  const normalized = [];
+  const seen = new Set();
+
+  function pushText(text) {
+    if (typeof text !== 'string') {
+      return;
+    }
+    const value = text.trim();
+    if (!value) {
+      return;
+    }
+    const key = `text:${value}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push({ type: 'text', text: value });
+  }
+
+  function pushLocalImage(entry) {
+    const rawPath = typeof entry === 'string'
+      ? entry
+      : (entry?.path || entry?.filePath || entry?.filepath || entry?.local_path || entry?.localPath || '');
+    const path = String(rawPath || '').trim();
+    if (!path) {
+      return;
+    }
+    const name = String(
+      (typeof entry === 'object' && entry)
+        ? (entry.name || entry.fileName || getAttachmentFileName(path))
+        : getAttachmentFileName(path)
+    ).trim();
+    const previewUrl = typeof entry === 'object' && entry
+      ? (entry.previewUrl || entry.url || buildUploadPreviewUrl(path))
+      : buildUploadPreviewUrl(path);
+    const key = `localImage:${path}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push({
+      type: 'localImage',
+      path,
+      name,
+      previewUrl,
+    });
+  }
+
+  function pushRemoteImage(entry) {
+    const url = String(
+      (typeof entry === 'string' ? entry : (entry?.url || entry?.uri || entry?.src || ''))
+    ).trim();
+    if (!url) {
+      return;
+    }
+    const name = String(
+      (typeof entry === 'object' && entry)
+        ? (entry.name || entry.fileName || getAttachmentFileName(url))
+        : getAttachmentFileName(url)
+    ).trim();
+    const key = `image:${url}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    normalized.push({
+      type: 'image',
+      url,
+      name,
+    });
+  }
+
+  for (const entry of Array.isArray(item?.content) ? item.content : []) {
+    if (entry?.type === 'text') {
+      pushText(entry.text);
+      continue;
+    }
+    if (entry?.type === 'localImage' || entry?.type === 'local_image') {
+      pushLocalImage(entry);
+      continue;
+    }
+    if (entry?.type === 'image') {
+      pushRemoteImage(entry);
+    }
+  }
+
+  for (const entry of Array.isArray(item?.local_images) ? item.local_images : []) {
+    pushLocalImage(entry);
+  }
+  for (const entry of Array.isArray(item?.localImages) ? item.localImages : []) {
+    pushLocalImage(entry);
+  }
+  for (const entry of Array.isArray(item?.images) ? item.images : []) {
+    pushRemoteImage(entry);
+  }
+
+  return normalized;
+}
+
+function createUserMessageFingerprint(content) {
+  const normalized = Array.isArray(content) ? content : [];
+  return JSON.stringify(normalized.map((entry) => {
+    if (entry.type === 'text') {
+      return { type: 'text', text: entry.text || '' };
+    }
+    if (entry.type === 'localImage') {
+      return { type: 'localImage', path: entry.path || '' };
+    }
+    if (entry.type === 'image') {
+      return { type: 'image', url: entry.url || '' };
+    }
+    return { type: entry.type || 'unknown' };
+  }));
+}
+
+function getComposerAttachments(threadId = state.activeThreadId) {
+  if (!threadId) {
+    return [];
+  }
+  if (!state.composerAttachmentsByThread.has(threadId)) {
+    state.composerAttachmentsByThread.set(threadId, []);
+  }
+  return state.composerAttachmentsByThread.get(threadId);
+}
+
+function setComposerAttachments(threadId, attachments) {
+  if (!threadId) {
+    return;
+  }
+  state.composerAttachmentsByThread.set(threadId, Array.isArray(attachments) ? attachments : []);
+}
+
+function clearComposerAttachments(threadId = state.activeThreadId) {
+  if (!threadId) {
+    return;
+  }
+  state.composerAttachmentsByThread.set(threadId, []);
+}
+
+function getComposerUploadCount(threadId = state.activeThreadId) {
+  if (!threadId) {
+    return 0;
+  }
+  return state.composerUploadsInFlightByThread.get(threadId) || 0;
+}
+
+function setComposerUploadCount(threadId, count) {
+  if (!threadId) {
+    return;
+  }
+  if (count > 0) {
+    state.composerUploadsInFlightByThread.set(threadId, count);
+  } else {
+    state.composerUploadsInFlightByThread.delete(threadId);
+  }
 }
 
 function createLocalId(prefix) {
@@ -1255,6 +1445,7 @@ function executeSlashCommand(command) {
   if (command.action === 'clear_input') {
     promptInput.value = '';
     closeSlashMenu();
+    renderComposer();
     promptInput.focus();
     return true;
   }
@@ -1371,14 +1562,15 @@ function ensureMessageDomMap(threadKey) {
   return messageDomByThread.get(threadKey);
 }
 
-function registerPendingUserMessage(clientMessageId, threadId, itemId, text) {
+function registerPendingUserMessage(clientMessageId, threadId, itemId, content) {
   if (!clientMessageId) {
     return;
   }
   state.pendingUserMessages.set(clientMessageId, {
     threadId,
     itemId,
-    text: typeof text === 'string' ? text.trim() : '',
+    fingerprint: createUserMessageFingerprint(Array.isArray(content) ? content : []),
+    content: Array.isArray(content) ? content.map((entry) => ({ ...entry })) : [],
   });
 }
 
@@ -1398,10 +1590,11 @@ function removeItemById(threadId, itemId) {
 function rollbackPendingUserMessage(clientMessageId) {
   const pending = state.pendingUserMessages.get(clientMessageId);
   if (!pending) {
-    return false;
+    return null;
   }
   state.pendingUserMessages.delete(clientMessageId);
-  return removeItemById(pending.threadId, pending.itemId);
+  removeItemById(pending.threadId, pending.itemId);
+  return pending;
 }
 
 function prunePendingUserMessages(threadId) {
@@ -1437,7 +1630,7 @@ function getUserMessageText(item) {
     return '';
   }
 
-  return (item.content || [])
+  return normalizeUserMessageContent(item)
     .filter((entry) => entry.type === 'text')
     .map((entry) => entry.text)
     .join('\n')
@@ -1445,13 +1638,13 @@ function getUserMessageText(item) {
 }
 
 function reconcilePendingUserMessage(threadId, item) {
-  const text = getUserMessageText(item);
-  if (!text) {
+  const fingerprint = createUserMessageFingerprint(normalizeUserMessageContent(item));
+  if (!fingerprint || fingerprint === '[]') {
     return false;
   }
 
   for (const [clientMessageId, pending] of state.pendingUserMessages.entries()) {
-    if (pending.threadId !== threadId || pending.text !== text) {
+    if (pending.threadId !== threadId || pending.fingerprint !== fingerprint) {
       continue;
     }
 
@@ -2022,6 +2215,8 @@ function removeTab(threadId) {
   state.partialByThread.delete(threadId);
   state.turnActiveByThread.delete(threadId);
   state.currentTurnIdByThread.delete(threadId);
+  state.composerAttachmentsByThread.delete(threadId);
+  state.composerUploadsInFlightByThread.delete(threadId);
   state.composerPrefsByThread.delete(threadId);
   state.serverRequests = state.serverRequests.filter((entry) => entry.threadId !== threadId);
   removePendingUserMessagesForThread(threadId);
@@ -2182,7 +2377,9 @@ function dedupeItems(items) {
   const seen = new Set();
   const deduped = [];
   for (const item of items) {
-    const key = `${item.type}:${item.id || ''}:${item._turnId || ''}:${item.text || ''}`;
+    const key = item?.type === 'userMessage'
+      ? `${item.type}:${item.id || ''}:${item._turnId || ''}:${createUserMessageFingerprint(normalizeUserMessageContent(item))}`
+      : `${item.type}:${item.id || ''}:${item._turnId || ''}:${item.text || ''}`;
     if (seen.has(key)) {
       continue;
     }
@@ -2383,15 +2580,21 @@ function renderHeader() {
 
 function renderComposer() {
   const disabled = state.authFailed || !state.activeThreadId;
+  const attachments = getComposerAttachments();
+  const uploadCount = getComposerUploadCount();
+  const hasDraftContent = Boolean(promptInput.value.trim() || attachments.length);
   const prefs = getActiveComposerPrefs();
   promptInput.disabled = disabled;
-  composerSubmitBtn.disabled = disabled;
+  attachImageBtn.disabled = disabled || uploadCount > 0;
+  composerSubmitBtn.disabled = disabled || uploadCount > 0 || !hasDraftContent;
   composerControlsToggle.disabled = state.authFailed;
   composerControlsSummary.textContent = formatMobileComposerSummary(prefs);
   composerControlsToggle.setAttribute('aria-expanded', composer.classList.contains('mobile-controls-open') ? 'true' : 'false');
   promptInput.placeholder = state.authFailed
     ? 'WebSocket 鉴权失败，请点击右上角“设置 Token”。'
     : (!state.activeThreadId ? '请先在左侧选择一个会话。' : DEFAULT_PROMPT_PLACEHOLDER);
+  attachImageBtn.textContent = uploadCount > 0 ? `上传中 ${uploadCount}` : '图片';
+  renderComposerAttachmentList(attachments);
 
   fillSelectOptions(modelSelect, buildModelSelectOptions(), normalizeComposerModel(prefs?.model));
   fillSelectOptions(reasoningEffortSelect, buildEffortSelectOptions(), normalizeComposerEffort(prefs?.effort));
@@ -2410,6 +2613,51 @@ function renderComposer() {
   syncCustomSelect(approvalPolicySelect);
   syncCustomSelect(sandboxModeSelect);
   autoResizePromptInput();
+}
+
+function renderComposerAttachmentList(attachments = getComposerAttachments()) {
+  composerAttachmentList.replaceChildren();
+  composerAttachmentList.hidden = !attachments.length;
+  if (!attachments.length) {
+    return;
+  }
+
+  for (const attachment of attachments) {
+    const card = document.createElement('div');
+    card.className = 'composer-attachment-card';
+
+    const image = document.createElement('img');
+    image.className = 'composer-attachment-thumb';
+    image.src = attachment.previewUrl || buildUploadPreviewUrl(attachment.path);
+    image.alt = attachment.name || getAttachmentFileName(attachment.path) || '已选图片';
+    image.loading = 'lazy';
+    card.appendChild(image);
+
+    const meta = document.createElement('div');
+    meta.className = 'composer-attachment-meta';
+
+    const name = document.createElement('div');
+    name.className = 'composer-attachment-name';
+    name.textContent = attachment.name || getAttachmentFileName(attachment.path) || '图片';
+    meta.appendChild(name);
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'composer-attachment-remove';
+    action.textContent = '移除';
+    action.addEventListener('click', () => {
+      const threadId = state.activeThreadId;
+      if (!threadId) {
+        return;
+      }
+      setComposerAttachments(threadId, getComposerAttachments(threadId).filter((entry) => entry.path !== attachment.path));
+      renderComposer();
+    });
+    meta.appendChild(action);
+
+    card.appendChild(meta);
+    composerAttachmentList.appendChild(card);
+  }
 }
 
 function renderCreatingOverlay() {
@@ -2511,6 +2759,56 @@ function renderSessionModal() {
     });
     workspaceBrowserList.appendChild(button);
   });
+}
+
+async function uploadComposerImageFiles(fileList) {
+  const threadId = state.activeThreadId;
+  if (!threadId) {
+    return;
+  }
+
+  const files = Array.from(fileList || []).filter((file) => file && String(file.type || '').startsWith('image/'));
+  if (!files.length) {
+    return;
+  }
+
+  setComposerUploadCount(threadId, getComposerUploadCount(threadId) + files.length);
+  renderComposer();
+
+  const uploaded = [];
+  try {
+    for (const file of files) {
+      const result = await apiFetchJson('/api/uploads/image', {
+        method: 'POST',
+        headers: {
+          'content-type': file.type || 'application/octet-stream',
+          'x-upload-filename': encodeURIComponent(file.name || 'image'),
+        },
+        body: await file.arrayBuffer(),
+      });
+      uploaded.push({
+        type: 'localImage',
+        path: result.filePath,
+        name: result.name || file.name || getAttachmentFileName(result.filePath),
+        previewUrl: result.url ? withAuthTokenQuery(result.url) : buildUploadPreviewUrl(result.filePath),
+      });
+      setComposerUploadCount(threadId, Math.max(0, getComposerUploadCount(threadId) - 1));
+      renderComposer();
+    }
+  } catch (error) {
+    if (uploaded.length) {
+      setComposerAttachments(threadId, getComposerAttachments(threadId).concat(uploaded));
+    }
+    setComposerUploadCount(threadId, 0);
+    addThreadNotice(threadId, `图片上传失败：${error.message || '请稍后重试。'}`, '_error');
+    render();
+    return;
+  }
+
+  if (uploaded.length) {
+    setComposerAttachments(threadId, getComposerAttachments(threadId).concat(uploaded));
+  }
+  renderComposer();
 }
 
 async function loadWorkspaceShortcuts() {
@@ -2921,15 +3219,17 @@ function buildEntryFromItem(threadId, item, partials, index) {
   const key = `${item.type}:${item.id || index}:${item._turnId || ''}`;
 
   if (item.type === 'userMessage') {
-    const text = (item.content || [])
+    const content = normalizeUserMessageContent(item);
+    const text = content
       .filter((entry) => entry.type === 'text')
       .map((entry) => entry.text)
       .join('\n');
     return {
       key,
       kind: 'user',
+      content,
       text,
-      signature: JSON.stringify(['user', key, text]),
+      signature: JSON.stringify(['user', key, createUserMessageFingerprint(content)]),
     };
   }
 
@@ -3250,6 +3550,51 @@ function populateNoticeEntry(node, entry) {
   node.textContent = entry.text;
 }
 
+function appendUserMessageContent(node, content) {
+  const entries = Array.isArray(content) ? content : [];
+  const textEntries = entries.filter((entry) => entry.type === 'text');
+  const imageEntries = entries.filter((entry) => entry.type === 'localImage' || entry.type === 'image');
+
+  if (textEntries.length) {
+    const text = textEntries.map((entry) => entry.text).join('\n');
+    const textBody = document.createElement('div');
+    textBody.className = 'user-message-text';
+    textBody.textContent = text;
+    node.appendChild(textBody);
+  }
+
+  if (!imageEntries.length) {
+    return;
+  }
+
+  const gallery = document.createElement('div');
+  gallery.className = 'message-image-grid';
+
+  for (const imageEntry of imageEntries) {
+    const figure = document.createElement('div');
+    figure.className = 'message-image-card';
+
+    const url = imageEntry.previewUrl || imageEntry.url || buildUploadPreviewUrl(imageEntry.path);
+    if (url) {
+      const image = document.createElement('img');
+      image.className = 'message-image-thumb';
+      image.src = url;
+      image.alt = imageEntry.name || getAttachmentFileName(imageEntry.path || imageEntry.url) || '图片';
+      image.loading = 'lazy';
+      figure.appendChild(image);
+    }
+
+    const caption = document.createElement('div');
+    caption.className = 'message-image-name';
+    caption.textContent = imageEntry.name || getAttachmentFileName(imageEntry.path || imageEntry.url) || '图片';
+    figure.appendChild(caption);
+
+    gallery.appendChild(figure);
+  }
+
+  node.appendChild(gallery);
+}
+
 function populateMessageNode(node, entry) {
   node.replaceChildren();
 
@@ -3317,7 +3662,7 @@ function populateMessageNode(node, entry) {
 
   if (entry.kind === 'user') {
     node.className = 'message user msg-bubble msg-bubble-user';
-    node.textContent = entry.text;
+    appendUserMessageContent(node, entry.content);
     return;
   }
 
@@ -4067,11 +4412,36 @@ promptInput.addEventListener('keydown', (event) => {
 promptInput.addEventListener('input', () => {
   autoResizePromptInput();
   updateSlashMenu();
+  renderComposer();
 });
 
 promptInput.addEventListener('focus', () => {
   autoResizePromptInput();
   updateSlashMenu();
+});
+
+attachImageBtn.addEventListener('click', () => {
+  if (attachImageBtn.disabled) {
+    return;
+  }
+  imageInput.click();
+});
+
+imageInput.addEventListener('change', () => {
+  const selected = imageInput.files;
+  imageInput.value = '';
+  if (!selected?.length) {
+    return;
+  }
+  void uploadComposerImageFiles(selected);
+});
+
+promptInput.addEventListener('paste', (event) => {
+  const files = Array.from(event.clipboardData?.files || []).filter((file) => String(file.type || '').startsWith('image/'));
+  if (!files.length) {
+    return;
+  }
+  void uploadComposerImageFiles(files);
 });
 
 modelSelect.addEventListener('change', () => {
@@ -4122,30 +4492,43 @@ themeSelect.addEventListener('change', () => {
 composer.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = promptInput.value.trim();
-  if (!text) {
+  const attachments = getComposerAttachments();
+  if (!text && !attachments.length) {
     return;
   }
 
-  const slashCommand = getExactSlashCommand(text);
+  const slashCommand = attachments.length ? null : getExactSlashCommand(text);
   if (slashCommand) {
     executeSlashCommand(slashCommand);
     return;
   }
 
-  if (!state.activeThreadId) {
+  if (!state.activeThreadId || getComposerUploadCount() > 0) {
     return;
   }
 
   const threadId = state.activeThreadId;
   const clientMessageId = createLocalId('turn');
   const localMessageId = createLocalId('local');
+  const content = [];
+  if (text) {
+    content.push({ type: 'text', text });
+  }
+  for (const attachment of attachments) {
+    content.push({
+      type: 'localImage',
+      path: attachment.path,
+      name: attachment.name || getAttachmentFileName(attachment.path),
+      previewUrl: attachment.previewUrl || buildUploadPreviewUrl(attachment.path),
+    });
+  }
   const items = ensureItems(threadId);
   items.push({
     type: 'userMessage',
     id: localMessageId,
-    content: [{ type: 'text', text }],
+    content,
   });
-  registerPendingUserMessage(clientMessageId, threadId, localMessageId, text);
+  registerPendingUserMessage(clientMessageId, threadId, localMessageId, content);
 
   const composerSelection = getEffectiveComposerSelection(threadId);
   state.turnActiveByThread.set(threadId, true);
@@ -4153,6 +4536,10 @@ composer.addEventListener('submit', (event) => {
     type: 'turn_send',
     threadId,
     text,
+    attachments: attachments.map((attachment) => ({
+      path: attachment.path,
+      name: attachment.name || getAttachmentFileName(attachment.path),
+    })),
     clientMessageId,
     model: composerSelection.model || '',
     effort: composerSelection.effort || '',
@@ -4161,16 +4548,22 @@ composer.addEventListener('submit', (event) => {
   })) {
     rollbackPendingUserMessage(clientMessageId);
     state.turnActiveByThread.set(threadId, false);
+    promptInput.value = text;
+    setComposerAttachments(threadId, attachments);
     ensureItems(threadId).push({
       type: '_error',
       id: createLocalId('send'),
       text: '消息发送失败：WebSocket 未连接，请稍后重试。',
     });
+    autoResizePromptInput();
+    render();
+    return;
   }
   promptInput.value = '';
+  clearComposerAttachments(threadId);
   autoResizePromptInput();
   closeSlashMenu();
-  renderMessages();
+  render();
 });
 
 function handleMessage(msg) {
@@ -4421,8 +4814,20 @@ function handleMessage(msg) {
     }
 
     if (msg.op === 'turn_start' && msg.clientMessageId) {
-      rollbackPendingUserMessage(msg.clientMessageId);
+      const pending = rollbackPendingUserMessage(msg.clientMessageId);
       state.turnActiveByThread.set(threadId, false);
+      if (threadId === state.activeThreadId && pending?.content?.length) {
+        const restoredText = pending.content
+          .filter((entry) => entry.type === 'text')
+          .map((entry) => entry.text)
+          .join('\n');
+        const restoredAttachments = pending.content
+          .filter((entry) => entry.type === 'localImage')
+          .map((entry) => ({ ...entry }));
+        promptInput.value = restoredText;
+        setComposerAttachments(threadId, restoredAttachments);
+        autoResizePromptInput();
+      }
     }
 
     if (msg.code === 'THREAD_NOT_FOUND' && msg.op === 'turn_start') {
@@ -4450,7 +4855,7 @@ function handleMessage(msg) {
       _turnId: state.currentTurnIdByThread.get(threadId) || null,
     });
     if (threadId === state.activeThreadId) {
-      renderMessages();
+      render();
     }
     return;
   }
