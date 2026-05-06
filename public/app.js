@@ -224,6 +224,8 @@ const newTabBtn = document.getElementById('newTabBtn');
 const messagesEl = document.getElementById('messages');
 const sessionCreatingOverlay = document.getElementById('sessionCreatingOverlay');
 const composer = document.getElementById('composer');
+const composerControlsToggle = document.getElementById('composerControlsToggle');
+const composerControlsSummary = document.getElementById('composerControlsSummary');
 const modelSelect = document.getElementById('modelSelect');
 const reasoningEffortSelect = document.getElementById('reasoningEffortSelect');
 const approvalPolicySelect = document.getElementById('approvalPolicySelect');
@@ -323,6 +325,10 @@ document.addEventListener('keydown', (event) => {
 window.addEventListener('resize', () => {
   if (activeCustomSelect) {
     positionCustomSelectMenu(activeCustomSelect);
+  }
+  if (window.innerWidth > 720) {
+    composer.classList.remove('mobile-controls-open');
+    composerControlsToggle.setAttribute('aria-expanded', 'false');
   }
 });
 
@@ -640,6 +646,22 @@ function formatSandboxModeLabel(value) {
     return '完全访问';
   }
   return value;
+}
+
+function formatMobileComposerSummary(prefs) {
+  const parts = [];
+  if (prefs?.model) {
+    parts.push(prefs.model);
+  } else if (state.composerModelDefault) {
+    parts.push(state.composerModelDefault);
+  } else {
+    parts.push('模型默认');
+  }
+
+  parts.push(formatReasoningEffortLabel(prefs?.effort || state.composerEffortDefault || ''));
+  parts.push(formatApprovalPolicyLabel(prefs?.approvalPolicy || state.composerApprovalPolicyDefault || '').replace('跟随当前配置', '批准默认'));
+  parts.push(formatSandboxModeLabel(prefs?.sandboxMode || state.composerSandboxModeDefault || '').replace('跟随当前配置', '沙箱默认'));
+  return parts.join(' · ');
 }
 
 function buildSandboxModeSelectOptions() {
@@ -2358,6 +2380,9 @@ function renderComposer() {
   const prefs = getActiveComposerPrefs();
   promptInput.disabled = disabled;
   composerSubmitBtn.disabled = disabled;
+  composerControlsToggle.disabled = state.authFailed;
+  composerControlsSummary.textContent = formatMobileComposerSummary(prefs);
+  composerControlsToggle.setAttribute('aria-expanded', composer.classList.contains('mobile-controls-open') ? 'true' : 'false');
   promptInput.placeholder = state.authFailed
     ? 'WebSocket 鉴权失败，请点击右上角“设置 Token”。'
     : (!state.activeThreadId ? '请先在左侧选择一个会话。' : DEFAULT_PROMPT_PLACEHOLDER);
@@ -3991,6 +4016,12 @@ sessionWorkspaceInput.addEventListener('keydown', (event) => {
   }
   event.preventDefault();
   void browseWorkspacePath(sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts));
+});
+
+composerControlsToggle.addEventListener('click', () => {
+  const nextOpen = !composer.classList.contains('mobile-controls-open');
+  composer.classList.toggle('mobile-controls-open', nextOpen);
+  composerControlsToggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
 });
 
 promptInput.addEventListener('keydown', (event) => {
