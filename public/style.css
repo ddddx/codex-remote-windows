@@ -113,6 +113,11 @@
   --workspace-path-bg: #fff;
   --workspace-item-bg: #f7fbfa;
   --workspace-item-selected-bg: #faf6f0;
+  --select-menu-bg: var(--card-strong);
+  --select-menu-border: var(--line);
+  --select-menu-shadow: 0 18px 40px rgba(35, 28, 22, 0.16);
+  --select-option-hover: var(--workspace-item-bg);
+  --select-option-selected: var(--workspace-item-selected-bg);
   --grid-rgb: 20, 92, 79;
   --sidebar-w: 260px;
 }
@@ -202,6 +207,7 @@ body[data-theme="bay"] {
   --workspace-path-bg: #ffffff;
   --workspace-item-bg: #f2faf9;
   --workspace-item-selected-bg: #f6f8fb;
+  --select-menu-shadow: 0 18px 40px rgba(32, 57, 74, 0.14);
   --grid-rgb: 12, 111, 122;
 }
 
@@ -320,6 +326,11 @@ body[data-theme="night"] {
   --workspace-path-bg: rgba(29, 40, 51, 0.98);
   --workspace-item-bg: rgba(22, 58, 56, 0.28);
   --workspace-item-selected-bg: rgba(57, 72, 87, 0.42);
+  --select-menu-bg: rgba(29, 40, 51, 0.98);
+  --select-menu-border: rgba(82, 99, 117, 0.42);
+  --select-menu-shadow: 0 22px 44px rgba(0, 0, 0, 0.34);
+  --select-option-hover: rgba(57, 72, 87, 0.72);
+  --select-option-selected: rgba(91, 192, 181, 0.16);
   --grid-rgb: 91, 192, 181;
 }
 
@@ -579,6 +590,24 @@ body {
 .theme-select-group span,
 .composer-select-group span {
   white-space: nowrap;
+}
+
+.select-native {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+}
+
+.select-shell {
+  position: relative;
+  min-width: 148px;
+  max-width: min(36vw, 240px);
+}
+
+.theme-select-group .select-shell {
+  min-width: 96px;
 }
 
 .status-badge {
@@ -1195,13 +1224,8 @@ body {
   color: var(--muted);
 }
 
-.theme-select-group select,
-.composer-select-group select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  min-width: 148px;
-  max-width: min(36vw, 240px);
+.select-trigger {
+  width: 100%;
   border: 1px solid var(--input-border);
   border-radius: 999px;
   padding: 7px 34px 7px 12px;
@@ -1218,33 +1242,70 @@ body {
   font: inherit;
   outline: none;
   box-shadow: none;
+  text-align: left;
+  cursor: pointer;
 }
 
-.theme-select-group select {
-  min-width: 96px;
+.select-trigger-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.theme-select-group select:focus,
-.composer-select-group select:focus {
+.select-trigger:focus,
+.select-shell.open .select-trigger {
   border-color: var(--accent);
   box-shadow: var(--modal-input-focus);
 }
 
-.theme-select-group select:disabled,
-.composer-select-group select:disabled {
+.select-trigger:disabled,
+.select-shell.disabled .select-trigger {
   opacity: 0.72;
   cursor: not-allowed;
 }
 
-.theme-select-group select::-ms-expand,
-.composer-select-group select::-ms-expand {
+.select-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 40;
   display: none;
+  padding: 8px;
+  border: 1px solid var(--select-menu-border);
+  border-radius: 18px;
+  background: var(--select-menu-bg);
+  box-shadow: var(--select-menu-shadow);
 }
 
-.theme-select-group select option,
-.composer-select-group select option {
-  background: var(--card-strong);
+.select-shell.open .select-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.select-option {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: transparent;
   color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-option:hover,
+.select-option:focus-visible {
+  background: var(--select-option-hover);
+  outline: none;
+}
+
+.select-option.selected {
+  background: var(--select-option-selected);
 }
 
 .composer-input-row {
@@ -1618,7 +1679,7 @@ body {
     justify-content: space-between;
   }
 
-  .composer-select-group select {
+  .composer-select-group .select-shell {
     max-width: none;
     min-width: 0;
     width: 100%;

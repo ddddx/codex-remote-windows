@@ -254,6 +254,29 @@ const workspaceBrowserList = document.getElementById('workspaceBrowserList');
 const sessionModalHint = document.getElementById('sessionModalHint');
 const sessionModalCancelBtn = document.getElementById('sessionModalCancelBtn');
 const sessionModalConfirmBtn = document.getElementById('sessionModalConfirmBtn');
+const customSelectControllers = new WeakMap();
+let activeCustomSelect = null;
+
+ensureCustomSelect(themeSelect);
+ensureCustomSelect(modelSelect);
+ensureCustomSelect(reasoningEffortSelect);
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Node)) {
+    closeActiveCustomSelect();
+    return;
+  }
+  if (activeCustomSelect && !activeCustomSelect.wrapper.contains(target)) {
+    closeActiveCustomSelect();
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeActiveCustomSelect();
+  }
+});
 
 const state = {
   tabs: [],
@@ -525,6 +548,130 @@ function fillSelectOptions(selectEl, options, selectedValue) {
     ? selectedValue
     : (options.some((option) => option.value === previousValue) ? previousValue : options[0]?.value || '');
   selectEl.value = nextValue;
+  syncCustomSelect(selectEl);
+}
+
+function closeActiveCustomSelect() {
+  if (!activeCustomSelect) {
+    return;
+  }
+  activeCustomSelect.wrapper.classList.remove('open');
+  activeCustomSelect.trigger.setAttribute('aria-expanded', 'false');
+  activeCustomSelect = null;
+}
+
+function openCustomSelect(controller) {
+  if (activeCustomSelect && activeCustomSelect !== controller) {
+    closeActiveCustomSelect();
+  }
+  controller.wrapper.classList.add('open');
+  controller.trigger.setAttribute('aria-expanded', 'true');
+  activeCustomSelect = controller;
+}
+
+function ensureCustomSelect(selectEl) {
+  if (!(selectEl instanceof HTMLSelectElement)) {
+    return null;
+  }
+
+  const existing = customSelectControllers.get(selectEl);
+  if (existing) {
+    return existing;
+  }
+
+  selectEl.classList.add('select-native');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'select-shell';
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const label = document.createElement('span');
+  label.className = 'select-trigger-label';
+  trigger.appendChild(label);
+
+  const menu = document.createElement('div');
+  menu.className = 'select-menu';
+  menu.setAttribute('role', 'listbox');
+
+  selectEl.parentNode.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(selectEl);
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(menu);
+
+  const controller = { selectEl, wrapper, trigger, label, menu };
+  customSelectControllers.set(selectEl, controller);
+
+  trigger.addEventListener('click', () => {
+    if (selectEl.disabled) {
+      return;
+    }
+    if (activeCustomSelect === controller) {
+      closeActiveCustomSelect();
+      return;
+    }
+    openCustomSelect(controller);
+  });
+
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeActiveCustomSelect();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (activeCustomSelect === controller) {
+        closeActiveCustomSelect();
+      } else if (!selectEl.disabled) {
+        openCustomSelect(controller);
+      }
+    }
+  });
+
+  syncCustomSelect(selectEl);
+  return controller;
+}
+
+function syncCustomSelect(selectEl) {
+  const controller = ensureCustomSelect(selectEl);
+  if (!controller) {
+    return;
+  }
+
+  const { wrapper, trigger, label, menu } = controller;
+  const selectedOption = selectEl.options[selectEl.selectedIndex] || selectEl.options[0] || null;
+  label.textContent = selectedOption?.textContent || '';
+  trigger.disabled = selectEl.disabled;
+  trigger.title = selectEl.title || '';
+  wrapper.classList.toggle('disabled', selectEl.disabled);
+
+  menu.replaceChildren();
+  Array.from(selectEl.options).forEach((option) => {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'select-option';
+    optionButton.setAttribute('role', 'option');
+    optionButton.dataset.value = option.value;
+    optionButton.textContent = option.textContent || '';
+    optionButton.classList.toggle('selected', option.selected);
+    optionButton.setAttribute('aria-selected', option.selected ? 'true' : 'false');
+    optionButton.addEventListener('click', () => {
+      if (selectEl.disabled) {
+        return;
+      }
+      const changed = selectEl.value !== option.value;
+      selectEl.value = option.value;
+      syncCustomSelect(selectEl);
+      closeActiveCustomSelect();
+      if (changed) {
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    menu.appendChild(optionButton);
+  });
 }
 
 function formatReasoningEffortLabel(effort) {
@@ -1505,6 +1652,7 @@ function renderHeader() {
   activeTitle.textContent = tab ? getSessionName(tab) : 'Codex Remote Control';
   fillSelectOptions(themeSelect, THEME_OPTIONS, state.currentTheme);
   themeSelect.disabled = false;
+  syncCustomSelect(themeSelect);
   tokenBtn.textContent = state.authFailed ? '设置 Token' : 'Token';
   tokenBtn.classList.toggle('btn-alert', state.authFailed);
 
@@ -1563,6 +1711,8 @@ function renderComposer() {
   reasoningEffortSelect.disabled = state.authFailed;
   modelSelect.title = state.composerOptionsLoading ? '正在加载模型列表...' : '';
   reasoningEffortSelect.title = '思考等级会应用到当前及后续轮次';
+  syncCustomSelect(modelSelect);
+  syncCustomSelect(reasoningEffortSelect);
 }
 
 function renderCreatingOverlay() {
