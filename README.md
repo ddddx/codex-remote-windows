@@ -1,13 +1,13 @@
-# Codex Remote Sessions
+# Codex Remote 远程会话控制
 
 通过手机或 PC 远程控制本机 Codex，会话以列表显示，并映射到本机多个 Codex 窗口。
 
 ## 功能
 
-- 控制端新建会话 -> PC 创建新的 Codex thread，并尝试打开一个本地 Codex 窗口
-- 控制端关闭会话 -> 关闭对应窗口并归档对应 thread
-- 支持在控制端发送 prompt 到指定会话
-- 支持流式查看 agent 输出（delta）
+- 控制端新建会话 -> PC 创建新的 Codex 会话线程，并尝试打开一个本地 Codex 窗口
+- 控制端关闭会话 -> 关闭对应窗口并归档对应会话线程
+- 支持在控制端发送提示词到指定会话
+- 支持流式查看助手输出（delta）
 - 手机/PC 都可访问（响应式 Web UI）
 - 左侧边栏会话管理，支持打开/隐藏
 - Markdown 渲染（代码块、加粗、列表、标题）
@@ -19,7 +19,7 @@
 
 - Windows
 - Node.js 22+
-- 已安装 Codex CLI（`codex.cmd` 需在 PATH 中，或通过 `CODEX_CMD` 环境变量指定路径）
+- 已安装 Codex 命令行（`codex.cmd` 需在 PATH 中，或通过 `CODEX_CMD` 环境变量指定路径）
 
 ## 快速启动
 
@@ -39,7 +39,7 @@ start-codex-remote.bat
 ```bash
 npm run remote         # 只启动，不主动清理旧进程
 npm run remote:restart # 先杀旧进程再重启，推荐
-npm run appserver   # 只启动 Codex app-server
+npm run appserver   # 只启动 Codex 服务端
 npm run web         # 只启动 Web 控制端
 ```
 
@@ -58,8 +58,8 @@ npm run web         # 只启动 Web 控制端
 |------|--------|------|
 | `PORT` | `8787` | Web 控制端端口 |
 | `CODEX_HOME` | Codex 默认目录 | 可选；仅在你想强制切换到另一套 Codex 数据目录时设置 |
-| `CODEX_CMD` | `codex.cmd` | Codex CLI 路径 |
-| `CODEX_APP_SERVER_WS` | `ws://127.0.0.1:4792` | app-server WebSocket 地址 |
+| `CODEX_CMD` | `codex.cmd` | Codex 命令行路径 |
+| `CODEX_APP_SERVER_WS` | `ws://127.0.0.1:4792` | Codex 服务端 WebSocket 地址 |
 | `WS_TOKEN` | 空 | WebSocket 鉴权 token；设置后，控制端连接必须携带同值 |
 
 本地配置文件示例：
@@ -100,7 +100,7 @@ http://<本机IP>:8787/?token=your-secret-token
 2. 在 PC 上放开 `8787` 端口（只对内网）。
 3. 手机浏览器访问 `http://<PC局域网IP>:8787`。
 
-如果要公网访问，建议反向代理 + HTTPS + 强认证，不要直接裸露端口。
+如果要公网访问，建议使用反向代理 + HTTPS + 强认证，不要直接暴露端口。
 
 ## 项目结构
 
@@ -112,11 +112,11 @@ cc-workspace/
 │   └── style.css
 ├── src/              # 后端源码
 │   ├── server.js     # Web 服务器 + WebSocket
-│   ├── codexAppServerClient.js  # Codex app-server 客户端
+│   ├── codexAppServerClient.js  # Codex 服务端客户端
 │   └── windowManager.js         # 窗口管理
 ├── start-all.js        # 同时拉起 app-server 和 Web 控制端
 ├── restart-codex-remote.js # 按当前配置先杀旧进程再启动
-├── start-appserver.js  # 调试用：只启动 app-server
+├── start-appserver.js  # 调试用：只启动 Codex 服务端
 ├── start-web.js        # 调试用：只启动 Web 控制端
 ├── start-codex-remote.bat # Windows 一键重启入口
 └── package.json
@@ -125,4 +125,4 @@ cc-workspace/
 ## 当前限制
 
 - 会话关闭是归档（`thread/archive`），不是物理删除。
-- "本地窗口映射"依赖 Windows `Start-Process`；若权限策略限制，仍可远程控制 thread，但不会自动弹出本地窗口。
+- “本地窗口映射”依赖 Windows `Start-Process`；若权限策略限制，仍可远程控制会话线程，但不会自动弹出本地窗口。

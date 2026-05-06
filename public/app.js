@@ -1120,8 +1120,9 @@ function buildMessageEntries(threadId) {
   const requestEntries = getServerRequestsForThread(threadId).map((request) => buildEntryFromServerRequest(request));
   entries.push(...requestEntries);
 
+  const hasAgentMessage = items.some((item) => item.type === 'agentMessage' && (item.text || partials.has(item.id)));
   const hasPartialAgent = items.some((item) => item.type === 'agentMessage' && (item._partial || partials.has(item.id)));
-  if (state.turnActiveByThread.get(threadId) && !hasPartialAgent) {
+  if (state.turnActiveByThread.get(threadId) && !hasPartialAgent && !hasAgentMessage) {
     entries.push({
       key: '__thinking__',
       kind: 'thinking',
