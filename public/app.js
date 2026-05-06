@@ -2197,12 +2197,11 @@ function hasLiveEntryActivity(entry) {
 }
 
 function createThinkingEntry(key = '__thinking__', threadId = '') {
-  const workingLabel = threadId ? getTurnWorkingLabel(threadId) : '';
   return {
     key,
     kind: 'thinking',
-    workingLabel,
-    signature: JSON.stringify(['thinking', key, workingLabel]),
+    threadId,
+    signature: JSON.stringify(['thinking', key, threadId]),
   };
 }
 
@@ -2267,8 +2266,8 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const pendingRequest = findPendingRequestForItem(threadId, item.id);
     const status = pendingRequest ? 'pendingApproval' : (item.status || '');
     const output = getCommandOutput(item);
-    const workingLabel = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
-      ? getTurnWorkingLabel(threadId)
+    const activeThreadId = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
+      ? threadId
       : '';
     return {
       key,
@@ -2276,8 +2275,8 @@ function buildEntryFromItem(threadId, item, partials, index) {
       command: typeof command === 'string' ? command : JSON.stringify(command),
       status,
       output,
-      workingLabel,
-      signature: JSON.stringify(['command', key, command, status, output, workingLabel]),
+      threadId: activeThreadId,
+      signature: JSON.stringify(['command', key, command, status, output, activeThreadId]),
     };
   }
 
@@ -2287,8 +2286,8 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const output = getFileChangeOutput(item);
     const patch = getFileChangePatch(item);
     const changes = normalizeFileChanges(item.changes, patch);
-    const workingLabel = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
-      ? getTurnWorkingLabel(threadId)
+    const activeThreadId = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
+      ? threadId
       : '';
     return {
       key,
@@ -2297,8 +2296,8 @@ function buildEntryFromItem(threadId, item, partials, index) {
       changes,
       output,
       patch,
-      workingLabel,
-      signature: JSON.stringify(['fileChange', key, status, JSON.stringify(changes), output, patch, workingLabel]),
+      threadId: activeThreadId,
+      signature: JSON.stringify(['fileChange', key, status, JSON.stringify(changes), output, patch, activeThreadId]),
     };
   }
 
@@ -2400,6 +2399,14 @@ function createTimelineMeta(text) {
   return meta;
 }
 
+function createLiveWorkingMeta(threadId) {
+  const meta = document.createElement('div');
+  meta.className = 'timeline-inline-meta timeline-inline-meta-working';
+  meta.dataset.liveWorkingThreadId = threadId || '';
+  meta.textContent = threadId ? getTurnWorkingLabel(threadId) : '';
+  return meta;
+}
+
 function createTimelineTitle(text) {
   const title = document.createElement('div');
   title.className = 'timeline-inline-title';
@@ -2436,7 +2443,10 @@ function populateCommandEntry(node, entry) {
 
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(entry.command, 110) || '命令执行'}`));
-  summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}${entry.workingLabel ? ` · ${entry.workingLabel}` : ''}`));
+  summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}`));
+  if (entry.threadId) {
+    summary.appendChild(createLiveWorkingMeta(entry.threadId));
+  }
   details.appendChild(summary);
 
   const body = createDetailContent();
@@ -2464,7 +2474,10 @@ function populateFileChangeEntry(node, entry) {
 
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(summaryText, 110)}${extraCount}`));
-  summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}${entry.workingLabel ? ` · ${entry.workingLabel}` : ''}`));
+  summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}`));
+  if (entry.threadId) {
+    summary.appendChild(createLiveWorkingMeta(entry.threadId));
+  }
   details.appendChild(summary);
 
   const body = createDetailContent();
@@ -2509,8 +2522,8 @@ function populateThinkingEntry(node, entry) {
   node.className = 'timeline-card timeline-card-thinking';
   const title = createTimelineTitle('思考中…');
   node.appendChild(title);
-  if (entry?.workingLabel) {
-    node.appendChild(createTimelineMeta(entry.workingLabel));
+  if (entry?.threadId) {
+    node.appendChild(createLiveWorkingMeta(entry.threadId));
   }
   const dots = document.createElement('div');
   dots.className = 'thinking-inline';
@@ -3040,6 +3053,14 @@ function render() {
   renderComposer();
   renderMessages();
   renderCreatingOverlay();
+}
+
+function refreshLiveWorkingLabels() {
+  const nodes = messagesEl.querySelectorAll('[data-live-working-thread-id]');
+  nodes.forEach((node) => {
+    const threadId = node.dataset.liveWorkingThreadId || '';
+    node.textContent = threadId ? getTurnWorkingLabel(threadId) : '';
+  });
 }
 
 function renderNewTabButton() {
@@ -3698,8 +3719,6 @@ function handleMessage(msg) {
 window.setInterval(() => {
   if (state.creatingTab || Array.from(state.turnActiveByThread.values()).some(Boolean)) {
     renderHeader();
-    if (state.activeThreadId && state.turnActiveByThread.get(state.activeThreadId)) {
-      renderMessages();
-    }
+    refreshLiveWorkingLabels();
   }
 }, 1000);
