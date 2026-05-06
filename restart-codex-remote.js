@@ -24,16 +24,17 @@ foreach ($port in $ports) {
     continue
   }
 
-  $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-  foreach ($pid in $pids) {
+  $targetPids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($targetPid in $targetPids) {
     try {
-      Stop-Process -Id $pid -Force -ErrorAction Stop
-      Write-Output ("[stop] killed pid {0} on port {1}" -f $pid, $port)
+      Stop-Process -Id $targetPid -Force -ErrorAction Stop
+      Write-Output ("[stop] killed pid {0} on port {1}" -f $targetPid, $port)
     } catch {
-      Write-Output ("[stop] failed to kill pid {0} on port {1}: {2}" -f $pid, $port, $_.Exception.Message)
+      Write-Output ("[stop] failed to kill pid {0} on port {1}: {2}" -f $targetPid, $port, $_.Exception.Message)
     }
   }
 }
+Start-Sleep -Milliseconds 800
 `.trim();
 
   const result = spawnSync(
