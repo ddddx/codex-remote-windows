@@ -1473,6 +1473,12 @@ body {
   padding-top: 2px;
 }
 
+.slash-focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line) 52%);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
 /* Reasoning / thinking */
 .message.reasoning {
   background: var(--reasoning-bg);

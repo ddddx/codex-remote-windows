@@ -258,16 +258,23 @@ const sessionModalConfirmBtn = document.getElementById('sessionModalConfirmBtn')
 const customSelectControllers = new WeakMap();
 let activeCustomSelect = null;
 const SLASH_COMMANDS = [
-  { name: '/new', title: '新建会话', description: '打开新建会话窗口', action: 'new_session' },
-  { name: '/model', title: '切换模型', description: '打开模型选择', action: 'open_model' },
-  { name: '/effort', title: '切换思考等级', description: '打开思考等级选择', action: 'open_effort' },
-  { name: '/theme', title: '切换主题', description: '打开主题选择', action: 'open_theme' },
-  { name: '/approve', title: '批准', description: '批准当前会话最新待处理请求', action: 'approve_latest' },
-  { name: '/approve-session', title: '本会话允许', description: '本会话内持续允许当前待处理请求', action: 'approve_latest_for_session' },
-  { name: '/deny', title: '拒绝', description: '拒绝当前会话最新待处理请求', action: 'deny_latest' },
-  { name: '/token', title: '设置 Token', description: '打开 WebSocket Token 设置窗口', action: 'open_token' },
-  { name: '/clear', title: '清空输入框', description: '清除当前输入内容', action: 'clear_input' },
-  { name: '/help', title: '查看命令', description: '显示可用的本地命令', action: 'show_help' },
+  { name: '/new', aliases: ['/new-session'], title: '新建会话', description: '打开新建会话窗口', action: 'new_session' },
+  { name: '/workspace', aliases: ['/cwd', '/dir'], title: '工作区', description: '打开新建会话窗口并优先选择工作区', action: 'open_workspace_picker' },
+  { name: '/sessions', aliases: ['/tabs', '/sidebar'], title: '会话列表', description: '打开左侧会话列表', action: 'open_sessions' },
+  { name: '/close', aliases: ['/close-session'], title: '关闭会话', description: '关闭当前会话', action: 'close_session' },
+  { name: '/refresh', aliases: ['/sync'], title: '刷新会话', description: '重新同步当前会话消息', action: 'refresh_session' },
+  { name: '/reconnect', aliases: ['/retry-connection'], title: '重新连接', description: '重连 WebSocket 并刷新会话状态', action: 'reconnect_socket' },
+  { name: '/approvals', aliases: ['/approval', '/pending'], title: '待批准', description: '定位当前会话的待处理请求', action: 'show_approvals' },
+  { name: '/approve', aliases: ['/allow'], title: '批准', description: '批准当前会话最新待处理请求', action: 'approve_latest' },
+  { name: '/approve-session', aliases: ['/allow-session'], title: '本会话允许', description: '本会话内持续允许当前待处理请求', action: 'approve_latest_for_session' },
+  { name: '/deny', aliases: ['/reject'], title: '拒绝', description: '拒绝当前会话最新待处理请求', action: 'deny_latest' },
+  { name: '/model', aliases: ['/models'], title: '切换模型', description: '打开模型选择', action: 'open_model' },
+  { name: '/effort', aliases: ['/reasoning'], title: '切换思考等级', description: '打开思考等级选择', action: 'open_effort' },
+  { name: '/theme', aliases: ['/appearance'], title: '切换主题', description: '打开主题选择', action: 'open_theme' },
+  { name: '/token', aliases: ['/auth'], title: '设置 Token', description: '打开 WebSocket Token 设置窗口', action: 'open_token' },
+  { name: '/status', aliases: ['/info'], title: '当前状态', description: '显示当前连接、会话和工作区信息', action: 'show_status' },
+  { name: '/clear', aliases: ['/reset-input'], title: '清空输入框', description: '清除当前输入内容', action: 'clear_input' },
+  { name: '/help', aliases: ['/commands'], title: '查看命令', description: '显示可用的本地命令', action: 'show_help' },
 ];
 const slashMenuState = {
   visible: false,
@@ -275,6 +282,7 @@ const slashMenuState = {
   items: [],
   activeIndex: 0,
 };
+let slashFocusTimer = null;
 
 ensureCustomSelect(themeSelect);
 ensureCustomSelect(modelSelect);
@@ -733,9 +741,61 @@ function getSlashCommandQuery(text) {
   return normalized.trim().toLowerCase();
 }
 
+function normalizeSlashToken(token) {
+  const normalized = typeof token === 'string' ? token.trim().toLowerCase() : '';
+  if (!normalized) {
+    return '';
+  }
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function getSlashCommandTokens(command) {
+  const tokens = [command?.name, ...(Array.isArray(command?.aliases) ? command.aliases : [])]
+    .map(normalizeSlashToken)
+    .filter(Boolean);
+  return Array.from(new Set(tokens));
+}
+
+function getSlashCommandAliasText(command) {
+  const aliases = getSlashCommandTokens(command).filter((token) => token !== command.name);
+  return aliases.length ? `别名: ${aliases.join(' ')}` : '';
+}
+
+function getSlashMatchScore(command, query) {
+  const normalizedQuery = normalizeSlashToken(query);
+  if (!normalizedQuery) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const tokens = getSlashCommandTokens(command);
+  if (!tokens.length) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (tokens.includes(normalizedQuery)) {
+    return 0;
+  }
+  if (normalizeSlashToken(command.name).startsWith(normalizedQuery)) {
+    return 1;
+  }
+  if (tokens.some((token) => token !== normalizeSlashToken(command.name) && token.startsWith(normalizedQuery))) {
+    return 2;
+  }
+  if (tokens.some((token) => token.includes(normalizedQuery))) {
+    return 3;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function getFilteredSlashCommands(query) {
-  const normalized = (query || '').replace(/^\//, '');
-  return SLASH_COMMANDS.filter((command) => command.name.slice(1).startsWith(normalized));
+  return SLASH_COMMANDS
+    .map((command, index) => ({
+      command,
+      index,
+      score: getSlashMatchScore(command, query),
+    }))
+    .filter((entry) => Number.isFinite(entry.score))
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+    .map((entry) => entry.command);
 }
 
 function addThreadNotice(threadId, text, type = '_warning') {
@@ -781,7 +841,9 @@ function renderSlashMenu() {
 
     const desc = document.createElement('div');
     desc.className = 'slash-item-desc';
-    desc.textContent = item.description;
+    desc.textContent = getSlashCommandAliasText(item)
+      ? `${item.description} · ${getSlashCommandAliasText(item)}`
+      : item.description;
     main.appendChild(desc);
 
     const hint = document.createElement('div');
@@ -846,14 +908,72 @@ function isDecisionServerRequest(request) {
     || request.kind === 'file_change_approval_legacy';
 }
 
-function getLatestPendingServerRequestForActiveThread() {
+function getPendingDecisionServerRequestsForActiveThread() {
   const threadId = state.activeThreadId;
   if (!threadId) {
-    return null;
+    return [];
   }
-  const requests = getServerRequestsForThread(threadId)
+  return getServerRequestsForThread(threadId)
     .filter((entry) => normalizeServerRequestStatus(entry.status) === 'pending' && isDecisionServerRequest(entry));
+}
+
+function getLatestPendingServerRequestForActiveThread() {
+  const requests = getPendingDecisionServerRequestsForActiveThread();
   return requests[requests.length - 1] || null;
+}
+
+function openSidebarPanel() {
+  sidebar.classList.remove('hidden');
+  mainArea.classList.remove('full');
+}
+
+function flashSlashFocus(node) {
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  if (slashFocusTimer) {
+    window.clearTimeout(slashFocusTimer);
+    slashFocusTimer = null;
+  }
+  node.classList.add('slash-focus');
+  slashFocusTimer = window.setTimeout(() => {
+    node.classList.remove('slash-focus');
+    slashFocusTimer = null;
+  }, 1800);
+}
+
+function focusServerRequestCard(requestId) {
+  if (!requestId) {
+    return false;
+  }
+  const target = Array.from(messagesEl.querySelectorAll('[data-server-request-id]'))
+    .find((node) => node instanceof HTMLElement && node.dataset.serverRequestId === requestId);
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  flashSlashFocus(target);
+  return true;
+}
+
+function showPendingApprovals() {
+  const threadId = state.activeThreadId;
+  if (!threadId) {
+    return false;
+  }
+  const requests = getPendingDecisionServerRequestsForActiveThread();
+  if (!requests.length) {
+    addThreadNotice(threadId, '当前会话没有待处理的批准请求。');
+    render();
+    return false;
+  }
+  closeSlashMenu();
+  renderMessages();
+  const latest = requests[requests.length - 1];
+  window.requestAnimationFrame(() => {
+    focusServerRequestCard(latest.requestId);
+  });
+  return true;
 }
 
 function buildServerRequestDecision(request, mode) {
@@ -916,7 +1036,63 @@ function executeSlashCommand(command) {
 
   if (command.action === 'new_session') {
     closeSlashMenu();
-    newTabBtn.click();
+    void startNewSessionFlow();
+    return true;
+  }
+  if (command.action === 'open_workspace_picker') {
+    closeSlashMenu();
+    void startNewSessionFlow({ focusField: 'workspace' });
+    return true;
+  }
+  if (command.action === 'open_sessions') {
+    closeSlashMenu();
+    openSidebarPanel();
+    return true;
+  }
+  if (command.action === 'close_session') {
+    closeSlashMenu();
+    if (!state.activeThreadId) {
+      return false;
+    }
+    return send({ type: 'tab_close', threadId: state.activeThreadId });
+  }
+  if (command.action === 'refresh_session') {
+    closeSlashMenu();
+    if (!state.activeThreadId) {
+      return false;
+    }
+    if (!send({ type: 'thread_sync', threadId: state.activeThreadId })) {
+      reconnectNow();
+      addThreadNotice(state.activeThreadId, '连接未就绪，已尝试重新连接并稍后自动同步。');
+      render();
+    }
+    return true;
+  }
+  if (command.action === 'reconnect_socket') {
+    closeSlashMenu();
+    reconnectNow();
+    return true;
+  }
+  if (command.action === 'show_approvals') {
+    return showPendingApprovals();
+  }
+  if (command.action === 'show_status') {
+    closeSlashMenu();
+    if (!state.activeThreadId) {
+      return false;
+    }
+    const tab = state.tabs.find((entry) => entry.threadId === state.activeThreadId) || null;
+    const composerSelection = getEffectiveComposerSelection(state.activeThreadId);
+    const connected = window._ws?.readyState === WebSocket.OPEN ? '已连接' : '未连接';
+    const status = [
+      `连接: ${connected}`,
+      `会话: ${getSessionName(tab)}`,
+      `工作区: ${getWorkspacePath(tab) || '未提供'}`,
+      `模型: ${composerSelection.model || '默认'}`,
+      `思考等级: ${formatReasoningEffortLabel(composerSelection.effort || '')}`,
+    ].join(' · ');
+    addThreadNotice(state.activeThreadId, status);
+    render();
     return true;
   }
   if (command.action === 'open_model') {
@@ -969,8 +1145,8 @@ function executeSlashCommand(command) {
 }
 
 function getExactSlashCommand(text) {
-  const normalized = (text || '').trim().toLowerCase();
-  return SLASH_COMMANDS.find((command) => command.name === normalized) || null;
+  const normalized = normalizeSlashToken(text);
+  return SLASH_COMMANDS.find((command) => getSlashCommandTokens(command).includes(normalized)) || null;
 }
 
 function applySlashCommand(command) {
@@ -2145,7 +2321,7 @@ async function loadWorkspaceShortcuts() {
   }
 }
 
-function openSessionModal() {
+function openSessionModal(options = {}) {
   if (sessionModalState.resolve) {
     closeSessionModal(null);
   }
@@ -2177,9 +2353,43 @@ function openSessionModal() {
     }
   })();
   window.setTimeout(() => {
+    if (options.focusField === 'workspace') {
+      sessionWorkspaceInput.focus();
+      return;
+    }
     sessionNameInput.focus();
   }, 0);
   return promise;
+}
+
+async function startNewSessionFlow(options = {}) {
+  if (state.creatingTab) {
+    return false;
+  }
+
+  const draft = await openSessionModal(options);
+  if (draft === null) {
+    return false;
+  }
+
+  state.creatingTab = true;
+  render();
+  const createPrefs = getActiveComposerPrefs();
+  if (!send({
+    type: 'tab_create',
+    name: draft.name,
+    cwd: draft.cwd,
+    model: normalizeComposerModel(createPrefs?.model) || state.composerModelDefault || '',
+  })) {
+    state.creatingTab = false;
+    render();
+    return false;
+  }
+  if (window.innerWidth <= 680) {
+    sidebar.classList.add('hidden');
+    mainArea.classList.add('full');
+  }
+  return true;
 }
 
 function closeSessionModal(value) {
@@ -2936,6 +3146,7 @@ function populateMessageNode(node, entry) {
 
   if (entry.kind === 'serverRequest') {
     node.className = 'approval-banner approval-card';
+    node.dataset.serverRequestId = entry.request?.requestId || '';
     populateServerRequestNode(node, entry.request);
     return;
   }
@@ -3494,33 +3705,8 @@ mainArea.addEventListener('click', (event) => {
   }
 });
 
-newTabBtn.addEventListener('click', async () => {
-  if (state.creatingTab) {
-    return;
-  }
-
-  const draft = await openSessionModal();
-  if (draft === null) {
-    return;
-  }
-
-  state.creatingTab = true;
-  render();
-  const createPrefs = getActiveComposerPrefs();
-  if (!send({
-    type: 'tab_create',
-    name: draft.name,
-    cwd: draft.cwd,
-    model: normalizeComposerModel(createPrefs?.model) || state.composerModelDefault || '',
-  })) {
-    state.creatingTab = false;
-    render();
-    return;
-  }
-  if (window.innerWidth <= 680) {
-    sidebar.classList.add('hidden');
-    mainArea.classList.add('full');
-  }
+newTabBtn.addEventListener('click', () => {
+  void startNewSessionFlow();
 });
 
 tokenBtn.addEventListener('click', async () => {
