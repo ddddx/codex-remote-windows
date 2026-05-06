@@ -262,6 +262,10 @@ const SLASH_COMMANDS = [
   { name: '/model', title: '切换模型', description: '打开模型选择', action: 'open_model' },
   { name: '/effort', title: '切换思考等级', description: '打开思考等级选择', action: 'open_effort' },
   { name: '/theme', title: '切换主题', description: '打开主题选择', action: 'open_theme' },
+  { name: '/approve', title: '批准', description: '批准当前会话最新待处理请求', action: 'approve_latest' },
+  { name: '/approve-session', title: '本会话允许', description: '本会话内持续允许当前待处理请求', action: 'approve_latest_for_session' },
+  { name: '/deny', title: '拒绝', description: '拒绝当前会话最新待处理请求', action: 'deny_latest' },
+  { name: '/token', title: '设置 Token', description: '打开 WebSocket Token 设置窗口', action: 'open_token' },
   { name: '/clear', title: '清空输入框', description: '清除当前输入内容', action: 'clear_input' },
   { name: '/help', title: '查看命令', description: '显示可用的本地命令', action: 'show_help' },
 ];
@@ -734,6 +738,17 @@ function getFilteredSlashCommands(query) {
   return SLASH_COMMANDS.filter((command) => command.name.slice(1).startsWith(normalized));
 }
 
+function addThreadNotice(threadId, text, type = '_warning') {
+  if (!threadId || !text) {
+    return;
+  }
+  ensureItems(threadId).push({
+    type,
+    id: createLocalId(type === '_error' ? 'slash-error' : 'slash-warning'),
+    text,
+  });
+}
+
 function closeSlashMenu() {
   slashMenuState.visible = false;
   slashMenuState.query = '';
@@ -820,6 +835,80 @@ function showSlashHelp() {
   renderSlashMenu();
 }
 
+function isDecisionServerRequest(request) {
+  if (!request?.kind) {
+    return false;
+  }
+  return request.kind === 'permissions_approval'
+    || request.kind === 'command_approval'
+    || request.kind === 'command_approval_legacy'
+    || request.kind === 'file_change_approval'
+    || request.kind === 'file_change_approval_legacy';
+}
+
+function getLatestPendingServerRequestForActiveThread() {
+  const threadId = state.activeThreadId;
+  if (!threadId) {
+    return null;
+  }
+  const requests = getServerRequestsForThread(threadId)
+    .filter((entry) => normalizeServerRequestStatus(entry.status) === 'pending' && isDecisionServerRequest(entry));
+  return requests[requests.length - 1] || null;
+}
+
+function buildServerRequestDecision(request, mode) {
+  if (!request) {
+    return null;
+  }
+
+  if (request.kind === 'permissions_approval') {
+    if (mode === 'deny') {
+      return {
+        permissions: {},
+        scope: 'turn',
+      };
+    }
+    return {
+      permissions: request.permissions || {},
+      scope: mode === 'session' ? 'session' : 'turn',
+    };
+  }
+
+  const legacy = request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy');
+  if (mode === 'deny') {
+    return {
+      decision: legacy ? 'denied' : 'decline',
+    };
+  }
+  if (mode === 'session') {
+    return {
+      decision: legacy ? 'approved_for_session' : 'acceptForSession',
+    };
+  }
+  return {
+    decision: legacy ? 'approved' : 'accept',
+  };
+}
+
+function submitLatestPendingServerRequest(mode) {
+  const request = getLatestPendingServerRequestForActiveThread();
+  if (!request) {
+    if (state.activeThreadId) {
+      addThreadNotice(state.activeThreadId, '当前会话没有待处理的批准请求。');
+      render();
+    }
+    return false;
+  }
+
+  const response = buildServerRequestDecision(request, mode);
+  if (!response) {
+    return false;
+  }
+  closeSlashMenu();
+  submitServerRequestResponse(request, response);
+  return true;
+}
+
 function executeSlashCommand(command) {
   if (!command) {
     return false;
@@ -843,6 +932,26 @@ function executeSlashCommand(command) {
   if (command.action === 'open_theme') {
     closeSlashMenu();
     openCustomSelectFor(themeSelect);
+    return true;
+  }
+  if (command.action === 'approve_latest') {
+    return submitLatestPendingServerRequest('turn');
+  }
+  if (command.action === 'approve_latest_for_session') {
+    return submitLatestPendingServerRequest('session');
+  }
+  if (command.action === 'deny_latest') {
+    return submitLatestPendingServerRequest('deny');
+  }
+  if (command.action === 'open_token') {
+    closeSlashMenu();
+    void promptForWebSocketToken({
+      title: '设置 WebSocket Token',
+      label: '访问 Token',
+      placeholder: '请输入服务端配置的 WS_TOKEN',
+      confirmText: '保存并重连',
+      inputType: 'password',
+    });
     return true;
   }
   if (command.action === 'clear_input') {
