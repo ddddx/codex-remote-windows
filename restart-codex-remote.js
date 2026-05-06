@@ -10,9 +10,32 @@ const PORT = Number.parseInt(process.env.PORT || '8787', 10);
 const APP_SERVER_WS = process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:4792';
 const APP_SERVER_PORT = Number.parseInt(new URL(APP_SERVER_WS).port || '4792', 10);
 const ports = Array.from(new Set([APP_SERVER_PORT, PORT].filter(Number.isFinite)));
-const PM2_APP_NAMES = ['cc-appserver', 'cc-web'];
+const PM2_APP_NAMES = String(process.env.PM2_APP_NAMES || '')
+  .split(',')
+  .map((name) => name.trim())
+  .filter(Boolean);
+
+function hasCommand(command) {
+  const result = spawnSync(
+    process.platform === 'win32' ? 'where.exe' : 'which',
+    [command],
+    {
+      stdio: 'ignore',
+      windowsHide: true,
+    }
+  );
+  return !result.error && result.status === 0;
+}
 
 function stopManagedPm2Apps() {
+  if (!PM2_APP_NAMES.length) {
+    return;
+  }
+
+  if (!hasCommand('pm2')) {
+    return;
+  }
+
   const result = spawnSync(
     'pm2',
     ['jlist'],
