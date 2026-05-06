@@ -1376,16 +1376,17 @@ body {
 }
 
 .composer-input-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
-  align-items: flex-start;
+  align-items: end;
 }
 
 .composer-attach-btn,
 .composer-input-row > .btn[type="submit"] {
   height: 45px;
   min-height: 45px;
-  align-self: flex-start;
+  align-self: end;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1399,7 +1400,8 @@ body {
 
 .prompt-stack {
   position: relative;
-  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 
@@ -1941,12 +1943,8 @@ body {
   }
 
   .composer-input-row {
-    flex-direction: row;
-    align-items: flex-end;
-  }
-
-  .composer-input-row .prompt-stack {
-    flex: 1;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: end;
   }
 
   .composer-input-row .composer-attach-btn,
