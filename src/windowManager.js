@@ -65,7 +65,7 @@ class CodexWindowManager {
 
     const script = [
       "$ErrorActionPreference = 'SilentlyContinue'",
-      `Stop-Process -Id ${pid} -Force`,
+      `taskkill /PID ${pid} /T /F | Out-Null`,
     ].join('; ');
 
     await runPowerShell(script);

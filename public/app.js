@@ -467,9 +467,6 @@ function upsertTab(tab) {
   }
 
   state.tabs.sort(compareTabs);
-  if (!state.activeThreadId) {
-    setActiveTab(tab.threadId);
-  }
 }
 
 function compareTabs(a, b) {
@@ -492,10 +489,7 @@ function removeTab(threadId) {
   messageDomByThread.delete(threadId);
 
   if (state.activeThreadId === threadId) {
-    state.activeThreadId = state.tabs[0]?.threadId || null;
-    if (state.activeThreadId) {
-      send({ type: 'thread_sync', threadId: state.activeThreadId });
-    }
+    state.activeThreadId = null;
   }
 
   render();
@@ -772,12 +766,12 @@ function renderHeader() {
 }
 
 function renderComposer() {
-  const disabled = state.authFailed;
+  const disabled = state.authFailed || !state.activeThreadId;
   promptInput.disabled = disabled;
   composerSubmitBtn.disabled = disabled;
-  promptInput.placeholder = disabled
+  promptInput.placeholder = state.authFailed
     ? 'WebSocket 鉴权失败，请点击右上角“设置 Token”。'
-    : DEFAULT_PROMPT_PLACEHOLDER;
+    : (!state.activeThreadId ? '请先在左侧选择一个标签。' : DEFAULT_PROMPT_PLACEHOLDER);
 }
 
 function renderMessages() {
@@ -845,6 +839,14 @@ function buildMessageEntries(threadId) {
         kind: 'empty',
         text: '正在新建会话并拉起本地 Codex 窗口...',
         signature: 'creating',
+      }];
+    }
+    if (state.tabs.length) {
+      return [{
+        key: 'unselected',
+        kind: 'empty',
+        text: '请选择左侧一个标签开始查看和对话。',
+        signature: 'unselected',
       }];
     }
     return [{
@@ -1626,11 +1628,8 @@ function handleMessage(msg) {
       upsertServerRequest(request);
     }
     pruneUnreadThreads();
-    if (!state.activeThreadId && state.tabs.length) {
-      state.activeThreadId = state.tabs[0].threadId;
-    }
     if (state.activeThreadId && !state.tabs.some((tab) => tab.threadId === state.activeThreadId)) {
-      state.activeThreadId = state.tabs[0]?.threadId || null;
+      state.activeThreadId = null;
     }
     if (state.activeThreadId) {
       state.unreadThreadIds.delete(state.activeThreadId);
