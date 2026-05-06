@@ -87,13 +87,7 @@ $env:WS_TOKEN='your-secret-token'
 npm run remote:restart
 ```
 
-如果设置了 `WS_TOKEN`，访问控制端时可直接带上查询参数：
-
-```text
-http://<本机IP>:8787/?token=your-secret-token
-```
-
-如果没有带上，或浏览器里缓存的是旧 token，页面右上角的 `Token` / `设置 Token` 按钮可直接更新并重连。
+如果设置了 `WS_TOKEN`，首次访问后可通过页面右上角的 `Token` / `设置 Token` 按钮输入并保存在浏览器本地。为了避免 token 暴露在地址栏、浏览器历史或截图里，不建议再用 `?token=` 方式访问。
 
 ## 远程访问（手机）
 

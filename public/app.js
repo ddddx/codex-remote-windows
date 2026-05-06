@@ -56,11 +56,25 @@ function isAuthFailureClose(event) {
   return event.code === 4401 || event.reason === 'Unauthorized';
 }
 
+function stripTokenFromLocation() {
+  try {
+    const nextUrl = new URL(window.location.href);
+    if (!nextUrl.searchParams.has('token')) {
+      return;
+    }
+    nextUrl.searchParams.delete('token');
+    window.history.replaceState(null, '', nextUrl);
+  } catch (_error) {
+    // Ignore URL rewrite failures.
+  }
+}
+
 function getWebSocketToken() {
   const queryToken = new URLSearchParams(window.location.search).get('token');
   try {
     if (queryToken) {
       window.localStorage.setItem(WEBSOCKET_TOKEN_STORAGE_KEY, queryToken);
+      stripTokenFromLocation();
       return queryToken;
     }
     return window.localStorage.getItem(WEBSOCKET_TOKEN_STORAGE_KEY) || '';
@@ -78,19 +92,9 @@ function setWebSocketToken(token) {
       window.localStorage.removeItem(WEBSOCKET_TOKEN_STORAGE_KEY);
     }
   } catch (_error) {
-    // Ignore storage failures and still keep the token in the URL.
-  }
-
-  try {
-    const nextUrl = new URL(window.location.href);
-    if (normalized) {
-      nextUrl.searchParams.set('token', normalized);
-    } else {
-      nextUrl.searchParams.delete('token');
-    }
-    window.history.replaceState(null, '', nextUrl);
-  } catch (_error) {
-    // Ignore URL rewrite failures.
+    // Ignore storage failures.
+  } finally {
+    stripTokenFromLocation();
   }
 
   return normalized;
