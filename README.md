@@ -39,6 +39,7 @@ start-codex-remote.bat
 ```bash
 npm run remote         # 只启动，不主动清理旧进程
 npm run remote:restart # 先杀旧进程再重启，推荐
+npm run remote:stop    # 停止当前远程控制服务
 npm run appserver   # 只启动 Codex 服务端
 npm run web         # 只启动 Web 控制端
 ```
@@ -113,12 +114,12 @@ cc-workspace/
 ├── src/              # 后端源码
 │   ├── server.js     # Web 服务器 + WebSocket
 │   ├── codexAppServerClient.js  # Codex 服务端客户端
+│   ├── localConfig.js           # 本地配置读取
+│   ├── workspaceManager.js      # 工作区目录浏览与状态管理
 │   └── windowManager.js         # 窗口管理
-├── start-all.js        # 同时拉起 app-server 和 Web 控制端
-├── restart-codex-remote.js # 按当前配置先杀旧进程再启动
-├── start-appserver.js  # 调试用：只启动 Codex 服务端
-├── start-web.js        # 调试用：只启动 Web 控制端
-├── start-codex-remote.bat # Windows 一键重启入口
+├── restart-codex-remote.js # 统一启动脚本：start/restart/stop/appserver/web
+├── start-codex-remote.bat  # Windows 一键重启入口
+├── stop-codex-remote.bat   # Windows 一键停止入口
 └── package.json
 ```
 

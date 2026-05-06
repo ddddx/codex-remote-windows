@@ -13,7 +13,7 @@ if errorlevel 1 (
 
 echo Starting Codex Remote...
 echo.
-node restart-codex-remote.js
+node restart-codex-remote.js restart
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (

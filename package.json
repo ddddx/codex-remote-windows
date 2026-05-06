@@ -7,10 +7,11 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "remote": "node start-all.js",
+    "remote": "node restart-codex-remote.js start",
     "remote:restart": "node restart-codex-remote.js",
-    "appserver": "node start-appserver.js",
-    "web": "node start-web.js"
+    "remote:stop": "node restart-codex-remote.js stop",
+    "appserver": "node restart-codex-remote.js appserver",
+    "web": "node restart-codex-remote.js web"
   },
   "dependencies": {
     "express": "^4.21.2",

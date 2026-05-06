@@ -1,15 +1,17 @@
 @echo off
-setlocal
+setlocal EnableExtensions DisableDelayedExpansion
 
-echo Stopping Codex app-server and web controller ...
+set "ROOT=%~dp0"
+cd /d "%ROOT%"
 
-:: Kill by window title
-taskkill /F /T /FI "WINDOWTITLE eq Codex AppServer 4792*" >nul 2>nul
-taskkill /F /T /FI "WINDOWTITLE eq Codex Web 8787*" >nul 2>nul
+where node >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] node not found in PATH.
+  pause
+  exit /b 1
+)
 
-:: Kill by port (fallback)
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":4792.*LISTENING"') do taskkill /PID %%a /F >nul 2>nul
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8787.*LISTENING"') do taskkill /PID %%a /F >nul 2>nul
-
-echo Done.
+echo Stopping Codex Remote...
+echo.
+node restart-codex-remote.js stop
 endlocal
