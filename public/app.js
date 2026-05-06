@@ -1985,6 +1985,7 @@ function buildSemanticTimelineEntries(threadId) {
     finalEntry: group.finalEntry,
     isActive: group.isActive,
     isPendingLocal: group.isPendingLocal,
+    workingLabel: group.isActive ? getTurnWorkingLabel(threadId) : '',
     signature: JSON.stringify([
       'turn',
       group.key,
@@ -1993,6 +1994,7 @@ function buildSemanticTimelineEntries(threadId) {
       group.finalEntry?.signature || '',
       group.isActive,
       group.isPendingLocal,
+      group.isActive ? getTurnWorkingLabel(threadId) : '',
     ]),
   }));
 
@@ -2376,9 +2378,8 @@ function populateMessageNode(node, entry) {
     }
     if (entry.isActive) {
       meta.appendChild(createTurnBadge('进行中', 'active'));
-      const workingLabel = entry.threadId ? getTurnWorkingLabel(entry.threadId) : '';
-      if (workingLabel) {
-        meta.appendChild(createTurnBadge(workingLabel, 'active working'));
+      if (entry.workingLabel) {
+        meta.appendChild(createTurnBadge(entry.workingLabel, 'active working'));
       }
     } else if (entry.finalEntry || entry.timelineEntries.length) {
       meta.appendChild(createTurnBadge('已完成', 'done'));
