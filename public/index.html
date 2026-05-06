@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Codex Remote 会话</title>
-    <link rel="stylesheet" href="/style.css?v=14" />
+    <link rel="stylesheet" href="/style.css?v=15" />
   </head>
   <body>
     <div class="bg"></div>
@@ -22,6 +22,10 @@
         <header class="topbar">
           <button id="menuBtn" class="btn-icon">☰</button>
           <h1 id="activeTitle">Codex Remote Control</h1>
+          <label class="theme-select-group" for="themeSelect">
+            <span>主题</span>
+            <select id="themeSelect"></select>
+          </label>
           <button id="tokenBtn" class="btn btn-secondary btn-inline" type="button">Token</button>
           <span id="activeStatus" class="status-badge"></span>
         </header>
@@ -120,6 +124,6 @@
     </template>
 
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js" crossorigin="anonymous"></script>
-    <script type="module" src="/app.js?v=20"></script>
+    <script type="module" src="/app.js?v=21"></script>
   </body>
 </html>

@@ -8,7 +8,13 @@ const RECONNECT_MAX_DELAY_MS = 30000;
 const DEFAULT_SESSION_NAME = '未命名会话';
 const DEFAULT_PROMPT_PLACEHOLDER = '给当前会话发送指令...';
 const COMPOSER_PREFS_STORAGE_KEY = 'codex-remote-composer-prefs';
+const THEME_STORAGE_KEY = 'codex-remote-theme';
 const REASONING_EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+const THEME_OPTIONS = [
+  { value: 'paper', label: '纸墨' },
+  { value: 'bay', label: '海湾' },
+  { value: 'night', label: '夜航' },
+];
 
 function getReconnectDelayMs(attempt) {
   const baseDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** attempt));
@@ -221,6 +227,7 @@ const reasoningEffortSelect = document.getElementById('reasoningEffortSelect');
 const promptInput = document.getElementById('promptInput');
 const composerSubmitBtn = composer.querySelector('button[type="submit"]');
 const activeTitle = document.getElementById('activeTitle');
+const themeSelect = document.getElementById('themeSelect');
 const tokenBtn = document.getElementById('tokenBtn');
 const activeStatus = document.getElementById('activeStatus');
 const mainArea = document.querySelector('.main-area');
@@ -266,6 +273,7 @@ const state = {
   composerEffortDefault: '',
   composerPrefsByThread: new Map(),
   composerGlobalPrefs: { model: '', effort: '' },
+  currentTheme: 'paper',
   creatingTab: false,
   authFailed: false,
   connectionError: '',
@@ -289,6 +297,7 @@ const sessionModalState = {
 };
 
 loadComposerGlobalPrefs();
+loadThemePreference();
 
 function send(payload) {
   if (window._ws && window._ws.readyState === WebSocket.OPEN) {
@@ -362,6 +371,39 @@ function normalizeComposerModel(value) {
 function normalizeComposerEffort(value) {
   const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return REASONING_EFFORT_OPTIONS.includes(normalized) ? normalized : '';
+}
+
+function normalizeTheme(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return THEME_OPTIONS.some((theme) => theme.value === normalized) ? normalized : 'paper';
+}
+
+function applyTheme(theme) {
+  const normalized = normalizeTheme(theme);
+  state.currentTheme = normalized;
+  if (normalized === 'paper') {
+    document.body.removeAttribute('data-theme');
+  } else {
+    document.body.setAttribute('data-theme', normalized);
+  }
+}
+
+function loadThemePreference() {
+  try {
+    applyTheme(window.localStorage.getItem(THEME_STORAGE_KEY) || 'paper');
+  } catch (_error) {
+    applyTheme('paper');
+  }
+}
+
+function saveThemePreference(theme) {
+  const normalized = normalizeTheme(theme);
+  applyTheme(normalized);
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  } catch (_error) {
+    // Ignore storage failures.
+  }
 }
 
 function normalizeEffortOptionValue(value) {
@@ -1461,6 +1503,8 @@ function normalizeTabStatus(status) {
 function renderHeader() {
   const tab = state.tabs.find((entry) => entry.threadId === state.activeThreadId);
   activeTitle.textContent = tab ? getSessionName(tab) : 'Codex Remote Control';
+  fillSelectOptions(themeSelect, THEME_OPTIONS, state.currentTheme);
+  themeSelect.disabled = false;
   tokenBtn.textContent = state.authFailed ? '设置 Token' : 'Token';
   tokenBtn.classList.toggle('btn-alert', state.authFailed);
 
@@ -3124,6 +3168,11 @@ reasoningEffortSelect.addEventListener('change', () => {
     effort: reasoningEffortSelect.value,
   });
   renderComposer();
+});
+
+themeSelect.addEventListener('change', () => {
+  saveThemePreference(themeSelect.value);
+  renderHeader();
 });
 
 composer.addEventListener('submit', (event) => {

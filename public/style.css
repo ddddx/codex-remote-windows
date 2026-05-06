@@ -7,7 +7,65 @@
   --accent-2: #e2b03e;
   --line: #dacdbf;
   --card: #fffdf8;
+  --card-strong: #ffffff;
+  --surface-soft: #f4ede3;
+  --surface-soft-hover: #ede3d4;
+  --success-bg: #e8f5e9;
+  --success-ink: #2e7d32;
+  --warning-bg: #fff4d6;
+  --warning-ink: #9a5a00;
+  --danger-bg: #fbe9e7;
+  --danger-ink: #c62828;
+  --closed-bg: #ece8e2;
+  --closed-ink: #6f6259;
+  --grid-rgb: 20, 92, 79;
   --sidebar-w: 260px;
+}
+
+body[data-theme="bay"] {
+  --bg: #edf4f8;
+  --bg2: #f9fdff;
+  --ink: #18242d;
+  --muted: #5a6f7c;
+  --accent: #0c6f7a;
+  --accent-2: #f0a949;
+  --line: #c9d7e1;
+  --card: #fdfefe;
+  --card-strong: #ffffff;
+  --surface-soft: #e8f0f4;
+  --surface-soft-hover: #dbe7ed;
+  --success-bg: #e4f7f4;
+  --success-ink: #117a63;
+  --warning-bg: #fff2dd;
+  --warning-ink: #9f6110;
+  --danger-bg: #fdeceb;
+  --danger-ink: #be4747;
+  --closed-bg: #edf1f4;
+  --closed-ink: #607280;
+  --grid-rgb: 12, 111, 122;
+}
+
+body[data-theme="night"] {
+  --bg: #10161d;
+  --bg2: #17222d;
+  --ink: #e8edf2;
+  --muted: #95a5b5;
+  --accent: #5bc0b5;
+  --accent-2: #f0a35a;
+  --line: #2d3b49;
+  --card: #18212b;
+  --card-strong: #1d2833;
+  --surface-soft: #24313d;
+  --surface-soft-hover: #2b3a48;
+  --success-bg: rgba(54, 119, 91, 0.22);
+  --success-ink: #8ee0ba;
+  --warning-bg: rgba(173, 120, 35, 0.22);
+  --warning-ink: #f4c176;
+  --danger-bg: rgba(163, 73, 73, 0.22);
+  --danger-ink: #f4a1a1;
+  --closed-bg: rgba(122, 136, 149, 0.18);
+  --closed-ink: #b0bcc7;
+  --grid-rgb: 91, 192, 181;
 }
 
 * {
@@ -25,8 +83,8 @@ body {
 .bg {
   position: fixed;
   inset: 0;
-  background-image: linear-gradient(0deg, rgba(20, 92, 79, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 92, 79, 0.06) 1px, transparent 1px);
+  background-image: linear-gradient(0deg, rgba(var(--grid-rgb), 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--grid-rgb), 0.06) 1px, transparent 1px);
   background-size: 30px 30px;
   pointer-events: none;
 }
@@ -82,7 +140,7 @@ body {
 
 .tab-item {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--card-strong);
   border-radius: 10px;
   padding: 10px 12px;
   text-align: left;
@@ -97,17 +155,17 @@ body {
 
 .tab-item.active {
   border-color: var(--accent);
-  background: #f2fcfa;
-  box-shadow: 0 0 0 2px rgba(20, 92, 79, 0.12);
+  background: color-mix(in srgb, var(--card-strong) 72%, var(--accent) 10%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .tab-item.closed {
-  border-color: #d7d1c9;
-  background: #f6f4f1;
+  border-color: color-mix(in srgb, var(--line) 85%, var(--closed-ink) 15%);
+  background: var(--closed-bg);
 }
 
 .tab-item.closed:hover {
-  border-color: #b8b0a6;
+  border-color: color-mix(in srgb, var(--closed-ink) 65%, var(--line) 35%);
 }
 
 .tab-item.closed .name {
@@ -249,6 +307,29 @@ body {
   background: var(--bg);
 }
 
+.theme-select-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.theme-select-group select {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+  min-width: 84px;
+}
+
 .status-badge {
   font-size: 12px;
   padding: 3px 8px;
@@ -258,23 +339,23 @@ body {
 }
 
 .status-badge.running {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: var(--success-bg);
+  color: var(--success-ink);
 }
 
 .status-badge.failed {
-  background: #fbe9e7;
-  color: #c62828;
+  background: var(--danger-bg);
+  color: var(--danger-ink);
 }
 
 .status-badge.waiting {
-  background: #fff4d6;
-  color: #9a5a00;
+  background: var(--warning-bg);
+  color: var(--warning-ink);
 }
 
 .status-badge.closed {
-  background: #ece8e2;
-  color: #6f6259;
+  background: var(--closed-bg);
+  color: var(--closed-ink);
 }
 
 .btn {
@@ -304,13 +385,13 @@ body {
 }
 
 .btn-secondary {
-  background: #f4ede3;
+  background: var(--surface-soft);
   border-color: var(--line);
   color: var(--ink);
 }
 
 .btn-secondary:hover {
-  background: #ede3d4;
+  background: var(--surface-soft-hover);
 }
 
 .btn-alert {
