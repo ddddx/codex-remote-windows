@@ -1423,10 +1423,13 @@ body {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 11px 12px;
-  resize: vertical;
+  resize: none;
   font-size: 14px;
   font-family: inherit;
-  min-height: 54px;
+  line-height: 1.5;
+  min-height: 45px;
+  max-height: 162px;
+  overflow-y: auto;
   background: var(--input-bg);
   color: var(--ink);
 }

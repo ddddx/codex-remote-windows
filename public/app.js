@@ -1612,6 +1612,12 @@ function scheduleRender(options = {}) {
   });
 }
 
+function autoResizePromptInput() {
+  promptInput.style.height = '0px';
+  const nextHeight = Math.min(promptInput.scrollHeight, 162);
+  promptInput.style.height = `${Math.max(45, nextHeight)}px`;
+}
+
 function findItemIndexById(threadId, itemId) {
   if (!itemId) {
     return -1;
@@ -2403,6 +2409,7 @@ function renderComposer() {
   syncCustomSelect(reasoningEffortSelect);
   syncCustomSelect(approvalPolicySelect);
   syncCustomSelect(sandboxModeSelect);
+  autoResizePromptInput();
 }
 
 function renderCreatingOverlay() {
@@ -4058,10 +4065,12 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 promptInput.addEventListener('input', () => {
+  autoResizePromptInput();
   updateSlashMenu();
 });
 
 promptInput.addEventListener('focus', () => {
+  autoResizePromptInput();
   updateSlashMenu();
 });
 
@@ -4159,6 +4168,7 @@ composer.addEventListener('submit', (event) => {
     });
   }
   promptInput.value = '';
+  autoResizePromptInput();
   closeSlashMenu();
   renderMessages();
 });
