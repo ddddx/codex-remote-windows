@@ -1346,6 +1346,16 @@ body {
   align-items: flex-start;
 }
 
+.composer-input-row > .btn[type="submit"] {
+  height: 45px;
+  min-height: 45px;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
 .prompt-stack {
   position: relative;
   flex: 1;
