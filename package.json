@@ -6,7 +6,10 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "remote": "node start-all.js",
+    "appserver": "node start-appserver.js",
+    "web": "node start-web.js"
   },
   "dependencies": {
     "express": "^4.21.2",

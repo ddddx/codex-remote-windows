@@ -229,6 +229,7 @@ const state = {
   turnActiveByThread: new Map(),
   unreadThreadIds: new Set(),
   pendingUserMessages: new Map(),
+  serverRequests: [],
   creatingTab: false,
   authFailed: false,
   connectionError: '',
@@ -416,6 +417,47 @@ function markThreadUnread(threadId) {
   return state.unreadThreadIds.size !== sizeBefore;
 }
 
+function normalizeServerRequestStatus(status) {
+  return status === 'submitting' ? 'submitting' : 'pending';
+}
+
+function upsertServerRequest(request) {
+  if (!request || !request.requestId) {
+    return;
+  }
+
+  const normalized = {
+    ...request,
+    status: normalizeServerRequestStatus(request.status),
+  };
+  const index = state.serverRequests.findIndex((entry) => entry.requestId === normalized.requestId);
+  if (index >= 0) {
+    state.serverRequests[index] = normalized;
+  } else {
+    state.serverRequests.push(normalized);
+  }
+  state.serverRequests.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+
+function removeServerRequest(requestId) {
+  state.serverRequests = state.serverRequests.filter((entry) => entry.requestId !== requestId);
+}
+
+function getServerRequestsForThread(threadId) {
+  return state.serverRequests.filter((entry) => entry.threadId === threadId);
+}
+
+function hasPendingServerRequest(threadId) {
+  return state.serverRequests.some((entry) => entry.threadId === threadId);
+}
+
+function findPendingRequestForItem(threadId, itemId) {
+  if (!threadId || !itemId) {
+    return null;
+  }
+  return state.serverRequests.find((entry) => entry.threadId === threadId && entry.itemId === itemId) || null;
+}
+
 function upsertTab(tab) {
   const index = state.tabs.findIndex((entry) => entry.threadId === tab.threadId);
   if (index >= 0) {
@@ -435,6 +477,7 @@ function removeTab(threadId) {
   state.itemsByThread.delete(threadId);
   state.partialByThread.delete(threadId);
   state.turnActiveByThread.delete(threadId);
+  state.serverRequests = state.serverRequests.filter((entry) => entry.threadId !== threadId);
   removePendingUserMessagesForThread(threadId);
   state.unreadThreadIds.delete(threadId);
   messageDomByThread.delete(threadId);
@@ -630,6 +673,7 @@ function renderTabs() {
   for (const tab of state.tabs) {
     const status = normalizeTabStatus(tab.status);
     const isClosed = status === 'closed';
+    const isWaitingApproval = !isClosed && hasPendingServerRequest(tab.threadId);
     const hasUnread = state.unreadThreadIds.has(tab.threadId) && tab.threadId !== state.activeThreadId;
     const node = tabTpl.content.firstElementChild.cloneNode(true);
     node.dataset.threadId = tab.threadId;
@@ -640,10 +684,10 @@ function renderTabs() {
     const meta = node.querySelector('.meta');
     meta.replaceChildren();
     const statusDot = document.createElement('span');
-    statusDot.className = `status-dot ${isClosed ? 'closed' : 'open'}`;
+    statusDot.className = `status-dot ${isClosed ? 'closed' : (isWaitingApproval ? 'waiting' : 'open')}`;
     const statusText = document.createElement('span');
     statusText.className = 'status-text';
-    statusText.textContent = isClosed ? '已关闭' : '在线';
+    statusText.textContent = isClosed ? '已关闭' : (isWaitingApproval ? '待批准' : '在线');
     meta.append(statusDot, statusText);
 
     node.querySelector('.close').addEventListener('click', (event) => {
@@ -695,6 +739,12 @@ function renderHeader() {
   if (state.creatingTab) {
     activeStatus.textContent = '创建中';
     activeStatus.className = 'status-badge running';
+    return;
+  }
+
+  if (tab && hasPendingServerRequest(tab.threadId)) {
+    activeStatus.textContent = '待批准';
+    activeStatus.className = 'status-badge waiting';
     return;
   }
 
@@ -798,7 +848,9 @@ function buildMessageEntries(threadId) {
 
   const items = ensureItems(threadId);
   const partials = state.partialByThread.get(threadId) || new Map();
-  const entries = items.map((item, index) => buildEntryFromItem(item, partials, index));
+  const entries = items.map((item, index) => buildEntryFromItem(threadId, item, partials, index));
+  const requestEntries = getServerRequestsForThread(threadId).map((request) => buildEntryFromServerRequest(request));
+  entries.push(...requestEntries);
 
   const hasPartialAgent = items.some((item) => item.type === 'agentMessage' && (item._partial || partials.has(item.id)));
   if (state.turnActiveByThread.get(threadId) && !hasPartialAgent) {
@@ -812,7 +864,7 @@ function buildMessageEntries(threadId) {
   return connectionEntries.concat(entries);
 }
 
-function buildEntryFromItem(item, partials, index) {
+function buildEntryFromItem(threadId, item, partials, index) {
   const key = `${item.type}:${item.id || index}`;
 
   if (item.type === 'userMessage') {
@@ -863,7 +915,8 @@ function buildEntryFromItem(item, partials, index) {
 
   if (item.type === 'commandExecution') {
     const command = item.command || item.input || '';
-    const status = item.status || '';
+    const pendingRequest = findPendingRequestForItem(threadId, item.id);
+    const status = pendingRequest ? 'pendingApproval' : (item.status || '');
     const output = item.aggregatedOutput || item.output || '';
     return {
       key,
@@ -872,6 +925,19 @@ function buildEntryFromItem(item, partials, index) {
       status,
       output,
       signature: JSON.stringify(['command', key, command, status, output]),
+    };
+  }
+
+  if (item.type === 'fileChange') {
+    const pendingRequest = findPendingRequestForItem(threadId, item.id);
+    const status = pendingRequest ? 'pendingApproval' : (item.status || '');
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    return {
+      key,
+      kind: 'fileChange',
+      status,
+      changes,
+      signature: JSON.stringify(['fileChange', key, status, JSON.stringify(changes)]),
     };
   }
 
@@ -890,6 +956,27 @@ function buildEntryFromItem(item, partials, index) {
     label: item.type || 'unknown',
     preview: JSON.stringify(item, null, 2).substring(0, 500),
     signature: JSON.stringify(['generic', key, item.type || 'unknown', JSON.stringify(item)]),
+  };
+}
+
+function buildEntryFromServerRequest(request) {
+  const summary = JSON.stringify([
+    request.kind,
+    request.status,
+    request.reason || '',
+    request.command || '',
+    request.cwd || '',
+    request.grantRoot || '',
+    JSON.stringify(request.permissions || {}),
+    JSON.stringify(request.questions || []),
+    JSON.stringify(request.fileChanges || {}),
+  ]);
+
+  return {
+    key: `server_request:${request.requestId}`,
+    kind: 'serverRequest',
+    request,
+    signature: summary,
   };
 }
 
@@ -986,6 +1073,37 @@ function populateMessageNode(node, entry) {
     return;
   }
 
+  if (entry.kind === 'fileChange') {
+    node.classList.add('tool-call');
+    const label = document.createElement('div');
+    label.className = 'item-label';
+    label.textContent = `${commandStatusIcon(entry.status)} 文件修改`;
+    node.appendChild(label);
+
+    const changes = document.createElement('div');
+    changes.className = 'file-change-list';
+    for (const change of entry.changes.slice(0, 6)) {
+      const line = document.createElement('div');
+      line.className = 'file-change-entry';
+      line.textContent = `${formatFileChangeKind(change.kind)} ${change.path}`;
+      changes.appendChild(line);
+    }
+    if (entry.changes.length > 6) {
+      const more = document.createElement('div');
+      more.className = 'file-change-entry muted';
+      more.textContent = `还有 ${entry.changes.length - 6} 项未展开`;
+      changes.appendChild(more);
+    }
+    node.appendChild(changes);
+    return;
+  }
+
+  if (entry.kind === 'serverRequest') {
+    node.classList.add('approval-card');
+    populateServerRequestNode(node, entry.request);
+    return;
+  }
+
   if (entry.kind === '_error' || entry.kind === '_warning') {
     node.classList.add(entry.kind);
     node.textContent = entry.text;
@@ -1001,6 +1119,291 @@ function populateMessageNode(node, entry) {
   const preview = document.createElement('pre');
   preview.textContent = entry.preview;
   node.appendChild(preview);
+}
+
+function formatFileChangeKind(kind) {
+  if (kind === 'add') {
+    return '新增';
+  }
+  if (kind === 'delete') {
+    return '删除';
+  }
+  if (kind === 'update') {
+    return '修改';
+  }
+  return '变更';
+}
+
+function populateServerRequestNode(node, request) {
+  const title = document.createElement('div');
+  title.className = 'item-label';
+  title.textContent = describeServerRequestTitle(request);
+  node.appendChild(title);
+
+  if (request.reason) {
+    const reason = document.createElement('div');
+    reason.className = 'approval-reason';
+    reason.textContent = request.reason;
+    node.appendChild(reason);
+  }
+
+  if (request.command) {
+    const code = document.createElement('code');
+    code.textContent = request.command;
+    node.appendChild(code);
+  }
+
+  if (request.cwd) {
+    const cwd = document.createElement('div');
+    cwd.className = 'approval-meta';
+    cwd.textContent = `目录: ${request.cwd}`;
+    node.appendChild(cwd);
+  }
+
+  if (request.grantRoot) {
+    const grantRoot = document.createElement('div');
+    grantRoot.className = 'approval-meta';
+    grantRoot.textContent = `授权根目录: ${request.grantRoot}`;
+    node.appendChild(grantRoot);
+  }
+
+  if (request.kind === 'permissions_approval') {
+    const permissionList = document.createElement('div');
+    permissionList.className = 'approval-meta';
+    permissionList.textContent = describePermissions(request.permissions);
+    node.appendChild(permissionList);
+  }
+
+  if ((request.kind === 'file_change_approval_legacy') && request.fileChanges) {
+    const changes = document.createElement('div');
+    changes.className = 'file-change-list';
+    Object.entries(request.fileChanges).slice(0, 6).forEach(([filePath, change]) => {
+      const line = document.createElement('div');
+      line.className = 'file-change-entry';
+      line.textContent = `${formatFileChangeKind(change?.kind || change?.type)} ${filePath}`;
+      changes.appendChild(line);
+    });
+    node.appendChild(changes);
+  }
+
+  if (request.kind === 'user_input') {
+    renderUserInputRequest(node, request);
+    return;
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'approval-actions';
+  const submitting = request.status === 'submitting';
+
+  if (request.kind === 'permissions_approval') {
+    actions.appendChild(createActionButton('允许本次', submitting, () => {
+      submitServerRequestResponse(request, {
+        permissions: request.permissions || {},
+        scope: 'turn',
+      });
+    }));
+    actions.appendChild(createActionButton('允许本会话', submitting, () => {
+      submitServerRequestResponse(request, {
+        permissions: request.permissions || {},
+        scope: 'session',
+      });
+    }));
+    actions.appendChild(createActionButton('拒绝', submitting, () => {
+      submitServerRequestResponse(request, {
+        permissions: {},
+        scope: 'turn',
+      });
+    }, 'btn-secondary'));
+  } else {
+    actions.appendChild(createActionButton('批准', submitting, () => {
+      submitServerRequestResponse(request, {
+        decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
+          ? 'approved'
+          : 'accept',
+      });
+    }));
+    actions.appendChild(createActionButton('本会话允许', submitting, () => {
+      submitServerRequestResponse(request, {
+        decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
+          ? 'approved_for_session'
+          : 'acceptForSession',
+      });
+    }));
+    actions.appendChild(createActionButton('拒绝', submitting, () => {
+      submitServerRequestResponse(request, {
+        decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
+          ? 'denied'
+          : 'decline',
+      });
+    }, 'btn-secondary'));
+  }
+
+  node.appendChild(actions);
+
+  if (submitting) {
+    const pending = document.createElement('div');
+    pending.className = 'approval-meta';
+    pending.textContent = '已提交，等待 Codex 确认...';
+    node.appendChild(pending);
+  }
+}
+
+function renderUserInputRequest(node, request) {
+  const form = document.createElement('form');
+  form.className = 'approval-form';
+  const submitting = request.status === 'submitting';
+
+  for (const question of request.questions || []) {
+    const block = document.createElement('div');
+    block.className = 'approval-question';
+
+    const header = document.createElement('div');
+    header.className = 'approval-question-header';
+    header.textContent = question.header || question.question || question.id;
+    block.appendChild(header);
+
+    const prompt = document.createElement('div');
+    prompt.className = 'approval-meta';
+    prompt.textContent = question.question || '';
+    block.appendChild(prompt);
+
+    const options = Array.isArray(question.options) ? question.options : [];
+    if (options.length) {
+      const optionList = document.createElement('div');
+      optionList.className = 'approval-options';
+      options.forEach((option, index) => {
+        const label = document.createElement('label');
+        label.className = 'approval-option';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = `question-${question.id}`;
+        radio.value = option.label;
+        radio.disabled = submitting;
+        if (index === 0 && !question.isOther) {
+          radio.checked = true;
+        }
+        label.appendChild(radio);
+
+        const text = document.createElement('span');
+        text.textContent = option.label;
+        label.appendChild(text);
+        optionList.appendChild(label);
+      });
+      block.appendChild(optionList);
+    }
+
+    if (question.isOther || question.isSecret || !options.length) {
+      const input = document.createElement(question.isSecret ? 'input' : 'textarea');
+      input.name = `question-input-${question.id}`;
+      input.className = 'approval-text-input';
+      if (question.isSecret) {
+        input.type = 'password';
+      } else {
+        input.rows = 2;
+      }
+      input.placeholder = '填写回答';
+      input.disabled = submitting;
+      block.appendChild(input);
+    }
+
+    form.appendChild(block);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'approval-actions';
+  const submitBtn = document.createElement('button');
+  submitBtn.type = 'submit';
+  submitBtn.className = 'btn';
+  submitBtn.textContent = submitting ? '提交中...' : '提交';
+  submitBtn.disabled = submitting;
+  actions.appendChild(submitBtn);
+  form.appendChild(actions);
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const answers = {};
+    for (const question of request.questions || []) {
+      const selected = form.querySelector(`input[name="question-${question.id}"]:checked`);
+      const freeform = form.querySelector(`[name="question-input-${question.id}"]`);
+      const value = selected?.value || freeform?.value?.trim() || '';
+      if (!value) {
+        continue;
+      }
+      answers[question.id] = { answers: [value] };
+    }
+    submitServerRequestResponse(request, { answers });
+  });
+
+  node.appendChild(form);
+}
+
+function describeServerRequestTitle(request) {
+  if (request.kind === 'permissions_approval') {
+    return '⏳ 额外权限请求';
+  }
+  if (request.kind === 'file_change_approval' || request.kind === 'file_change_approval_legacy') {
+    return '⏳ 文件修改待批准';
+  }
+  if (request.kind === 'user_input') {
+    return '⏳ 等待人工输入';
+  }
+  return '⏳ 命令执行待批准';
+}
+
+function describePermissions(permissions) {
+  const parts = [];
+  const networkEnabled = permissions?.network?.enabled;
+  if (networkEnabled) {
+    parts.push('网络访问');
+  }
+
+  const readPaths = permissions?.fileSystem?.read || [];
+  const writePaths = permissions?.fileSystem?.write || [];
+  if (readPaths.length) {
+    parts.push(`读: ${readPaths.join(', ')}`);
+  }
+  if (writePaths.length) {
+    parts.push(`写: ${writePaths.join(', ')}`);
+  }
+
+  const entries = permissions?.fileSystem?.entries || [];
+  if (entries.length && !readPaths.length && !writePaths.length) {
+    parts.push(`文件系统项: ${entries.length}`);
+  }
+
+  return parts.length ? parts.join(' | ') : '无额外权限详情';
+}
+
+function createActionButton(label, disabled, onClick, extraClass = '') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = extraClass ? `btn ${extraClass}` : 'btn';
+  button.textContent = label;
+  button.disabled = disabled;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function submitServerRequestResponse(request, response) {
+  if (!request?.requestId) {
+    return;
+  }
+
+  if (!send({ type: 'server_request_respond', requestId: request.requestId, response })) {
+    const threadId = request.threadId || state.activeThreadId;
+    if (threadId) {
+      ensureItems(threadId).push({
+        type: '_error',
+        id: createLocalId('approval-send'),
+        text: '批准响应发送失败：WebSocket 未连接，请稍后重试。',
+      });
+    }
+    render();
+    return;
+  }
+
+  upsertServerRequest({ ...request, status: 'submitting' });
+  render();
 }
 
 function createMessageBody(html) {
@@ -1020,7 +1423,7 @@ function commandStatusIcon(status) {
   if (status === 'completed') {
     return '✅';
   }
-  if (status === 'failed') {
+  if (status === 'failed' || status === 'declined') {
     return '❌';
   }
   if (status === 'pendingApproval') {
@@ -1209,6 +1612,10 @@ composer.addEventListener('submit', (event) => {
 function handleMessage(msg) {
   if (msg.type === 'state') {
     state.tabs = msg.tabs || [];
+    state.serverRequests = [];
+    for (const request of msg.serverRequests || []) {
+      upsertServerRequest(request);
+    }
     pruneUnreadThreads();
     if (!state.activeThreadId && state.tabs.length) {
       state.activeThreadId = state.tabs[0].threadId;
@@ -1223,6 +1630,39 @@ function handleMessage(msg) {
       send({ type: 'thread_sync', threadId: state.activeThreadId });
     }
     render();
+    return;
+  }
+
+  if (msg.type === 'server_request_required') {
+    upsertServerRequest(msg.request);
+    if (markThreadUnread(msg.request?.threadId)) {
+      renderTabs();
+    }
+    if (msg.request?.threadId === state.activeThreadId) {
+      render();
+    } else {
+      renderTabs();
+    }
+    return;
+  }
+
+  if (msg.type === 'server_request_updated') {
+    upsertServerRequest(msg.request);
+    if (msg.request?.threadId === state.activeThreadId) {
+      render();
+    } else {
+      renderTabs();
+    }
+    return;
+  }
+
+  if (msg.type === 'server_request_resolved') {
+    removeServerRequest(msg.requestId);
+    if (msg.threadId === state.activeThreadId) {
+      render();
+    } else {
+      renderTabs();
+    }
     return;
   }
 

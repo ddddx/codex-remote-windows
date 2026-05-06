@@ -79,6 +79,20 @@ class CodexAppServerClient extends EventEmitter {
     return promise;
   }
 
+  respond(id, result = {}) {
+    if (!this.proc && !this.ws) {
+      throw new Error('codex app-server is not running');
+    }
+    this.#send({ id, result });
+  }
+
+  respondError(id, error) {
+    if (!this.proc && !this.ws) {
+      throw new Error('codex app-server is not running');
+    }
+    this.#send({ id, error });
+  }
+
   notify(method, params = {}) {
     if (!this.proc && !this.ws) {
       throw new Error('codex app-server is not running');
@@ -232,7 +246,9 @@ class CodexAppServerClient extends EventEmitter {
     if (this.ws) {
       try {
         const msg = JSON.parse(chunk.trim());
-        if (msg.method) {
+        if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
+          this.emit('server_request', msg);
+        } else if (msg.method) {
           this.emit('notification', msg);
         } else if (Object.prototype.hasOwnProperty.call(msg, 'id')) {
           const entry = this.pending.get(String(msg.id));
@@ -272,6 +288,11 @@ class CodexAppServerClient extends EventEmitter {
         msg = JSON.parse(raw);
       } catch {
         this.emit('log', `non-json output: ${raw}`);
+        continue;
+      }
+
+      if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
+        this.emit('server_request', msg);
         continue;
       }
 

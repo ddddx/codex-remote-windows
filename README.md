@@ -13,6 +13,7 @@
 - Markdown 渲染（代码块、加粗、列表、标题）
 - 发送后显示思考动画，流式回复实时显示
 - WebSocket 断开自动重连
+- 支持网页端处理命令批准、文件修改批准和 `request_user_input`
 
 ## 运行要求
 
@@ -24,15 +25,20 @@
 
 ```bash
 npm install
-node start-appserver.js   # 启动 app-server
-node start-web.js          # 启动 Web 控制端
+npm run remote
 ```
 
-或使用 pm2：
+Windows 下也可以直接双击：
 
 ```bash
-pm2 start start-appserver.js --name cc-appserver
-pm2 start start-web.js --name cc-web
+start-codex-remote.bat
+```
+
+如果你只是调试某一层，再单独启动：
+
+```bash
+npm run appserver   # 只启动 Codex app-server
+npm run web         # 只启动 Web 控制端
 ```
 
 默认地址：
@@ -75,7 +81,7 @@ pm2 start start-web.js --name cc-web
 $env:CODEX_CMD='C:\path\to\codex.cmd'
 $env:PORT='9000'
 $env:WS_TOKEN='your-secret-token'
-node start-web.js
+npm run remote
 ```
 
 如果设置了 `WS_TOKEN`，访问控制端时可直接带上查询参数：
@@ -106,8 +112,10 @@ cc-workspace/
 │   ├── server.js     # Web 服务器 + WebSocket
 │   ├── codexAppServerClient.js  # Codex app-server 客户端
 │   └── windowManager.js         # 窗口管理
-├── start-appserver.js  # 启动 app-server
-├── start-web.js        # 启动 Web 控制端
+├── start-all.js        # 推荐入口：同时拉起 app-server 和 Web 控制端
+├── start-appserver.js  # 调试用：只启动 app-server
+├── start-web.js        # 调试用：只启动 Web 控制端
+├── start-codex-remote.bat # Windows 启动器，内部调用 start-all.js
 └── package.json
 ```
 

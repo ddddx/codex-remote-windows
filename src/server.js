@@ -44,6 +44,7 @@ const windows = new CodexWindowManager({});
 const tabs = new Map();
 const closedTabTimers = new Map();
 const pendingWindowOpens = new Map();
+const pendingServerRequests = new Map();
 let shuttingDown = false;
 
 server.on('upgrade', (request, socket, head) => {
@@ -261,6 +262,44 @@ function broadcast(payload) {
   }
 }
 
+function toClientServerRequest(request) {
+  const { rawRequestId, ...clientRequest } = request;
+  return clientRequest;
+}
+
+function listPendingServerRequests(threadId = null) {
+  const requests = Array.from(pendingServerRequests.values())
+    .filter((request) => !threadId || request.threadId === threadId)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((request) => toClientServerRequest(request));
+  return requests;
+}
+
+function upsertPendingServerRequest(request) {
+  pendingServerRequests.set(request.requestId, request);
+  return request;
+}
+
+function getPendingServerRequest(requestId) {
+  return pendingServerRequests.get(String(requestId));
+}
+
+function updatePendingServerRequest(requestId, patch) {
+  const request = getPendingServerRequest(requestId);
+  if (!request) {
+    return null;
+  }
+  Object.assign(request, patch);
+  return request;
+}
+
+function resolvePendingServerRequest(requestId) {
+  const key = String(requestId);
+  const request = pendingServerRequests.get(key) || null;
+  pendingServerRequests.delete(key);
+  return request;
+}
+
 function shouldBroadcastUnread(threadId) {
   if (!THREAD_ID_REGEX.test(threadId || '')) {
     return false;
@@ -433,6 +472,12 @@ function normalizeClientMessage(raw) {
         type: 'thread_sync',
         threadId: normalizeThreadId(message.threadId),
       };
+    case 'server_request_respond':
+      return {
+        type: 'server_request_respond',
+        requestId: normalizeRequestId(message.requestId),
+        response: normalizeObject(message.response, 'response'),
+      };
     default:
       throw new Error(`unknown message type: ${message.type}`);
   }
@@ -471,6 +516,27 @@ function normalizeOptionalClientMessageId(value) {
   return value.trim().slice(0, 128);
 }
 
+function normalizeRequestId(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new Error('invalid requestId');
+  }
+  const normalized = String(value).trim();
+  if (!normalized) {
+    throw new Error('invalid requestId');
+  }
+  if (normalized.length > 128) {
+    throw new Error('requestId too long');
+  }
+  return normalized;
+}
+
+function normalizeObject(value, fieldName) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an object`);
+  }
+  return value;
+}
+
 function normalizeRequiredString(value, maxLength, fieldName) {
   if (typeof value !== 'string') {
     throw new Error(`${fieldName} required`);
@@ -483,6 +549,121 @@ function normalizeRequiredString(value, maxLength, fieldName) {
     throw new Error(`${fieldName} too long (max ${maxLength})`);
   }
   return normalized;
+}
+
+function createServerRequestRecord(msg) {
+  const method = msg.method;
+  const params = msg.params || {};
+  const requestId = normalizeRequestId(msg.id);
+
+  if (method === 'item/commandExecution/requestApproval') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'command_approval',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.threadId || null,
+      turnId: params.turnId || null,
+      itemId: params.itemId || null,
+      approvalId: params.approvalId || null,
+      reason: params.reason || '',
+      command: params.command || '',
+      cwd: params.cwd || '',
+      commandActions: Array.isArray(params.commandActions) ? params.commandActions : [],
+      proposedExecpolicyAmendment: params.proposedExecpolicyAmendment || null,
+      proposedNetworkPolicyAmendments: Array.isArray(params.proposedNetworkPolicyAmendments)
+        ? params.proposedNetworkPolicyAmendments
+        : [],
+    };
+  }
+
+  if (method === 'item/fileChange/requestApproval') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'file_change_approval',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.threadId || null,
+      turnId: params.turnId || null,
+      itemId: params.itemId || null,
+      reason: params.reason || '',
+      grantRoot: params.grantRoot || null,
+    };
+  }
+
+  if (method === 'item/permissions/requestApproval') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'permissions_approval',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.threadId || null,
+      turnId: params.turnId || null,
+      itemId: params.itemId || null,
+      reason: params.reason || '',
+      cwd: params.cwd || '',
+      permissions: params.permissions || {},
+    };
+  }
+
+  if (method === 'item/tool/requestUserInput') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'user_input',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.threadId || null,
+      turnId: params.turnId || null,
+      itemId: params.itemId || null,
+      questions: Array.isArray(params.questions) ? params.questions : [],
+    };
+  }
+
+  if (method === 'execCommandApproval') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'command_approval_legacy',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.conversationId || null,
+      turnId: null,
+      itemId: params.callId || null,
+      approvalId: params.approvalId || null,
+      reason: params.reason || '',
+      command: Array.isArray(params.command) ? params.command.join(' ') : '',
+      cwd: params.cwd || '',
+      commandActions: Array.isArray(params.parsedCmd) ? params.parsedCmd : [],
+    };
+  }
+
+  if (method === 'applyPatchApproval') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method,
+      kind: 'file_change_approval_legacy',
+      status: 'pending',
+      createdAt: Date.now(),
+      threadId: params.conversationId || null,
+      turnId: null,
+      itemId: params.callId || null,
+      reason: params.reason || '',
+      grantRoot: params.grantRoot || null,
+      fileChanges: params.fileChanges || {},
+    };
+  }
+
+  throw new Error(`unsupported server request method: ${method}`);
 }
 
 codex.on('notification', (msg) => {
@@ -591,6 +772,16 @@ codex.on('notification', (msg) => {
     return;
   }
 
+  if (method === 'serverRequest/resolved') {
+    const resolvedRequest = resolvePendingServerRequest(params.requestId);
+    broadcast({
+      type: 'server_request_resolved',
+      threadId: resolvedRequest?.threadId || params.threadId || null,
+      requestId: normalizeRequestId(params.requestId),
+    });
+    return;
+  }
+
   if (method === 'error') {
     broadcast({ type: 'codex_error', threadId: params.threadId, error: params.error });
     return;
@@ -606,7 +797,29 @@ codex.on('log', (line) => {
   console.log(`[codex] ${line}`);
 });
 
+codex.on('server_request', (msg) => {
+  try {
+    const request = upsertPendingServerRequest(createServerRequestRecord(msg));
+    broadcast({ type: 'server_request_required', request: toClientServerRequest(request) });
+    broadcastUnreadIfNeeded(request.threadId);
+  } catch (error) {
+    const requestId = Object.prototype.hasOwnProperty.call(msg, 'id') ? msg.id : null;
+    if (requestId != null) {
+      codex.respondError(requestId, {
+        code: -32601,
+        message: getErrorMessage(error) || 'unsupported server request',
+      });
+    }
+    broadcast({
+      type: 'warning',
+      threadId: msg.params?.threadId || msg.params?.conversationId || null,
+      message: `未处理的 Codex 请求：${msg.method}`,
+    });
+  }
+});
+
 codex.on('exit', ({ code, signal }) => {
+  pendingServerRequests.clear();
   if (!shuttingDown) {
     broadcast({ type: 'backend_error', message: `codex app-server exited (code=${code}, signal=${signal})` });
   }
@@ -625,7 +838,7 @@ wss.on('connection', (ws, request) => {
   }
 
   ws.activeThreadId = null;
-  send(ws, { type: 'state', tabs: tabsList() });
+  send(ws, { type: 'state', tabs: tabsList(), serverRequests: listPendingServerRequests() });
 
   ws.on('message', async (raw) => {
     let message;
@@ -687,6 +900,46 @@ wss.on('connection', (ws, request) => {
             message: getErrorMessage(error) || '服务端请求失败',
           });
           return;
+        }
+        return;
+      }
+
+      if (message.type === 'server_request_respond') {
+        const request = getPendingServerRequest(message.requestId);
+        if (!request) {
+          send(ws, {
+            type: 'error',
+            code: 'REQUEST_NOT_FOUND',
+            message: '待处理的批准请求不存在或已失效。',
+          });
+          return;
+        }
+
+        updatePendingServerRequest(message.requestId, {
+          status: 'submitting',
+          submittedAt: Date.now(),
+        });
+        broadcast({
+          type: 'server_request_updated',
+          request: toClientServerRequest(getPendingServerRequest(message.requestId)),
+        });
+
+        try {
+          codex.respond(request.rawRequestId, message.response);
+        } catch (error) {
+          updatePendingServerRequest(message.requestId, {
+            status: 'pending',
+            submittedAt: null,
+          });
+          broadcast({
+            type: 'server_request_updated',
+            request: toClientServerRequest(getPendingServerRequest(message.requestId)),
+          });
+          send(ws, {
+            type: 'error',
+            threadId: request.threadId,
+            message: getErrorMessage(error) || '批准响应发送失败',
+          });
         }
         return;
       }
