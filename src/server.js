@@ -129,7 +129,9 @@ app.get('/api/codex/options', async (req, res) => {
         isDefault: model.isDefault === true,
         defaultReasoningEffort: model.defaultReasoningEffort || '',
         supportedReasoningEfforts: Array.isArray(model.supportedReasoningEfforts)
-          ? model.supportedReasoningEfforts.map((entry) => entry?.value || entry).filter(Boolean)
+          ? model.supportedReasoningEfforts
+            .map((entry) => entry?.reasoningEffort || entry?.value || entry)
+            .filter(Boolean)
           : [],
       })),
       defaults: {

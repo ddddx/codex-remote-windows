@@ -364,6 +364,16 @@ function normalizeComposerEffort(value) {
   return REASONING_EFFORT_OPTIONS.includes(normalized) ? normalized : '';
 }
 
+function normalizeEffortOptionValue(value) {
+  if (typeof value === 'string') {
+    return normalizeComposerEffort(value);
+  }
+  if (value && typeof value === 'object') {
+    return normalizeComposerEffort(value.reasoningEffort || value.value || '');
+  }
+  return '';
+}
+
 function loadComposerGlobalPrefs() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(COMPOSER_PREFS_STORAGE_KEY) || '{}');
@@ -440,15 +450,16 @@ function buildEffortSelectOptions() {
   const activePrefs = getActiveComposerPrefs();
   const activeModel = getModelDefinition(activePrefs?.model || state.composerModelDefault);
   const supportedEfforts = Array.isArray(activeModel?.supportedReasoningEfforts) && activeModel.supportedReasoningEfforts.length
-    ? activeModel.supportedReasoningEfforts.map((effort) => normalizeComposerEffort(effort)).filter(Boolean)
+    ? activeModel.supportedReasoningEfforts.map((effort) => normalizeEffortOptionValue(effort)).filter(Boolean)
     : REASONING_EFFORT_OPTIONS;
+  const finalEfforts = supportedEfforts.length ? supportedEfforts : REASONING_EFFORT_OPTIONS;
   const defaultLabel = state.composerEffortDefault
     ? `默认（${formatReasoningEffortLabel(state.composerEffortDefault)}）`
     : '默认';
   return [{
     value: '',
     label: defaultLabel,
-  }].concat(supportedEfforts.map((effort) => ({
+  }].concat(finalEfforts.map((effort) => ({
     value: effort,
     label: formatReasoningEffortLabel(effort),
   })));
