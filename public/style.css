@@ -528,6 +528,311 @@ body {
   box-shadow: 0 0 0 3px rgba(247, 232, 189, 0.7);
 }
 
+/* Codex-like transcript */
+.messages {
+  padding: 20px 18px 16px;
+  gap: 16px;
+}
+
+.turn-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.turn-thread-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 2px;
+}
+
+.turn-thread-index {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(84, 70, 57, 0.55);
+}
+
+.transcript-row {
+  display: flex;
+  width: 100%;
+}
+
+.transcript-row-user {
+  justify-content: flex-end;
+}
+
+.transcript-row-assistant {
+  justify-content: flex-start;
+}
+
+.transcript-row-body {
+  width: min(100%, 920px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.transcript-row-user .transcript-row-body {
+  align-items: flex-end;
+}
+
+.transcript-row-assistant .transcript-row-body {
+  align-items: stretch;
+}
+
+.message,
+.msg-bubble {
+  max-width: min(100%, 820px);
+  border-radius: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(108, 93, 77, 0.12);
+  box-shadow: 0 8px 24px rgba(35, 28, 22, 0.05);
+  background: rgba(255, 252, 247, 0.94);
+  line-height: 1.62;
+}
+
+.msg-bubble-user {
+  background: linear-gradient(180deg, rgba(245, 252, 250, 0.98), rgba(234, 247, 243, 0.98));
+  border-color: rgba(33, 116, 101, 0.16);
+}
+
+.msg-bubble-assistant {
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(250, 245, 237, 0.98));
+  border-color: rgba(136, 116, 91, 0.14);
+}
+
+.msg-bubble-commentary {
+  background: rgba(252, 248, 241, 0.82);
+  border-color: rgba(120, 128, 140, 0.12);
+  box-shadow: none;
+}
+
+.assistant-main-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.timeline-event {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.timeline-marker {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin-top: 10px;
+}
+
+.timeline-marker::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: -14px;
+  bottom: -20px;
+  width: 2px;
+  background: rgba(166, 154, 136, 0.28);
+}
+
+.timeline-marker::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(125, 114, 98, 0.7);
+  box-shadow: 0 0 0 3px rgba(229, 221, 209, 0.7);
+}
+
+.timeline-event:first-child .timeline-marker::before {
+  top: 6px;
+}
+
+.timeline-event:last-child .timeline-marker::before {
+  bottom: 8px;
+}
+
+.timeline-card {
+  border: 1px solid rgba(112, 99, 84, 0.12);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(255, 251, 245, 0.8);
+  min-width: 0;
+}
+
+.timeline-card .message-body {
+  color: rgba(52, 45, 38, 0.78);
+  font-size: 13px;
+}
+
+.timeline-card-reasoning {
+  background: rgba(247, 242, 255, 0.78);
+  border-color: rgba(152, 127, 214, 0.18);
+}
+
+.timeline-card-thinking {
+  background: rgba(248, 244, 238, 0.76);
+}
+
+.timeline-card-tool {
+  background: rgba(243, 247, 251, 0.84);
+  border-color: rgba(111, 145, 177, 0.18);
+}
+
+.timeline-card-command {
+  background: rgba(245, 247, 250, 0.88);
+  border-color: rgba(125, 134, 149, 0.16);
+}
+
+.timeline-card-file-change {
+  background: rgba(243, 249, 245, 0.88);
+  border-color: rgba(96, 150, 112, 0.18);
+}
+
+.timeline-card-generic {
+  background: rgba(247, 244, 239, 0.86);
+}
+
+.timeline-inline-title {
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(32, 30, 28, 0.9);
+  word-break: break-word;
+}
+
+.timeline-inline-meta {
+  margin-top: 3px;
+  font-size: 12px;
+  color: rgba(93, 86, 77, 0.58);
+}
+
+.timeline-inline-detail-row {
+  margin: 0;
+}
+
+.timeline-inline-detail-row > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.timeline-inline-detail-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-inline-detail-row[open] > summary {
+  margin-bottom: 8px;
+}
+
+.timeline-inline-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-inline-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.timeline-inline-pre-shell {
+  background: rgba(18, 23, 27, 0.06);
+  color: rgba(22, 25, 28, 0.92);
+}
+
+.timeline-inline-pre-output {
+  background: rgba(18, 23, 27, 0.04);
+  color: rgba(36, 41, 46, 0.82);
+}
+
+.timeline-inline-placeholder {
+  font-size: 12px;
+  color: rgba(93, 86, 77, 0.58);
+  padding: 2px 0 0;
+}
+
+.thinking-inline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.approval-banner {
+  border: 1px solid rgba(201, 145, 52, 0.2);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255, 248, 231, 0.98), rgba(252, 242, 214, 0.98));
+  box-shadow: 0 10px 24px rgba(131, 93, 19, 0.08);
+}
+
+.approval-banner .item-label {
+  color: rgba(125, 83, 14, 0.78);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.timeline-system {
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.timeline-system-error {
+  background: rgba(255, 240, 240, 0.92);
+  border: 1px solid rgba(193, 94, 94, 0.22);
+  color: #a03030;
+}
+
+.timeline-system-warning {
+  background: rgba(255, 248, 224, 0.92);
+  border: 1px solid rgba(192, 162, 79, 0.22);
+  color: #8a6b18;
+}
+
+.item-phase {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(104, 97, 90, 0.62);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.turn-badge {
+  background: rgba(177, 160, 133, 0.16);
+  border: 1px solid rgba(166, 142, 100, 0.18);
+  color: rgba(108, 84, 55, 0.78);
+}
+
+.turn-badge.active {
+  background: rgba(33, 116, 101, 0.12);
+  border-color: rgba(33, 116, 101, 0.16);
+  color: rgba(23, 102, 88, 0.82);
+}
+
+.turn-badge.done {
+  background: rgba(136, 116, 91, 0.08);
+  border-color: rgba(136, 116, 91, 0.14);
+  color: rgba(96, 81, 64, 0.74);
+}
+
 .composer {
   border-top: 1px solid var(--line);
   padding: 10px 16px;

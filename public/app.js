@@ -1516,6 +1516,170 @@ function describeWebSearch(item) {
   return item.query || JSON.stringify(action);
 }
 
+function compactText(text, maxLength = 120) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return '';
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function basenamePath(filePath) {
+  const normalized = String(filePath || '').replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return '';
+  }
+  const parts = normalized.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
+function formatAgentPhaseLabel(phase) {
+  if (phase === 'commentary') {
+    return '处理中';
+  }
+  if (phase === 'final_answer') {
+    return '最终答复';
+  }
+  return phase || '';
+}
+
+function createTranscriptRow(role) {
+  const row = document.createElement('div');
+  row.className = `transcript-row transcript-row-${role}`;
+
+  const body = document.createElement('div');
+  body.className = 'transcript-row-body';
+  row.appendChild(body);
+
+  return { row, body };
+}
+
+function createTimelineMeta(text) {
+  const meta = document.createElement('div');
+  meta.className = 'timeline-inline-meta';
+  meta.textContent = text;
+  return meta;
+}
+
+function createTimelineTitle(text) {
+  const title = document.createElement('div');
+  title.className = 'timeline-inline-title';
+  title.textContent = text;
+  return title;
+}
+
+function createTimelinePlaceholder(text) {
+  const placeholder = document.createElement('div');
+  placeholder.className = 'timeline-inline-placeholder';
+  placeholder.textContent = text;
+  return placeholder;
+}
+
+function createTimelinePre(text, extraClass = '') {
+  const pre = document.createElement('pre');
+  pre.className = extraClass ? `timeline-inline-pre ${extraClass}` : 'timeline-inline-pre';
+  pre.textContent = text;
+  return pre;
+}
+
+function createDetailContent() {
+  const body = document.createElement('div');
+  body.className = 'timeline-inline-detail-body';
+  return body;
+}
+
+function populateCommandEntry(node, entry) {
+  node.className = 'timeline-card timeline-card-command';
+
+  const details = document.createElement('details');
+  details.className = 'timeline-inline-detail-row';
+  details.open = entry.status === 'running' || entry.status === 'pendingApproval' || entry.status === 'failed';
+
+  const summary = document.createElement('summary');
+  summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(entry.command, 110) || '命令执行'}`));
+  summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}`));
+  details.appendChild(summary);
+
+  const body = createDetailContent();
+  body.appendChild(createTimelinePre(entry.command || '', 'timeline-inline-pre-shell'));
+  if (entry.output) {
+    body.appendChild(createTimelinePre(entry.output, 'timeline-inline-pre-output'));
+  } else if (entry.status === 'running' || entry.status === 'pendingApproval') {
+    body.appendChild(createTimelinePlaceholder(entry.status === 'pendingApproval' ? '等待批准后继续执行…' : '命令正在执行…'));
+  }
+  details.appendChild(body);
+
+  node.appendChild(details);
+}
+
+function populateFileChangeEntry(node, entry) {
+  node.className = 'timeline-card timeline-card-file-change';
+
+  const details = document.createElement('details');
+  details.className = 'timeline-inline-detail-row';
+  details.open = entry.status === 'pendingApproval' || entry.status === 'running';
+
+  const preview = entry.changes.slice(0, 3).map((change) => basenamePath(change.path) || change.path).filter(Boolean);
+  const summaryText = preview.length ? preview.join(' · ') : '文件修改';
+  const extraCount = entry.changes.length > 3 ? ` · 另 ${entry.changes.length - 3} 项` : '';
+
+  const summary = document.createElement('summary');
+  summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(summaryText, 110)}${extraCount}`));
+  summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}`));
+  details.appendChild(summary);
+
+  const body = createDetailContent();
+  const changes = document.createElement('div');
+  changes.className = 'file-change-list';
+  for (const change of entry.changes) {
+    const line = document.createElement('div');
+    line.className = 'file-change-entry';
+    line.textContent = `${formatFileChangeKind(change.kind)} ${change.path}`;
+    changes.appendChild(line);
+  }
+  body.appendChild(changes);
+  if (!entry.changes.length) {
+    body.appendChild(createTimelinePlaceholder('等待文件变更详情…'));
+  }
+  details.appendChild(body);
+
+  node.appendChild(details);
+}
+
+function populateToolEntry(node, entry) {
+  node.className = 'timeline-card timeline-card-tool';
+  node.appendChild(createTimelineTitle(entry.label || '网页操作'));
+  node.appendChild(createTimelineMeta('网页操作'));
+}
+
+function populateReasoningEntry(node, entry) {
+  node.className = 'timeline-card timeline-card-reasoning';
+  node.appendChild(createTimelineTitle(entry.text ? '思考摘要' : '思考中…'));
+  if (entry.text) {
+    node.appendChild(createMessageBody(renderMarkdown(entry.text)));
+  }
+}
+
+function populateThinkingEntry(node) {
+  node.className = 'timeline-card timeline-card-thinking';
+  const title = createTimelineTitle('思考中…');
+  node.appendChild(title);
+  const dots = document.createElement('div');
+  dots.className = 'thinking-inline';
+  dots.appendChild(createDot());
+  dots.appendChild(createDot());
+  dots.appendChild(createDot());
+  node.appendChild(dots);
+}
+
+function populateNoticeEntry(node, entry) {
+  node.className = `timeline-system timeline-system-${entry.kind === '_error' ? 'error' : 'warning'}`;
+  node.textContent = entry.text;
+}
+
 function populateMessageNode(node, entry) {
   node.replaceChildren();
 
@@ -1527,100 +1691,73 @@ function populateMessageNode(node, entry) {
   }
 
   if (entry.kind === 'turn') {
-    node.className = 'turn-card';
+    node.className = 'turn-thread';
 
-    const header = document.createElement('div');
-    header.className = 'turn-header';
+    const meta = document.createElement('div');
+    meta.className = 'turn-thread-meta';
 
-    const title = document.createElement('div');
-    title.className = 'turn-title';
+    const title = document.createElement('span');
+    title.className = 'turn-thread-index';
     title.textContent = `第 ${entry.index} 轮`;
-    header.appendChild(title);
+    meta.appendChild(title);
 
-    const badges = document.createElement('div');
-    badges.className = 'turn-badges';
     if (entry.isPendingLocal) {
-      badges.appendChild(createTurnBadge('待启动'));
+      meta.appendChild(createTurnBadge('待启动'));
     }
     if (entry.isActive) {
-      badges.appendChild(createTurnBadge('进行中', 'active'));
+      meta.appendChild(createTurnBadge('进行中', 'active'));
     } else if (entry.finalEntry || entry.timelineEntries.length) {
-      badges.appendChild(createTurnBadge('已完成', 'done'));
+      meta.appendChild(createTurnBadge('已完成', 'done'));
     }
-    header.appendChild(badges);
-    node.appendChild(header);
+    node.appendChild(meta);
 
     if (entry.userEntry) {
-      const promptSection = document.createElement('div');
-      promptSection.className = 'turn-section';
-
-      const promptLabel = document.createElement('div');
-      promptLabel.className = 'turn-section-title';
-      promptLabel.textContent = '你的输入';
-      promptSection.appendChild(promptLabel);
-      promptSection.appendChild(createEntryElement(entry.userEntry));
-      node.appendChild(promptSection);
+      const userRow = createTranscriptRow('user');
+      userRow.body.appendChild(createEntryElement(entry.userEntry));
+      node.appendChild(userRow.row);
     }
 
-    const shouldRenderTimeline = entry.timelineEntries.length > 0 || (entry.isActive && !entry.finalEntry);
-    if (shouldRenderTimeline) {
-      const timelineSection = document.createElement('div');
-      timelineSection.className = 'turn-section';
-
-      const timelineLabel = document.createElement('div');
-      timelineLabel.className = 'turn-section-title';
-      timelineLabel.textContent = '执行过程';
-      timelineSection.appendChild(timelineLabel);
-
-      const timeline = document.createElement('div');
-      timeline.className = 'timeline-list';
+    const shouldRenderAssistantRow = entry.timelineEntries.length > 0 || entry.isActive || entry.finalEntry;
+    if (shouldRenderAssistantRow) {
+      const assistantRow = createTranscriptRow('assistant');
+      const stack = document.createElement('div');
+      stack.className = 'assistant-main-stack';
       for (const timelineEntry of entry.timelineEntries) {
-        timeline.appendChild(createTimelineEvent(timelineEntry));
+        stack.appendChild(createTimelineEvent(timelineEntry));
       }
       if (entry.isActive && !entry.finalEntry) {
-        timeline.appendChild(createTimelineEvent(createThinkingEntry(`${entry.key}:thinking`)));
+        stack.appendChild(createTimelineEvent(createThinkingEntry(`${entry.key}:thinking`)));
       }
-      timelineSection.appendChild(timeline);
-      node.appendChild(timelineSection);
-    }
-
-    if (entry.finalEntry) {
-      const answerSection = document.createElement('div');
-      answerSection.className = 'turn-section';
-
-      const answerLabel = document.createElement('div');
-      answerLabel.className = 'turn-section-title';
-      answerLabel.textContent = '最终答复';
-      answerSection.appendChild(answerLabel);
-      answerSection.appendChild(createEntryElement(entry.finalEntry));
-      node.appendChild(answerSection);
+      if (stack.childNodes.length) {
+        assistantRow.body.appendChild(stack);
+      }
+      if (entry.finalEntry) {
+        assistantRow.body.appendChild(createEntryElement(entry.finalEntry));
+      }
+      node.appendChild(assistantRow.row);
     }
 
     return;
   }
 
-  node.className = 'message';
-
   if (entry.kind === 'thinking') {
-    node.classList.add('agent', 'thinking');
-    node.appendChild(createDot());
-    node.appendChild(createDot());
-    node.appendChild(createDot());
+    populateThinkingEntry(node);
     return;
   }
 
   if (entry.kind === 'user') {
-    node.classList.add('user');
+    node.className = 'message user msg-bubble msg-bubble-user';
     node.textContent = entry.text;
     return;
   }
 
   if (entry.kind === 'agent') {
-    node.classList.add('agent');
-    if (entry.phase && entry.phase !== 'final_answer') {
+    const isCommentary = entry.phase && entry.phase !== 'final_answer';
+    node.className = `message agent msg-bubble ${isCommentary ? 'msg-bubble-commentary' : 'msg-bubble-assistant'}`;
+    if (isCommentary) {
       const phase = document.createElement('div');
       phase.className = 'item-phase';
-      phase.textContent = entry.phase;
+      phase.textContent = formatAgentPhaseLabel(entry.phase);
       node.appendChild(phase);
     }
 
@@ -1636,94 +1773,44 @@ function populateMessageNode(node, entry) {
   }
 
   if (entry.kind === 'reasoning') {
-    node.classList.add('reasoning');
-    const label = document.createElement('div');
-    label.className = 'item-label';
-    label.textContent = entry.text ? '思考摘要' : '思考中...';
-    node.appendChild(label);
-    if (entry.text) {
-      node.appendChild(createMessageBody(renderMarkdown(entry.text)));
-    }
+    populateReasoningEntry(node, entry);
     return;
   }
 
   if (entry.kind === 'tool') {
-    node.classList.add('tool-call');
-    const label = document.createElement('div');
-    label.className = 'item-label';
-    label.textContent = '网页操作';
-    node.appendChild(label);
-
-    const body = document.createElement('div');
-    body.textContent = entry.label;
-    node.appendChild(body);
+    populateToolEntry(node, entry);
     return;
   }
 
   if (entry.kind === 'command') {
-    node.classList.add('tool-call');
-    const label = document.createElement('div');
-    label.className = 'item-label';
-    label.textContent = `${commandStatusIcon(entry.status)} 命令执行 · ${formatExecutionStatusText(entry.status)}`;
-    node.appendChild(label);
-
-    const code = document.createElement('code');
-    code.textContent = entry.command;
-    node.appendChild(code);
-
-    if (entry.output) {
-      const output = document.createElement('pre');
-      output.className = 'cmd-output';
-      output.textContent = entry.output;
-      node.appendChild(output);
-    }
+    populateCommandEntry(node, entry);
     return;
   }
 
   if (entry.kind === 'fileChange') {
-    node.classList.add('tool-call');
-    const label = document.createElement('div');
-    label.className = 'item-label';
-    label.textContent = `${commandStatusIcon(entry.status)} 文件修改 · ${formatExecutionStatusText(entry.status)}`;
-    node.appendChild(label);
-
-    const changes = document.createElement('div');
-    changes.className = 'file-change-list';
-    for (const change of entry.changes.slice(0, 6)) {
-      const line = document.createElement('div');
-      line.className = 'file-change-entry';
-      line.textContent = `${formatFileChangeKind(change.kind)} ${change.path}`;
-      changes.appendChild(line);
-    }
-    if (entry.changes.length > 6) {
-      const more = document.createElement('div');
-      more.className = 'file-change-entry muted';
-      more.textContent = `还有 ${entry.changes.length - 6} 项未展开`;
-      changes.appendChild(more);
-    }
-    node.appendChild(changes);
+    populateFileChangeEntry(node, entry);
     return;
   }
 
   if (entry.kind === 'serverRequest') {
-    node.classList.add('approval-card');
+    node.className = 'approval-banner approval-card';
     populateServerRequestNode(node, entry.request);
     return;
   }
 
   if (entry.kind === '_error' || entry.kind === '_warning') {
-    node.classList.add(entry.kind);
-    node.textContent = entry.text;
+    populateNoticeEntry(node, entry);
     return;
   }
 
-  node.classList.add('tool-call');
+  node.className = 'timeline-card timeline-card-generic';
   const label = document.createElement('div');
-  label.className = 'item-label';
+  label.className = 'timeline-inline-title';
   label.textContent = `⚙ ${entry.label}`;
   node.appendChild(label);
 
   const preview = document.createElement('pre');
+  preview.className = 'timeline-inline-pre';
   preview.textContent = entry.preview;
   node.appendChild(preview);
 }
