@@ -1,7 +1,6 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
 
 class WorkspaceManager {
   constructor(options = {}) {
@@ -16,6 +15,7 @@ class WorkspaceManager {
       desktopPath: this.normalizeExistingDirectory(path.join(os.homedir(), 'Desktop')),
       lastUsedPath: this.getLastUsedPath(),
       preferredPath: this.getPreferredPath(),
+      roots: this.getRoots(),
     };
   }
 
@@ -53,16 +53,6 @@ class WorkspaceManager {
     return normalized;
   }
 
-  async pickDirectory(initialPath) {
-    const normalizedInitialPath = this.normalizeExistingDirectory(initialPath) || this.getPreferredPath();
-    const output = await runPowerShellSta(buildFolderPickerScript(normalizedInitialPath));
-    const selectedPath = String(output || '').trim();
-    if (!selectedPath) {
-      return null;
-    }
-    return this.resolveWorkspacePath(selectedPath);
-  }
-
   createDirectory(parentPath, folderName) {
     const parent = this.resolveWorkspacePath(parentPath || this.getPreferredPath());
     const sanitizedFolderName = sanitizeFolderName(folderName);
@@ -75,6 +65,47 @@ class WorkspaceManager {
     fs.mkdirSync(nextPath, { recursive: false });
     this.rememberPath(nextPath);
     return nextPath;
+  }
+
+  listDirectory(inputPath) {
+    const targetPath = this.resolveWorkspacePath(inputPath || this.getPreferredPath());
+    const entries = fs.readdirSync(targetPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: path.join(targetPath, entry.name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }));
+
+    return {
+      path: targetPath,
+      parentPath: this.getParentPath(targetPath),
+      entries,
+    };
+  }
+
+  getParentPath(inputPath) {
+    const targetPath = this.resolveWorkspacePath(inputPath);
+    const parsed = path.parse(targetPath);
+    const normalizedRoot = parsed.root.replace(/[\\/]+$/, '').toLowerCase();
+    const normalizedTarget = targetPath.replace(/[\\/]+$/, '').toLowerCase();
+    if (normalizedRoot === normalizedTarget) {
+      return '';
+    }
+
+    const parentPath = path.dirname(targetPath);
+    return parentPath === targetPath ? '' : parentPath;
+  }
+
+  getRoots() {
+    const roots = [];
+    for (let code = 65; code <= 90; code += 1) {
+      const drive = `${String.fromCharCode(code)}:\\`;
+      if (fs.existsSync(drive)) {
+        roots.push(drive);
+      }
+    }
+    return roots;
   }
 
   normalizeExistingDirectory(inputPath) {
@@ -142,36 +173,6 @@ function sanitizeFolderName(folderName) {
     throw new Error('文件夹名称非法');
   }
   return normalized;
-}
-
-function buildFolderPickerScript(initialPath) {
-  const escapedInitialPath = String(initialPath || '').replace(/'/g, "''");
-  return [
-    "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')",
-    "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-    "$dialog.Description = '选择会话工作区'",
-    "$dialog.ShowNewFolderButton = $true",
-    `if ('${escapedInitialPath}' -and [System.IO.Directory]::Exists('${escapedInitialPath}')) { $dialog.SelectedPath = '${escapedInitialPath}' }`,
-    "$result = $dialog.ShowDialog()",
-    "if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }",
-  ].join('; ');
-}
-
-function runPowerShellSta(script) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-Command', script],
-      { windowsHide: true },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr?.trim() || error.message));
-          return;
-        }
-        resolve(stdout.trim());
-      }
-    );
-  });
 }
 
 module.exports = { WorkspaceManager };

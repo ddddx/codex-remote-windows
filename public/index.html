@@ -71,14 +71,23 @@
           <input id="sessionNameInput" class="modal-input" type="text" maxlength="120" placeholder="可留空" />
 
           <label class="modal-label session-workspace-label" for="sessionWorkspaceInput">工作区目录</label>
-          <input id="sessionWorkspaceInput" class="modal-input" type="text" placeholder="请输入或选择主机上的工作区目录" />
+          <div class="session-path-row">
+            <input id="sessionWorkspaceInput" class="modal-input session-path-input" type="text" placeholder="请输入或选择主机上的工作区目录" />
+            <button id="browseWorkspaceBtn" class="btn btn-secondary" type="button">进入路径</button>
+          </div>
 
           <div class="session-workspace-actions">
-            <button id="pickWorkspaceBtn" class="btn btn-secondary" type="button">主机选择文件夹</button>
+            <button id="workspaceUpBtn" class="btn btn-secondary" type="button">上级目录</button>
+            <button id="workspaceRefreshBtn" class="btn btn-secondary" type="button">刷新</button>
             <button id="createWorkspaceBtn" class="btn btn-secondary" type="button">新建文件夹</button>
+            <button id="useCurrentWorkspaceBtn" class="btn" type="button">使用当前目录</button>
           </div>
 
           <div id="workspaceShortcutList" class="workspace-shortcut-list"></div>
+          <div class="workspace-browser">
+            <div id="workspaceBrowserPath" class="workspace-browser-path"></div>
+            <div id="workspaceBrowserList" class="workspace-browser-list"></div>
+          </div>
           <div id="sessionModalHint" class="modal-label session-modal-hint">支持直接输入主机路径，也可以用下面的快捷路径。</div>
 
           <div class="modal-actions">

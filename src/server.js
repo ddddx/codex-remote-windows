@@ -63,20 +63,16 @@ app.get('/api/workspace/shortcuts', (req, res) => {
   res.json(workspaces.getShortcuts());
 });
 
-app.post('/api/workspace/pick', async (req, res) => {
+app.get('/api/workspace/list', (req, res) => {
   if (!isAuthorizedHttpRequest(req)) {
     res.status(401).json({ message: 'Unauthorized' });
     return;
   }
 
   try {
-    const selectedPath = await workspaces.pickDirectory(normalizeWorkspaceInput(req.body?.initialPath));
-    res.json({
-      cancelled: !selectedPath,
-      path: selectedPath || '',
-    });
+    res.json(workspaces.listDirectory(normalizeWorkspaceInput(req.query?.path)));
   } catch (error) {
-    res.status(400).json({ message: getErrorMessage(error) || '无法打开主机文件夹选择器' });
+    res.status(400).json({ message: getErrorMessage(error) || '无法读取工作区目录' });
   }
 });
 

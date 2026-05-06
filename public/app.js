@@ -226,9 +226,14 @@ const sessionModal = document.getElementById('sessionModal');
 const sessionModalForm = document.getElementById('sessionModalForm');
 const sessionNameInput = document.getElementById('sessionNameInput');
 const sessionWorkspaceInput = document.getElementById('sessionWorkspaceInput');
-const pickWorkspaceBtn = document.getElementById('pickWorkspaceBtn');
+const browseWorkspaceBtn = document.getElementById('browseWorkspaceBtn');
+const workspaceUpBtn = document.getElementById('workspaceUpBtn');
+const workspaceRefreshBtn = document.getElementById('workspaceRefreshBtn');
 const createWorkspaceBtn = document.getElementById('createWorkspaceBtn');
+const useCurrentWorkspaceBtn = document.getElementById('useCurrentWorkspaceBtn');
 const workspaceShortcutList = document.getElementById('workspaceShortcutList');
+const workspaceBrowserPath = document.getElementById('workspaceBrowserPath');
+const workspaceBrowserList = document.getElementById('workspaceBrowserList');
 const sessionModalHint = document.getElementById('sessionModalHint');
 const sessionModalCancelBtn = document.getElementById('sessionModalCancelBtn');
 const sessionModalConfirmBtn = document.getElementById('sessionModalConfirmBtn');
@@ -257,8 +262,11 @@ const sessionModalState = {
   previousFocus: null,
   shortcuts: null,
   loadingShortcuts: false,
-  pickingWorkspace: false,
   creatingWorkspace: false,
+  browserLoading: false,
+  browserPath: '',
+  browserParentPath: '',
+  browserEntries: [],
 };
 
 function send(payload) {
@@ -605,6 +613,11 @@ function getDefaultWorkspacePath(shortcuts) {
   return shortcuts?.lastUsedPath || shortcuts?.projectRoot || shortcuts?.desktopPath || '';
 }
 
+function updateSessionWorkspacePath(path) {
+  const normalized = typeof path === 'string' ? path.trim() : '';
+  sessionWorkspaceInput.value = normalized;
+}
+
 function syncTurns(threadId, turns) {
   const syncedItems = [];
   for (const turn of turns || []) {
@@ -858,40 +871,91 @@ function renderSessionModal() {
   const shortcuts = sessionModalState.shortcuts || {};
   workspaceShortcutList.replaceChildren();
 
-  [
+  const shortcutItems = [
     { label: '项目目录', path: shortcuts.projectRoot },
     { label: '桌面', path: shortcuts.desktopPath },
     { label: '上次使用', path: shortcuts.lastUsedPath },
-  ].forEach((shortcut) => {
+    ...(Array.isArray(shortcuts.roots) ? shortcuts.roots.map((rootPath) => ({
+      label: `磁盘 ${rootPath.replace(/[\\/]+$/, '')}`,
+      path: rootPath,
+    })) : []),
+  ];
+
+  shortcutItems.forEach((shortcut) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'btn btn-secondary workspace-shortcut';
-    button.disabled = !shortcut.path || sessionModalState.loadingShortcuts || sessionModalState.pickingWorkspace || sessionModalState.creatingWorkspace;
+    button.disabled = !shortcut.path || sessionModalState.loadingShortcuts || sessionModalState.browserLoading || sessionModalState.creatingWorkspace;
 
     const label = document.createElement('span');
     label.className = 'workspace-shortcut-label';
     label.textContent = `${shortcut.label}: ${shortcut.path || '不可用'}`;
     button.appendChild(label);
 
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
       if (!shortcut.path) {
         return;
       }
-      sessionWorkspaceInput.value = shortcut.path;
-      setSessionModalHint('已填入快捷路径。');
+      updateSessionWorkspacePath(shortcut.path);
+      await browseWorkspacePath(shortcut.path);
     });
     workspaceShortcutList.appendChild(button);
   });
 
-  const busy = sessionModalState.loadingShortcuts || sessionModalState.pickingWorkspace || sessionModalState.creatingWorkspace;
+  const busy = sessionModalState.loadingShortcuts || sessionModalState.browserLoading || sessionModalState.creatingWorkspace;
   sessionNameInput.disabled = busy;
   sessionWorkspaceInput.disabled = busy;
-  pickWorkspaceBtn.disabled = busy;
+  browseWorkspaceBtn.disabled = busy;
+  workspaceUpBtn.disabled = busy || !sessionModalState.browserParentPath;
+  workspaceRefreshBtn.disabled = busy || !sessionModalState.browserPath;
   createWorkspaceBtn.disabled = busy;
+  useCurrentWorkspaceBtn.disabled = busy || !sessionModalState.browserPath;
   sessionModalCancelBtn.disabled = busy;
   sessionModalConfirmBtn.disabled = busy;
-  pickWorkspaceBtn.textContent = sessionModalState.pickingWorkspace ? '等待主机选择中...' : '主机选择文件夹';
+  browseWorkspaceBtn.textContent = sessionModalState.browserLoading ? '加载中...' : '进入路径';
   createWorkspaceBtn.textContent = sessionModalState.creatingWorkspace ? '正在创建...' : '新建文件夹';
+
+  workspaceBrowserPath.textContent = sessionModalState.browserPath || '尚未加载目录';
+  workspaceBrowserList.replaceChildren();
+
+  if (sessionModalState.browserLoading) {
+    const loading = document.createElement('div');
+    loading.className = 'workspace-browser-item empty';
+    loading.textContent = '正在加载目录...';
+    workspaceBrowserList.appendChild(loading);
+    return;
+  }
+
+  if (!sessionModalState.browserEntries.length) {
+    const empty = document.createElement('div');
+    empty.className = 'workspace-browser-item empty';
+    empty.textContent = sessionModalState.browserPath ? '当前目录下没有子文件夹。' : '请选择一个工作区目录。';
+    workspaceBrowserList.appendChild(empty);
+    return;
+  }
+
+  sessionModalState.browserEntries.forEach((entry) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'workspace-browser-item';
+    button.title = entry.path;
+
+    const icon = document.createElement('span');
+    icon.className = 'workspace-browser-item-icon';
+    icon.textContent = '📁';
+    button.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'workspace-browser-item-label';
+    label.textContent = entry.name;
+    button.appendChild(label);
+
+    button.addEventListener('click', async () => {
+      updateSessionWorkspacePath(entry.path);
+      await browseWorkspacePath(entry.path);
+    });
+    workspaceBrowserList.appendChild(button);
+  });
 }
 
 async function loadWorkspaceShortcuts() {
@@ -903,7 +967,7 @@ async function loadWorkspaceShortcuts() {
     const shortcuts = await apiFetchJson('/api/workspace/shortcuts');
     sessionModalState.shortcuts = shortcuts;
     if (!sessionWorkspaceInput.value.trim()) {
-      sessionWorkspaceInput.value = getDefaultWorkspacePath(shortcuts);
+      updateSessionWorkspacePath(getDefaultWorkspacePath(shortcuts));
     }
     setSessionModalHint('支持直接输入主机路径，也可以用下面的快捷路径。');
   } catch (error) {
@@ -922,10 +986,13 @@ function openSessionModal() {
   sessionModalState.previousFocus = document.activeElement;
   sessionModalState.shortcuts = null;
   sessionModalState.loadingShortcuts = false;
-  sessionModalState.pickingWorkspace = false;
   sessionModalState.creatingWorkspace = false;
+  sessionModalState.browserLoading = false;
+  sessionModalState.browserPath = '';
+  sessionModalState.browserParentPath = '';
+  sessionModalState.browserEntries = [];
   sessionNameInput.value = '';
-  sessionWorkspaceInput.value = '';
+  updateSessionWorkspacePath('');
   setSessionModalHint('支持直接输入主机路径，也可以用下面的快捷路径。');
   renderSessionModal();
   sessionModal.classList.add('open');
@@ -935,7 +1002,13 @@ function openSessionModal() {
     sessionModalState.resolve = resolve;
   });
 
-  void loadWorkspaceShortcuts();
+  void (async () => {
+    await loadWorkspaceShortcuts();
+    const defaultPath = sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts);
+    if (defaultPath) {
+      await browseWorkspacePath(defaultPath);
+    }
+  })();
   window.setTimeout(() => {
     sessionNameInput.focus();
   }, 0);
@@ -1682,40 +1755,26 @@ function closeTextModal(value) {
   }
 }
 
-async function pickWorkspaceOnHost() {
-  if (sessionModalState.pickingWorkspace) {
-    return;
-  }
-
-  sessionModalState.pickingWorkspace = true;
+async function browseWorkspacePath(targetPath = '') {
+  sessionModalState.browserLoading = true;
   renderSessionModal();
-  setSessionModalHint('主机正在等待你选择文件夹...');
+  setSessionModalHint('正在加载目录...');
 
   try {
-    const result = await apiFetchJson('/api/workspace/pick', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        initialPath: sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts),
-      }),
-    });
-
-    if (result.path) {
-      sessionWorkspaceInput.value = result.path;
-      if (sessionModalState.shortcuts) {
-        sessionModalState.shortcuts.lastUsedPath = result.path;
-      }
-      setSessionModalHint('已从主机选择工作区。');
-      return;
+    const url = new URL('/api/workspace/list', window.location.origin);
+    if (targetPath) {
+      url.searchParams.set('path', targetPath);
     }
-
-    setSessionModalHint('已取消主机文件夹选择。');
+    const result = await apiFetchJson(url);
+    sessionModalState.browserPath = result.path || '';
+    sessionModalState.browserParentPath = result.parentPath || '';
+    sessionModalState.browserEntries = Array.isArray(result.entries) ? result.entries : [];
+    updateSessionWorkspacePath(sessionModalState.browserPath);
+    setSessionModalHint('已同步目录列表，可继续进入子目录或直接使用当前目录。');
   } catch (error) {
-    setSessionModalHint(`主机文件夹选择失败：${error.message}`, true);
+    setSessionModalHint(`读取目录失败：${error.message}`, true);
   } finally {
-    sessionModalState.pickingWorkspace = false;
+    sessionModalState.browserLoading = false;
     renderSessionModal();
   }
 }
@@ -1725,7 +1784,7 @@ async function createWorkspaceOnHost() {
     return;
   }
 
-  const parentPath = sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts);
+  const parentPath = sessionModalState.browserPath || sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts);
   if (!parentPath) {
     setSessionModalHint('请先输入或选择父目录，再新建文件夹。', true);
     sessionWorkspaceInput.focus();
@@ -1761,11 +1820,12 @@ async function createWorkspaceOnHost() {
     });
 
     if (result.path) {
-      sessionWorkspaceInput.value = result.path;
+      updateSessionWorkspacePath(result.path);
       if (sessionModalState.shortcuts) {
         sessionModalState.shortcuts.lastUsedPath = result.path;
       }
       setSessionModalHint('新工作区文件夹已创建。');
+      await browseWorkspacePath(result.path);
     }
   } catch (error) {
     setSessionModalHint(`创建文件夹失败：${error.message}`, true);
@@ -1838,12 +1898,34 @@ modalCancelBtn.addEventListener('click', () => {
   closeTextModal(null);
 });
 
-pickWorkspaceBtn.addEventListener('click', () => {
-  void pickWorkspaceOnHost();
+browseWorkspaceBtn.addEventListener('click', () => {
+  void browseWorkspacePath(sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts));
+});
+
+workspaceUpBtn.addEventListener('click', () => {
+  if (!sessionModalState.browserParentPath) {
+    return;
+  }
+  void browseWorkspacePath(sessionModalState.browserParentPath);
+});
+
+workspaceRefreshBtn.addEventListener('click', () => {
+  if (!sessionModalState.browserPath) {
+    return;
+  }
+  void browseWorkspacePath(sessionModalState.browserPath);
 });
 
 createWorkspaceBtn.addEventListener('click', () => {
   void createWorkspaceOnHost();
+});
+
+useCurrentWorkspaceBtn.addEventListener('click', () => {
+  if (!sessionModalState.browserPath) {
+    return;
+  }
+  updateSessionWorkspacePath(sessionModalState.browserPath);
+  setSessionModalHint('已选中当前目录。');
 });
 
 sessionModalCancelBtn.addEventListener('click', () => {
@@ -1852,7 +1934,7 @@ sessionModalCancelBtn.addEventListener('click', () => {
 
 sessionModalForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  const cwd = sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts);
+  const cwd = sessionWorkspaceInput.value.trim() || sessionModalState.browserPath || getDefaultWorkspacePath(sessionModalState.shortcuts);
   if (!cwd) {
     setSessionModalHint('请先选择一个工作区目录。', true);
     sessionWorkspaceInput.focus();
@@ -1885,6 +1967,14 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && sessionModalState.resolve) {
     closeSessionModal(null);
   }
+});
+
+sessionWorkspaceInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+    return;
+  }
+  event.preventDefault();
+  void browseWorkspacePath(sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts));
 });
 
 promptInput.addEventListener('keydown', (event) => {
