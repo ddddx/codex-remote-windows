@@ -492,7 +492,7 @@ function setComposerPrefsForThread(threadId, prefs) {
 function buildModelSelectOptions() {
   const options = [{
     value: '',
-    label: state.composerModelDefault ? `默认（${state.composerModelDefault}）` : '默认',
+    label: state.composerModelDefault ? `跟随当前配置（${state.composerModelDefault}）` : '跟随当前配置',
   }];
 
   for (const model of state.availableModels) {
@@ -502,7 +502,7 @@ function buildModelSelectOptions() {
     }
     options.push({
       value,
-      label: model.displayName ? `${model.displayName}${model.isDefault ? '（默认）' : ''}` : value,
+      label: model.displayName || value,
     });
   }
 
@@ -525,8 +525,8 @@ function buildEffortSelectOptions() {
     : REASONING_EFFORT_OPTIONS;
   const finalEfforts = supportedEfforts.length ? supportedEfforts : REASONING_EFFORT_OPTIONS;
   const defaultLabel = state.composerEffortDefault
-    ? `默认（${formatReasoningEffortLabel(state.composerEffortDefault)}）`
-    : '默认';
+    ? `跟随当前配置（${formatReasoningEffortLabel(state.composerEffortDefault)}）`
+    : '跟随当前配置';
   return [{
     value: '',
     label: defaultLabel,
