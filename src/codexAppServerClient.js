@@ -129,6 +129,14 @@ class CodexAppServerClient extends EventEmitter {
     return result.thread;
   }
 
+  async resumeThread(threadId, options = {}) {
+    const result = await this.request('thread/resume', {
+      threadId,
+      excludeTurns: options.excludeTurns === true,
+    });
+    return result.thread;
+  }
+
   async startTurn(threadId, text) {
     const result = await this.request('turn/start', {
       threadId,

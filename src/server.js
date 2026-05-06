@@ -381,7 +381,7 @@ async function ensureWindowForThread(threadId) {
 
 async function syncThreadToClients(ws, threadId) {
   assertThreadId(threadId);
-  const thread = await codex.readThread(threadId);
+  const thread = await codex.resumeThread(threadId);
   const tab = ensureTab(thread);
   send(ws, { type: 'tab_updated', tab });
   send(ws, { type: 'thread_sync', threadId, turns: thread.turns || [] });
