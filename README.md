@@ -42,22 +42,49 @@ pm2 start start-web.js --name cc-web
 
 ## 配置
 
-可用环境变量：
+默认会优先读取项目根目录下的 `config.local.json`；如果同名环境变量已设置，则环境变量优先级更高。
+
+可用配置项 / 环境变量：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `PORT` | `8787` | Web 控制端端口 |
-| `CODEX_HOME` | `./.codex-home` | Codex 配置目录 |
+| `CODEX_HOME` | Codex 默认目录 | 可选；仅在你想强制切换到另一套 Codex 数据目录时设置 |
 | `CODEX_CMD` | `codex.cmd` | Codex CLI 路径 |
 | `CODEX_APP_SERVER_WS` | `ws://127.0.0.1:4792` | app-server WebSocket 地址 |
+| `WS_TOKEN` | 空 | WebSocket 鉴权 token；设置后，控制端连接必须携带同值 |
 
-示例：
+本地配置文件示例：
+
+```json
+{
+  "PORT": 8787,
+  "CODEX_CMD": "codex.cmd",
+  "CODEX_APP_SERVER_WS": "ws://127.0.0.1:4792",
+  "WS_TOKEN": "your-secret-token"
+}
+```
+
+默认不设置 `CODEX_HOME`，这样远程控制的就是你平时在本机直接使用的那套 Codex。只有需要强制隔离时，才额外加上 `CODEX_HOME`。
+
+仓库里提供了模板文件 `config.local.example.json`，实际生效的是你本机的 `config.local.json`。
+
+也可以继续使用环境变量覆盖：
 
 ```powershell
 $env:CODEX_CMD='C:\path\to\codex.cmd'
 $env:PORT='9000'
+$env:WS_TOKEN='your-secret-token'
 node start-web.js
 ```
+
+如果设置了 `WS_TOKEN`，访问控制端时可直接带上查询参数：
+
+```text
+http://<本机IP>:8787/?token=your-secret-token
+```
+
+如果没有带上，或浏览器里缓存的是旧 token，页面右上角的 `Token` / `设置 Token` 按钮可直接更新并重连。
 
 ## 远程访问（手机）
 

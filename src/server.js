@@ -7,6 +7,9 @@ const { WebSocketServer } = require('ws');
 
 const { CodexAppServerClient } = require('./codexAppServerClient');
 const { CodexWindowManager } = require('./windowManager');
+const { applyLocalConfig } = require('./localConfig');
+
+applyLocalConfig();
 
 const PORT = Number.parseInt(process.env.PORT || '8787', 10);
 const WS_TOKEN = process.env.WS_TOKEN || '';
@@ -40,6 +43,7 @@ const windows = new CodexWindowManager({});
 
 const tabs = new Map();
 const closedTabTimers = new Map();
+const pendingWindowOpens = new Map();
 let shuttingDown = false;
 
 server.on('upgrade', (request, socket, head) => {
@@ -312,7 +316,15 @@ async function ensureWindowForThread(threadId) {
     windows.clearPid(threadId);
   }
 
-  const newPid = await windows.openWindow(threadId);
+  let pendingOpen = pendingWindowOpens.get(threadId);
+  if (!pendingOpen) {
+    pendingOpen = windows.openWindow(threadId).finally(() => {
+      pendingWindowOpens.delete(threadId);
+    });
+    pendingWindowOpens.set(threadId, pendingOpen);
+  }
+
+  const newPid = await pendingOpen;
   if (!tab) {
     return;
   }
@@ -630,8 +642,7 @@ wss.on('connection', (ws, request) => {
         const tab = ensureTab(thread);
 
         try {
-          const pid = await windows.openWindow(thread.id);
-          tab.windowPid = pid;
+          await ensureWindowForThread(thread.id);
         } catch (error) {
           send(ws, {
             type: 'warning',

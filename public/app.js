@@ -24,9 +24,22 @@ function clearReconnectTimer() {
 function markAuthFailed(message) {
   clearReconnectTimer();
   reconnectAttempt = 0;
+  const changed = !state.authFailed || state.connectionError !== message;
   state.authFailed = true;
   state.connectionError = message;
-  render();
+  if (changed) {
+    render();
+  }
+  if (!modalState.resolve) {
+    void promptForWebSocketToken({
+      title: 'WebSocket 鉴权失败',
+      label: '访问 Token',
+      placeholder: '请输入服务端配置的 WS_TOKEN',
+      defaultValue: getWebSocketToken(),
+      confirmText: '保存并重连',
+      inputType: 'password',
+    });
+  }
 }
 
 function clearConnectionError() {
@@ -53,6 +66,76 @@ function getWebSocketToken() {
   } catch (_error) {
     return queryToken || '';
   }
+}
+
+function setWebSocketToken(token) {
+  const normalized = typeof token === 'string' ? token.trim() : '';
+  try {
+    if (normalized) {
+      window.localStorage.setItem(WEBSOCKET_TOKEN_STORAGE_KEY, normalized);
+    } else {
+      window.localStorage.removeItem(WEBSOCKET_TOKEN_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // Ignore storage failures and still keep the token in the URL.
+  }
+
+  try {
+    const nextUrl = new URL(window.location.href);
+    if (normalized) {
+      nextUrl.searchParams.set('token', normalized);
+    } else {
+      nextUrl.searchParams.delete('token');
+    }
+    window.history.replaceState(null, '', nextUrl);
+  } catch (_error) {
+    // Ignore URL rewrite failures.
+  }
+
+  return normalized;
+}
+
+function disconnectSocket() {
+  const socket = window._ws;
+  window._ws = null;
+  if (!socket) {
+    return;
+  }
+
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onclose = null;
+  socket.onerror = null;
+  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+    socket.close();
+  }
+}
+
+function reconnectNow() {
+  clearReconnectTimer();
+  reconnectAttempt = 0;
+  disconnectSocket();
+  connect();
+}
+
+async function promptForWebSocketToken(options = {}) {
+  const token = await openTextModal({
+    title: options.title || '设置 WebSocket Token',
+    label: options.label || '访问 Token',
+    placeholder: options.placeholder || '请输入服务端配置的 WS_TOKEN',
+    defaultValue: options.defaultValue ?? getWebSocketToken(),
+    confirmText: options.confirmText || '保存并重连',
+    inputType: options.inputType || 'password',
+  });
+
+  if (token === null) {
+    return false;
+  }
+
+  setWebSocketToken(token);
+  clearConnectionError();
+  reconnectNow();
+  return true;
 }
 
 function scheduleReconnect() {
@@ -126,12 +209,14 @@ const composer = document.getElementById('composer');
 const promptInput = document.getElementById('promptInput');
 const composerSubmitBtn = composer.querySelector('button[type="submit"]');
 const activeTitle = document.getElementById('activeTitle');
+const tokenBtn = document.getElementById('tokenBtn');
 const activeStatus = document.getElementById('activeStatus');
 const mainArea = document.querySelector('.main-area');
 const tabTpl = document.getElementById('tabTpl');
 const textModal = document.getElementById('textModal');
 const textModalForm = document.getElementById('textModalForm');
 const modalTitle = document.getElementById('modalTitle');
+const modalLabel = document.getElementById('modalLabel');
 const modalInput = document.getElementById('modalInput');
 const modalCancelBtn = document.getElementById('modalCancelBtn');
 const modalConfirmBtn = document.getElementById('modalConfirmBtn');
@@ -144,6 +229,7 @@ const state = {
   turnActiveByThread: new Map(),
   unreadThreadIds: new Set(),
   pendingUserMessages: new Map(),
+  creatingTab: false,
   authFailed: false,
   connectionError: '',
 };
@@ -222,11 +308,15 @@ function ensureMessageDomMap(threadKey) {
   return messageDomByThread.get(threadKey);
 }
 
-function registerPendingUserMessage(clientMessageId, threadId, itemId) {
+function registerPendingUserMessage(clientMessageId, threadId, itemId, text) {
   if (!clientMessageId) {
     return;
   }
-  state.pendingUserMessages.set(clientMessageId, { threadId, itemId });
+  state.pendingUserMessages.set(clientMessageId, {
+    threadId,
+    itemId,
+    text: typeof text === 'string' ? text.trim() : '',
+  });
 }
 
 function removeItemById(threadId, itemId) {
@@ -265,6 +355,43 @@ function removePendingUserMessagesForThread(threadId) {
     if (pending.threadId === threadId) {
       state.pendingUserMessages.delete(clientMessageId);
     }
+  }
+}
+
+function getUserMessageText(item) {
+  if (!item || item.type !== 'userMessage') {
+    return '';
+  }
+
+  return (item.content || [])
+    .filter((entry) => entry.type === 'text')
+    .map((entry) => entry.text)
+    .join('\n')
+    .trim();
+}
+
+function reconcilePendingUserMessage(threadId, item) {
+  const text = getUserMessageText(item);
+  if (!text) {
+    return false;
+  }
+
+  for (const [clientMessageId, pending] of state.pendingUserMessages.entries()) {
+    if (pending.threadId !== threadId || pending.text !== text) {
+      continue;
+    }
+
+    state.pendingUserMessages.delete(clientMessageId);
+    removeItemById(threadId, pending.itemId);
+    return true;
+  }
+
+  return false;
+}
+
+function reconcilePendingUserMessagesFromSync(threadId, items) {
+  for (const item of items) {
+    reconcilePendingUserMessage(threadId, item);
   }
 }
 
@@ -337,7 +464,8 @@ function markTabClosedLocally(threadId) {
   return true;
 }
 
-function setActiveTab(threadId) {
+function setActiveTab(threadId, options = {}) {
+  const { skipSync = false } = options;
   if (!threadId) {
     return;
   }
@@ -355,7 +483,7 @@ function setActiveTab(threadId) {
 
   state.activeThreadId = threadId;
   state.unreadThreadIds.delete(threadId);
-  if (!send({ type: 'thread_sync', threadId })) {
+  if (!skipSync && !send({ type: 'thread_sync', threadId })) {
     const items = ensureItems(threadId);
     items.push({
       type: '_warning',
@@ -373,6 +501,8 @@ function syncTurns(threadId, turns) {
       syncedItems.push(item);
     }
   }
+
+  reconcilePendingUserMessagesFromSync(threadId, syncedItems);
 
   const existing = state.itemsByThread.get(threadId) || [];
   const syncedIds = new Set(syncedItems.map((item) => item.id));
@@ -553,10 +683,18 @@ function normalizeTabStatus(status) {
 function renderHeader() {
   const tab = state.tabs.find((entry) => entry.threadId === state.activeThreadId);
   activeTitle.textContent = tab ? (tab.name || 'New Tab') : 'Codex Remote Control';
+  tokenBtn.textContent = state.authFailed ? '设置 Token' : 'Token';
+  tokenBtn.classList.toggle('btn-alert', state.authFailed);
 
   if (state.authFailed) {
     activeStatus.textContent = '鉴权失败';
     activeStatus.className = 'status-badge failed';
+    return;
+  }
+
+  if (state.creatingTab) {
+    activeStatus.textContent = '创建中';
+    activeStatus.className = 'status-badge running';
     return;
   }
 
@@ -579,7 +717,7 @@ function renderComposer() {
   promptInput.disabled = disabled;
   composerSubmitBtn.disabled = disabled;
   promptInput.placeholder = disabled
-    ? 'WebSocket 鉴权失败，请检查 token 后刷新页面。'
+    ? 'WebSocket 鉴权失败，请点击右上角“设置 Token”。'
     : DEFAULT_PROMPT_PLACEHOLDER;
 }
 
@@ -641,6 +779,14 @@ function buildMessageEntries(threadId) {
   if (!threadId) {
     if (connectionEntries.length) {
       return connectionEntries;
+    }
+    if (state.creatingTab) {
+      return [{
+        key: 'creating',
+        kind: 'empty',
+        text: '正在新建会话并拉起本地 Codex 窗口...',
+        signature: 'creating',
+      }];
     }
     return [{
       key: 'empty',
@@ -886,8 +1032,15 @@ function commandStatusIcon(status) {
 function render() {
   renderTabs();
   renderHeader();
+  renderNewTabButton();
   renderComposer();
   renderMessages();
+}
+
+function renderNewTabButton() {
+  newTabBtn.disabled = state.creatingTab || state.authFailed;
+  newTabBtn.classList.toggle('is-loading', state.creatingTab);
+  newTabBtn.textContent = state.creatingTab ? '创建中...' : '+ 新建标签';
 }
 
 function openTextModal(options = {}) {
@@ -897,8 +1050,10 @@ function openTextModal(options = {}) {
 
   modalState.previousFocus = document.activeElement;
   modalTitle.textContent = options.title || '输入';
+  modalLabel.textContent = options.label || '输入内容';
   modalInput.value = options.defaultValue || '';
   modalInput.placeholder = options.placeholder || '';
+  modalInput.type = options.inputType || 'text';
   modalConfirmBtn.textContent = options.confirmText || '确定';
   textModal.classList.add('open');
   textModal.setAttribute('aria-hidden', 'false');
@@ -950,21 +1105,43 @@ mainArea.addEventListener('click', (event) => {
 });
 
 newTabBtn.addEventListener('click', async () => {
+  if (state.creatingTab) {
+    return;
+  }
+
   const name = await openTextModal({
     title: '新建标签',
+    label: '标签名称',
     placeholder: '可留空',
     confirmText: '创建',
+    inputType: 'text',
   });
 
   if (name === null) {
     return;
   }
 
-  send({ type: 'tab_create', name });
+  state.creatingTab = true;
+  render();
+  if (!send({ type: 'tab_create', name })) {
+    state.creatingTab = false;
+    render();
+    return;
+  }
   if (window.innerWidth <= 680) {
     sidebar.classList.add('hidden');
     mainArea.classList.add('full');
   }
+});
+
+tokenBtn.addEventListener('click', async () => {
+  await promptForWebSocketToken({
+    title: '设置 WebSocket Token',
+    label: '访问 Token',
+    placeholder: '请输入服务端配置的 WS_TOKEN',
+    confirmText: '保存并重连',
+    inputType: 'password',
+  });
 });
 
 textModalForm.addEventListener('submit', (event) => {
@@ -988,6 +1165,15 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
+promptInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+    return;
+  }
+
+  event.preventDefault();
+  composer.requestSubmit();
+});
+
 composer.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = promptInput.value.trim();
@@ -1004,7 +1190,7 @@ composer.addEventListener('submit', (event) => {
     id: localMessageId,
     content: [{ type: 'text', text }],
   });
-  registerPendingUserMessage(clientMessageId, threadId, localMessageId);
+  registerPendingUserMessage(clientMessageId, threadId, localMessageId, text);
 
   state.turnActiveByThread.set(threadId, true);
   if (!send({ type: 'turn_send', threadId, text, clientMessageId })) {
@@ -1047,10 +1233,11 @@ function handleMessage(msg) {
   }
 
   if (msg.type === 'tab_created') {
+    state.creatingTab = false;
     if (msg.tab) {
       upsertTab(msg.tab);
     }
-    setActiveTab(msg.threadId || msg.tab?.threadId || null);
+    setActiveTab(msg.threadId || msg.tab?.threadId || null, { skipSync: true });
     return;
   }
 
@@ -1100,6 +1287,7 @@ function handleMessage(msg) {
   if (msg.type === 'item_started') {
     const items = ensureItems(msg.threadId);
     const item = msg.item;
+    reconcilePendingUserMessage(msg.threadId, item);
     if (item && item.id && !items.find((entry) => entry.id === item.id)) {
       items.push({ ...item, _partial: true });
     }
@@ -1110,6 +1298,7 @@ function handleMessage(msg) {
   }
 
   if (msg.type === 'item_completed') {
+    reconcilePendingUserMessage(msg.threadId, msg.item);
     finalizeItem(msg.threadId, msg.item);
     if (msg.threadId === state.activeThreadId) {
       renderMessages();
@@ -1147,6 +1336,9 @@ function handleMessage(msg) {
   }
 
   if (msg.type === 'error') {
+    if (state.creatingTab && !msg.threadId && !msg.op) {
+      state.creatingTab = false;
+    }
     if (msg.code === 'AUTH_FAILED') {
       markAuthFailed(msg.message || 'WebSocket 鉴权失败，请检查 token 是否正确。');
       return;

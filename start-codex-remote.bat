@@ -11,12 +11,10 @@ if errorlevel 1 (
 ) else (
   set "CODEX_CMD=codex.cmd"
 )
-set "CODEX_HOME=%ROOT%.codex-home"
 set "NPM_CACHE=%ROOT%.npm-cache"
 set "CODEX_APP_SERVER_WS=ws://127.0.0.1:4792"
 set "PORT=8787"
 
-if not exist "%CODEX_HOME%" mkdir "%CODEX_HOME%"
 if not exist "%NPM_CACHE%" mkdir "%NPM_CACHE%"
 
 where node >nul 2>nul
@@ -32,7 +30,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT%.*LISTENING"') do tas
 ping -n 2 127.0.0.1 >nul
 
 echo Starting Codex app-server on 127.0.0.1:4792 ...
-start "Codex AppServer 4792" cmd /k "set "CODEX_HOME=%CODEX_HOME%" && "%CODEX_CMD%" app-server --listen ws://127.0.0.1:4792"
+start "Codex AppServer 4792" cmd /k ""%CODEX_CMD%" app-server --listen ws://127.0.0.1:4792"
 
 :: Wait for app-server
 set "APP_READY="
@@ -52,7 +50,7 @@ if not defined APP_READY (
 echo [OK] app-server listening on 4792.
 
 echo Starting Web controller on 127.0.0.1:%PORT% ...
-start "Codex Web 8787" cmd /k "cd /d "%ROOT%" && set "npm_config_cache=%NPM_CACHE%" && set "CODEX_APP_SERVER_WS=%CODEX_APP_SERVER_WS%" && set "PORT=%PORT%" && set "CODEX_HOME=%CODEX_HOME%" && node src/server.js"
+start "Codex Web 8787" cmd /k "cd /d "%ROOT%" && set "npm_config_cache=%NPM_CACHE%" && set "CODEX_APP_SERVER_WS=%CODEX_APP_SERVER_WS%" && set "PORT=%PORT%" && node src/server.js"
 
 :: Wait for web server
 set "WEB_READY="

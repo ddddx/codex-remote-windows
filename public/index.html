@@ -22,6 +22,7 @@
         <header class="topbar">
           <button id="menuBtn" class="btn-icon">☰</button>
           <h1 id="activeTitle">Codex Remote Control</h1>
+          <button id="tokenBtn" class="btn btn-secondary btn-inline" type="button">Token</button>
           <span id="activeStatus" class="status-badge"></span>
         </header>
 
@@ -40,7 +41,7 @@
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <form id="textModalForm">
           <h2 id="modalTitle" class="modal-title">新建标签</h2>
-          <label class="modal-label" for="modalInput">标签名称</label>
+          <label id="modalLabel" class="modal-label" for="modalInput">标签名称</label>
           <input id="modalInput" class="modal-input" type="text" maxlength="120" placeholder="可留空" />
           <div class="modal-actions">
             <button id="modalCancelBtn" class="btn btn-secondary" type="button">取消</button>

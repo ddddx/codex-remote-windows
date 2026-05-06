@@ -265,8 +265,19 @@ body {
   font-size: 13px;
 }
 
+.btn-inline {
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+
 .btn:hover {
   filter: brightness(1.05);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  filter: none;
 }
 
 .btn-secondary {
@@ -277,6 +288,20 @@ body {
 
 .btn-secondary:hover {
   background: #ede3d4;
+}
+
+.btn-alert {
+  background: #fff2df;
+  border-color: #edc47c;
+  color: #8a4b10;
+}
+
+.btn-alert:hover {
+  background: #ffe7c0;
+}
+
+.btn.is-loading {
+  position: relative;
 }
 
 .panel {

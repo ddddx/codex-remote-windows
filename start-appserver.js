@@ -1,4 +1,7 @@
 const { spawn } = require('child_process');
+const { applyLocalConfig } = require('./src/localConfig');
+
+applyLocalConfig();
 
 const CODEX_CMD = process.env.CODEX_CMD || 'codex.cmd';
 const APP_SERVER_WS = process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:4792';
