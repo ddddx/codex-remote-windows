@@ -264,7 +264,8 @@ const SLASH_COMMANDS = [
   { name: '/close', aliases: ['/close-session'], title: '关闭会话', description: '关闭当前会话', action: 'close_session' },
   { name: '/refresh', aliases: ['/sync'], title: '刷新会话', description: '重新同步当前会话消息', action: 'refresh_session' },
   { name: '/reconnect', aliases: ['/retry-connection'], title: '重新连接', description: '重连 WebSocket 并刷新会话状态', action: 'reconnect_socket' },
-  { name: '/approvals', aliases: ['/approval', '/pending'], title: '待批准', description: '定位当前会话的待处理请求', action: 'show_approvals' },
+  { name: '/permissions', aliases: ['/approvals', '/approval', '/mode'], title: '权限模式', description: '查看或切换批准策略（当前网页端暂未实现）', action: 'show_permission_settings' },
+  { name: '/pending', aliases: ['/requests'], title: '待处理请求', description: '定位当前会话的待批准请求', action: 'show_approvals' },
   { name: '/approve', aliases: ['/allow'], title: '批准', description: '批准当前会话最新待处理请求', action: 'approve_latest' },
   { name: '/approve-session', aliases: ['/allow-session'], title: '本会话允许', description: '本会话内持续允许当前待处理请求', action: 'approve_latest_for_session' },
   { name: '/deny', aliases: ['/reject'], title: '拒绝', description: '拒绝当前会话最新待处理请求', action: 'deny_latest' },
@@ -1071,6 +1072,18 @@ function executeSlashCommand(command) {
   if (command.action === 'reconnect_socket') {
     closeSlashMenu();
     reconnectNow();
+    return true;
+  }
+  if (command.action === 'show_permission_settings') {
+    closeSlashMenu();
+    if (!state.activeThreadId) {
+      return false;
+    }
+    addThreadNotice(
+      state.activeThreadId,
+      '当前网页端还没接入批准策略/沙箱模式切换；现在只支持处理单条批准请求。可用 /pending 定位待处理请求。',
+    );
+    render();
     return true;
   }
   if (command.action === 'show_approvals') {
