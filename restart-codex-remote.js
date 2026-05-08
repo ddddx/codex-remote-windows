@@ -15,6 +15,12 @@ const APP_SERVER_PORT = Number.parseInt(new URL(APP_SERVER_WS).port || '4792', 1
 const ports = Array.from(new Set([APP_SERVER_PORT, PORT].filter(Number.isFinite)));
 const CODEX_CMD = process.env.CODEX_CMD || 'codex.cmd';
 const SHUTDOWN_TIMEOUT_MS = 10000;
+const RESTART_BASE_DELAY_MS = parsePositiveIntegerEnv(process.env.RESTART_BASE_DELAY_MS, 1000);
+const RESTART_MAX_DELAY_MS = Math.max(
+  RESTART_BASE_DELAY_MS,
+  parsePositiveIntegerEnv(process.env.RESTART_MAX_DELAY_MS, 30000)
+);
+const RESTART_RESET_WINDOW_MS = parsePositiveIntegerEnv(process.env.RESTART_RESET_WINDOW_MS, 60000);
 const LOG_DIR = path.join(process.cwd(), '.codex-remote-logs');
 const SESSION_TAG = new Date().toISOString().replace(/[:.]/g, '-');
 const LOG_FILE = path.join(LOG_DIR, `${SESSION_TAG}-${MODE}.log`);
@@ -38,6 +44,11 @@ function stringifyLogPart(value) {
   } catch {
     return String(value);
   }
+}
+
+function parsePositiveIntegerEnv(value, fallback) {
+  const parsed = Number.parseInt(value || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function writeLog(scope, ...parts) {
@@ -201,77 +212,13 @@ function runWebOnly() {
 function runCombined() {
   let shuttingDown = false;
   let exitCode = 0;
+  let appServer = null;
   let webServer = null;
-
-  const appServer = spawn(
-    'cmd.exe',
-    ['/c', CODEX_CMD, 'app-server', '--listen', APP_SERVER_WS],
-    {
-      env: process.env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }
-  );
-
-  attachChildLogging(appServer, 'appserver');
-  appServer.on('exit', (code, signal) => {
-    console.log(`[appserver] exited with code ${code}, signal ${signal || 'none'}`);
-    writeLog('appserver', `exit code=${code} signal=${signal || 'none'}`);
-    handleChildExit('appserver', code);
-  });
-
-  waitForPort(APP_SERVER_PORT, 30).then(() => {
-    if (shuttingDown) {
-      return;
-    }
-
-    console.log(`[appserver] ready on ${APP_SERVER_PORT}`);
-    writeLog('appserver', `ready on ${APP_SERVER_PORT}`);
-    webServer = fork(
-      path.join(__dirname, 'src', 'server.js'),
-      [],
-      {
-        env: {
-          ...process.env,
-          CODEX_APP_SERVER_WS: APP_SERVER_WS,
-          PORT: String(PORT),
-        },
-        silent: true,
-      }
-    );
-
-    attachChildLogging(webServer, 'web');
-    webServer.on('exit', (code, signal) => {
-      console.log(`[web] exited with code ${code}, signal ${signal || 'none'}`);
-      writeLog('web', `exit code=${code} signal=${signal || 'none'}`);
-      handleChildExit('web', code);
-    });
-    webServer.on('disconnect', () => {
-      writeLog('web', 'ipc disconnected');
-    });
-  }).catch((error) => {
-    if (shuttingDown && error.message === 'shutdown') {
-      return;
-    }
-    console.error('[appserver] failed to start:', error.message);
-    writeLog('appserver', `failed to start: ${error.stack || error.message}`);
-    exitCode = 1;
-    void shutdown('startup_failure');
-  });
-
-  function handleChildExit(name, code) {
-    if (name === 'web') {
-      webServer = null;
-    }
-
-    if (shuttingDown) {
-      maybeExit();
-      return;
-    }
-
-    exitCode = code || 1;
-    void shutdown(`${name}_exit`);
-  }
+  let activeCycle = 0;
+  let restartTimer = null;
+  let pendingRestartKind = '';
+  let restartAttempt = 0;
+  let lastRestartAt = 0;
 
   function stopChild(child, name) {
     if (!child) {
@@ -289,12 +236,179 @@ function runCombined() {
     }
   }
 
+  function isChildRunning(child) {
+    return !!child && child.exitCode === null && child.signalCode === null;
+  }
+
+  function stopActiveChildren() {
+    stopChild(webServer, 'web');
+    stopChild(appServer, 'appserver');
+  }
+
+  function computeRestartDelay() {
+    const now = Date.now();
+    if ((now - lastRestartAt) > RESTART_RESET_WINDOW_MS) {
+      restartAttempt = 0;
+    }
+    restartAttempt += 1;
+    lastRestartAt = now;
+    return Math.min(
+      RESTART_BASE_DELAY_MS * Math.pow(2, Math.max(0, restartAttempt - 1)),
+      RESTART_MAX_DELAY_MS
+    );
+  }
+
+  function getRestartPriority(kind) {
+    return kind === 'stack' ? 2 : 1;
+  }
+
+  function startWebServer(cycleId, reason) {
+    if (shuttingDown || activeCycle !== cycleId || !isChildRunning(appServer)) {
+      return;
+    }
+
+    console.log(`[web] starting (${reason})`);
+    writeLog('web', `starting cycle=${cycleId} reason=${reason}`);
+    const nextWebServer = fork(
+      path.join(__dirname, 'src', 'server.js'),
+      [],
+      {
+        env: {
+          ...process.env,
+          CODEX_APP_SERVER_WS: APP_SERVER_WS,
+          PORT: String(PORT),
+        },
+        silent: true,
+      }
+    );
+    webServer = nextWebServer;
+
+    attachChildLogging(nextWebServer, 'web');
+    nextWebServer.on('exit', (code, signal) => {
+      console.log(`[web] exited with code ${code}, signal ${signal || 'none'}`);
+      writeLog('web', `exit code=${code} signal=${signal || 'none'}`);
+      if (activeCycle !== cycleId || webServer !== nextWebServer) {
+        writeLog('supervisor', `ignore stale web exit cycle=${cycleId}`);
+        return;
+      }
+
+      webServer = null;
+      if (shuttingDown) {
+        maybeExit();
+        return;
+      }
+      scheduleRestart('web', 'web_exit', code);
+    });
+    nextWebServer.on('disconnect', () => {
+      writeLog('web', 'ipc disconnected');
+    });
+  }
+
+  function scheduleRestart(kind, reason, code) {
+    if (shuttingDown) {
+      return;
+    }
+    if (restartTimer) {
+      if (getRestartPriority(kind) <= getRestartPriority(pendingRestartKind)) {
+        writeLog('supervisor', `restart already scheduled kind=${pendingRestartKind}, ignore kind=${kind} reason=${reason}`);
+        return;
+      }
+
+      clearTimeout(restartTimer);
+      restartTimer = null;
+      writeLog('supervisor', `restart upgraded from kind=${pendingRestartKind} to kind=${kind} reason=${reason}`);
+    }
+
+    pendingRestartKind = kind;
+    exitCode = code || 1;
+    const delay = computeRestartDelay();
+    console.error(`[supervisor] ${reason}; restarting ${kind} in ${delay}ms`);
+    writeLog('supervisor', `restart scheduled kind=${kind} reason=${reason} delay_ms=${delay} attempt=${restartAttempt}`);
+    if (kind === 'web') {
+      stopChild(webServer, 'web');
+    } else {
+      stopActiveChildren();
+    }
+
+    restartTimer = setTimeout(() => {
+      const restartKind = pendingRestartKind;
+      restartTimer = null;
+      pendingRestartKind = '';
+      if (shuttingDown) {
+        return;
+      }
+
+      if (restartKind === 'web') {
+        startWebServer(activeCycle, `restart:${reason}`);
+        return;
+      }
+
+      startCycle(`restart:${reason}`);
+    }, delay);
+  }
+
   function maybeExit() {
-    const appExited = appServer.exitCode !== null || appServer.signalCode !== null;
-    const webExited = !webServer || webServer.exitCode !== null || webServer.signalCode !== null;
+    const appExited = !isChildRunning(appServer);
+    const webExited = !isChildRunning(webServer);
     if (appExited && webExited) {
       process.exit(exitCode);
     }
+  }
+
+  function startCycle(reason) {
+    if (shuttingDown) {
+      return;
+    }
+
+    const cycleId = activeCycle + 1;
+    activeCycle = cycleId;
+    console.log(`[supervisor] starting services (${reason})`);
+    writeLog('supervisor', `starting cycle=${cycleId} reason=${reason}`);
+
+    const nextAppServer = spawn(
+      'cmd.exe',
+      ['/c', CODEX_CMD, 'app-server', '--listen', APP_SERVER_WS],
+      {
+        env: process.env,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+    );
+    appServer = nextAppServer;
+
+    attachChildLogging(nextAppServer, 'appserver');
+    nextAppServer.on('exit', (code, signal) => {
+      console.log(`[appserver] exited with code ${code}, signal ${signal || 'none'}`);
+      writeLog('appserver', `exit code=${code} signal=${signal || 'none'}`);
+      if (activeCycle !== cycleId || appServer !== nextAppServer) {
+        writeLog('supervisor', `ignore stale appserver exit cycle=${cycleId}`);
+        return;
+      }
+
+      appServer = null;
+      if (shuttingDown) {
+        maybeExit();
+        return;
+      }
+      scheduleRestart('stack', 'appserver_exit', code);
+    });
+
+    waitForPort(APP_SERVER_PORT, 30).then(() => {
+      if (shuttingDown || activeCycle !== cycleId || !isChildRunning(nextAppServer)) {
+        return;
+      }
+
+      console.log(`[appserver] ready on ${APP_SERVER_PORT}`);
+      writeLog('appserver', `ready on ${APP_SERVER_PORT}`);
+      startWebServer(cycleId, 'appserver_ready');
+    }).catch((error) => {
+      if (shuttingDown || activeCycle !== cycleId || !isChildRunning(nextAppServer)) {
+        return;
+      }
+      console.error('[appserver] failed to start:', error.message);
+      writeLog('appserver', `failed to start: ${error.stack || error.message}`);
+      scheduleRestart('stack', 'startup_failure', 1);
+    });
   }
 
   async function shutdown(reason) {
@@ -303,18 +417,21 @@ function runCombined() {
     }
 
     shuttingDown = true;
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
     writeLog('shutdown', `reason=${reason}`);
     if (reason === 'SIGINT' || reason === 'SIGTERM') {
       exitCode = 0;
     }
 
     console.log(`[shutdown] stopping processes (${reason})`);
-    stopChild(webServer, 'web');
-    stopChild(appServer, 'appserver');
+    stopActiveChildren();
 
     setTimeout(() => {
-      const appExited = appServer.exitCode !== null || appServer.signalCode !== null;
-      const webExited = !webServer || webServer.exitCode !== null || webServer.signalCode !== null;
+      const appExited = !isChildRunning(appServer);
+      const webExited = !isChildRunning(webServer);
       if (!appExited || !webExited) {
         console.error('[shutdown] forcing exit after timeout');
         writeLog('shutdown', 'forcing exit after timeout');
@@ -332,6 +449,8 @@ function runCombined() {
   process.on('SIGTERM', () => {
     void shutdown('SIGTERM');
   });
+
+  startCycle('initial');
 }
 
 function printUsageAndExit() {
