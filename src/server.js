@@ -1060,6 +1060,8 @@ function createServerRequestRecord(msg) {
       itemId: params.itemId || null,
       reason: params.reason || '',
       grantRoot: params.grantRoot || null,
+      patch: typeof params.patch === 'string' ? params.patch : '',
+      changes: Array.isArray(params.changes) ? params.changes : [],
     };
   }
 
@@ -1253,6 +1255,20 @@ codex.on('notification', (msg) => {
   }
 
   if (STREAM_ITEM_DELTA_METHODS.has(method)) {
+    if (method === 'item/fileChange/patchUpdated') {
+      const requestId = params.requestId != null ? String(params.requestId) : '';
+      const request = requestId ? getPendingServerRequest(requestId) : null;
+      if (request && (request.kind === 'file_change_approval' || request.kind === 'file_change_approval_legacy')) {
+        updatePendingServerRequest(requestId, {
+          patch: typeof params.patch === 'string' ? params.patch : (request.patch || ''),
+          changes: Array.isArray(params.changes) ? params.changes : (request.changes || []),
+        });
+        broadcast({
+          type: 'server_request_updated',
+          request: toClientServerRequest(getPendingServerRequest(requestId)),
+        });
+      }
+    }
     broadcast({
       type: 'item_delta',
       method,

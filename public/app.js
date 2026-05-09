@@ -192,9 +192,13 @@ function connect() {
     reconnectAttempt = 0;
     clearReconnectTimer();
     clearConnectionError();
+    const cleared = clearTransientConnectionNotices();
     void loadComposerOptions({ render: false });
     if (state.activeThreadId) {
       send({ type: 'thread_sync', threadId: state.activeThreadId });
+    }
+    if (cleared) {
+      renderMessages();
     }
   };
 
@@ -1815,6 +1819,7 @@ function submitTurnMessage(threadId, text, attachments, options = {}) {
     return false;
   }
 
+  clearTransientConnectionNotices(threadId);
   const clientMessageId = createLocalId('turn');
   const localMessageId = createLocalId('local');
   const content = buildComposerMessageContent(text, attachments);
@@ -1823,6 +1828,7 @@ function submitTurnMessage(threadId, text, attachments, options = {}) {
     type: 'userMessage',
     id: localMessageId,
     content,
+    createdAt: Date.now(),
   });
   registerPendingUserMessage(clientMessageId, threadId, localMessageId, content);
 
@@ -1850,6 +1856,7 @@ function submitTurnMessage(threadId, text, attachments, options = {}) {
       type: '_error',
       id: createLocalId('send'),
       text: '消息发送失败：WebSocket 未连接，请稍后重试。',
+      _localNoticeCode: 'send_disconnected',
     });
     autoResizePromptInput();
     render();
@@ -1960,6 +1967,32 @@ function ensureItems(threadId) {
     state.itemsByThread.set(threadId, []);
   }
   return state.itemsByThread.get(threadId);
+}
+
+function isTransientConnectionNotice(item) {
+  return !!item
+    && (item.type === '_error' || item.type === '_warning')
+    && (item._localNoticeCode === 'send_disconnected' || item._localNoticeCode === 'ws_reconnecting');
+}
+
+function clearTransientConnectionNotices(threadId = null) {
+  let changed = false;
+  const targets = threadId
+    ? [[threadId, state.itemsByThread.get(threadId) || []]]
+    : Array.from(state.itemsByThread.entries());
+
+  for (const [targetThreadId, items] of targets) {
+    if (!Array.isArray(items) || !items.length) {
+      continue;
+    }
+    const filtered = items.filter((item) => !isTransientConnectionNotice(item));
+    if (filtered.length !== items.length) {
+      state.itemsByThread.set(targetThreadId, filtered);
+      changed = true;
+    }
+  }
+
+  return changed;
 }
 
 function ensurePartials(threadId) {
@@ -2087,6 +2120,40 @@ function cloneItemForTurn(item, turnId) {
   };
 }
 
+function mergeCompletedItem(existingItem, nextItem) {
+  if (!existingItem || !nextItem || typeof existingItem !== 'object' || typeof nextItem !== 'object') {
+    return nextItem;
+  }
+
+  const merged = { ...existingItem, ...nextItem };
+
+  if (nextItem.type === 'fileChange') {
+    const nextPatch = String(nextItem.patch || '').trim();
+    if (!nextPatch) {
+      const existingPatch = String(existingItem.patch || existingItem.aggregatedPatch || '').trim();
+      if (existingPatch) {
+        merged.patch = existingPatch;
+      }
+    }
+
+    if (!Array.isArray(nextItem.changes) || !nextItem.changes.length) {
+      if (Array.isArray(existingItem.changes) && existingItem.changes.length) {
+        merged.changes = existingItem.changes;
+      }
+    }
+
+    const nextOutput = String(nextItem.output || nextItem.aggregatedOutput || '').trim();
+    if (!nextOutput) {
+      const existingOutput = String(existingItem.output || existingItem.aggregatedOutput || '').trim();
+      if (existingOutput) {
+        merged.output = existingOutput;
+      }
+    }
+  }
+
+  return merged;
+}
+
 function normalizeTimestampMs(value) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value < 1e12 ? value * 1000 : value;
@@ -2105,6 +2172,39 @@ function normalizeTimestampMs(value) {
   }
 
   return null;
+}
+
+function extractItemTimestampMs(item) {
+  return normalizeTimestampMs(item?.createdAt)
+    || normalizeTimestampMs(item?.startedAt)
+    || normalizeTimestampMs(item?.completedAt)
+    || normalizeTimestampMs(item?.updatedAt)
+    || normalizeTimestampMs(item?._localCreatedAt)
+    || null;
+}
+
+function formatEntryTimestamp(timestampMs) {
+  const normalized = normalizeTimestampMs(timestampMs);
+  if (!normalized) {
+    return '';
+  }
+  const date = new Date(normalized);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+function createTimestampNode(timestampMs, extraClass = '') {
+  const label = formatEntryTimestamp(timestampMs);
+  if (!label) {
+    return null;
+  }
+  const node = document.createElement('div');
+  node.className = extraClass ? `entry-timestamp ${extraClass}` : 'entry-timestamp';
+  node.textContent = label;
+  node.title = new Date(normalizeTimestampMs(timestampMs)).toLocaleString();
+  return node;
 }
 
 function getTurnStartedAtFromTurn(turn) {
@@ -2365,8 +2465,43 @@ function getFileChangeOutput(item) {
   return String(item?.aggregatedOutput || item?.output || '').trim();
 }
 
+function stringifyFileChangeKind(kind) {
+  if (typeof kind === 'string') {
+    return kind;
+  }
+  if (kind && typeof kind === 'object' && typeof kind.type === 'string') {
+    return kind.type;
+  }
+  return '';
+}
+
 function getFileChangePatch(item) {
-  return String(item?.patch || item?.aggregatedPatch || '').trim();
+  const directPatch = String(item?.patch || item?.aggregatedPatch || '').trim();
+  if (directPatch) {
+    return directPatch;
+  }
+
+  const diffs = Array.isArray(item?.changes)
+    ? item.changes
+      .map((change) => {
+        const path = String(change?.path || '').trim();
+        const diff = String(change?.diff || '').trim();
+        if (!path || !diff) {
+          return '';
+        }
+        const kind = getNormalizedFileChangeKind(stringifyFileChangeKind(change.kind));
+        if (kind === 'add') {
+          return `*** Add File: ${path}\n${diff}`;
+        }
+        if (kind === 'delete') {
+          return `*** Delete File: ${path}\n${diff}`;
+        }
+        return `*** Update File: ${path}\n${diff}`;
+      })
+      .filter(Boolean)
+    : [];
+
+  return diffs.join('\n').trim();
 }
 
 function getNormalizedFileChangeKind(kind) {
@@ -2466,7 +2601,7 @@ function normalizeFileChanges(changes, patch = '') {
   const normalized = dedupeFileChanges(
     (Array.isArray(changes) ? changes : []).map((change) => ({
       path: change?.path || change?.filePath || change?.file || '',
-      kind: change?.kind || change?.type || '',
+      kind: stringifyFileChangeKind(change?.kind || change?.type || ''),
     }))
   );
   if (normalized.length) {
@@ -2709,6 +2844,7 @@ function setActiveTab(threadId, options = {}) {
       type: '_warning',
       id: createLocalId('ws'),
       text: '连接尚未建立，已自动重连。连接恢复后会同步消息。',
+      _localNoticeCode: 'ws_reconnecting',
     });
   }
   render();
@@ -2877,6 +3013,7 @@ function upsertStreamingItem(threadId, turnId, itemId, delta) {
     type: 'agentMessage',
     id: itemId,
     text: partials.get(itemId),
+    startedAt: Date.now(),
     _partial: true,
     _turnId: turnId || null,
     _renderVersion: 1,
@@ -2897,7 +3034,11 @@ function finalizeItem(threadId, turnId, item) {
   const index = items.findIndex((entry) => entry.id === item.id);
   if (index >= 0) {
     const previousVersion = ensureItemRenderVersion(items[index]);
-    items[index] = { ...nextItem, _partial: false, _renderVersion: previousVersion + 1 };
+    items[index] = {
+      ...mergeCompletedItem(items[index], nextItem),
+      _partial: false,
+      _renderVersion: previousVersion + 1,
+    };
     return;
   }
 
@@ -3678,12 +3819,14 @@ function buildEntryFromItem(threadId, item, partials, index) {
       .filter((entry) => entry.type === 'text')
       .map((entry) => entry.text)
       .join('\n');
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'user',
       content,
       text,
-      signature: JSON.stringify(['user', key, createUserMessageFingerprint(content)]),
+      timestampMs,
+      signature: JSON.stringify(['user', key, createUserMessageFingerprint(content), timestampMs || 0]),
     };
   }
 
@@ -3691,13 +3834,15 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const renderVersion = ensureItemRenderVersion(item);
     const partial = item._partial || partials.has(item.id);
     const text = partial ? (partials.get(item.id) || item.text || '') : (item.text || '');
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'agent',
       text,
       partial,
       phase: item.phase || '',
-      signature: JSON.stringify(['agent', key, renderVersion, partial, item.phase || '']),
+      timestampMs,
+      signature: JSON.stringify(['agent', key, renderVersion, partial, item.phase || '', timestampMs || 0]),
     };
   }
 
@@ -3707,21 +3852,25 @@ function buildEntryFromItem(threadId, item, partials, index) {
     if (!summary) {
       return null;
     }
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'reasoning',
       text: summary,
-      signature: JSON.stringify(['reasoning', key, renderVersion]),
+      timestampMs,
+      signature: JSON.stringify(['reasoning', key, renderVersion, timestampMs || 0]),
     };
   }
 
   if (item.type === 'webSearch') {
     const desc = describeWebSearch(item);
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'tool',
       label: desc,
-      signature: JSON.stringify(['tool', key, desc]),
+      timestampMs,
+      signature: JSON.stringify(['tool', key, desc, timestampMs || 0]),
     };
   }
 
@@ -3734,14 +3883,16 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const activeThreadId = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
       ? threadId
       : '';
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'command',
       command: typeof command === 'string' ? command : JSON.stringify(command),
       status,
       output,
+      timestampMs,
       threadId: activeThreadId,
-      signature: JSON.stringify(['command', key, renderVersion, status, activeThreadId]),
+      signature: JSON.stringify(['command', key, renderVersion, status, activeThreadId, timestampMs || 0]),
     };
   }
 
@@ -3755,6 +3906,7 @@ function buildEntryFromItem(threadId, item, partials, index) {
     const activeThreadId = isItemInActiveTurn(threadId, item) && (status === 'running' || status === 'in_progress' || status === 'pendingApproval')
       ? threadId
       : '';
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'fileChange',
@@ -3762,30 +3914,35 @@ function buildEntryFromItem(threadId, item, partials, index) {
       changes,
       output,
       patch,
+      timestampMs,
       threadId: activeThreadId,
-      signature: JSON.stringify(['fileChange', key, renderVersion, status, activeThreadId]),
+      signature: JSON.stringify(['fileChange', key, renderVersion, status, activeThreadId, timestampMs || 0]),
     };
   }
 
   if (item.type === '_error' || item.type === '_warning') {
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: item.type,
       text: item.text || '',
-      signature: JSON.stringify([item.type, key, item.text || '']),
+      timestampMs,
+      signature: JSON.stringify([item.type, key, item.text || '', timestampMs || 0]),
     };
   }
 
   if (item.type === '_permission_prompt') {
     const composerSelection = getEffectiveComposerSelection(threadId);
     const presetValue = inferPermissionPresetValue(composerSelection.approvalPolicy, composerSelection.sandboxMode);
+    const timestampMs = extractItemTimestampMs(item);
     return {
       key,
       kind: 'permissionPrompt',
       text: item.text || '',
       threadId,
       presetValue,
-      signature: JSON.stringify(['permissionPrompt', key, presetValue, item.text || '']),
+      timestampMs,
+      signature: JSON.stringify(['permissionPrompt', key, presetValue, item.text || '', timestampMs || 0]),
     };
   }
 
@@ -3815,7 +3972,8 @@ function buildEntryFromServerRequest(request) {
     key: `server_request:${request.requestId}`,
     kind: 'serverRequest',
     request,
-    signature: summary,
+    timestampMs: normalizeTimestampMs(request.createdAt) || null,
+    signature: JSON.stringify([summary, normalizeTimestampMs(request.createdAt) || 0]),
   };
 }
 
@@ -3907,6 +4065,44 @@ function createTimelinePre(text, extraClass = '') {
   return pre;
 }
 
+function classifyDiffLine(line) {
+  if (line.startsWith('+++ ') || line.startsWith('--- ')) {
+    return 'file';
+  }
+  if (line.startsWith('*** Add File:') || line.startsWith('*** Delete File:') || line.startsWith('*** Update File:')) {
+    return 'file';
+  }
+  if (line.startsWith('diff --git ')) {
+    return 'file';
+  }
+  if (line.startsWith('@@')) {
+    return 'hunk';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'delete';
+  }
+  return 'context';
+}
+
+function createDiffBlock(text) {
+  const root = document.createElement('div');
+  root.className = 'timeline-inline-diff';
+
+  const normalized = String(text || '').replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.className = `timeline-diff-line kind-${classifyDiffLine(line)}`;
+    row.textContent = line || ' ';
+    root.appendChild(row);
+  }
+
+  return root;
+}
+
 function createDetailContent() {
   const body = document.createElement('div');
   body.className = 'timeline-inline-detail-body';
@@ -3923,6 +4119,9 @@ function populateCommandEntry(node, entry) {
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(entry.command, 110) || '命令执行'}`));
   summary.appendChild(createTimelineMeta(`命令执行 · ${formatExecutionStatusText(entry.status)}`));
+  if (entry.timestampMs) {
+    summary.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+  }
   if (entry.threadId) {
     summary.appendChild(createLiveWorkingMeta(entry.threadId));
   }
@@ -3954,6 +4153,9 @@ function populateFileChangeEntry(node, entry) {
   const summary = document.createElement('summary');
   summary.appendChild(createTimelineTitle(`${commandStatusIcon(entry.status)} ${compactText(summaryText, 110)}${extraCount}`));
   summary.appendChild(createTimelineMeta(`文件修改 · ${formatExecutionStatusText(entry.status)}`));
+  if (entry.timestampMs) {
+    summary.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+  }
   if (entry.threadId) {
     summary.appendChild(createLiveWorkingMeta(entry.threadId));
   }
@@ -3976,7 +4178,7 @@ function populateFileChangeEntry(node, entry) {
     body.appendChild(createTimelinePlaceholder('等待文件变更详情…'));
   }
   if (entry.patch) {
-    body.appendChild(createTimelinePre(entry.patch, 'timeline-inline-pre-output'));
+    body.appendChild(createDiffBlock(entry.patch));
   } else if (entry.output) {
     body.appendChild(createTimelinePre(entry.output, 'timeline-inline-pre-output'));
   }
@@ -3989,12 +4191,18 @@ function populateToolEntry(node, entry) {
   node.className = 'timeline-card timeline-card-tool';
   node.appendChild(createTimelineTitle(entry.label || '网页操作'));
   node.appendChild(createTimelineMeta('网页操作'));
+  if (entry.timestampMs) {
+    node.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+  }
 }
 
 function populateReasoningEntry(node, entry) {
   node.className = 'timeline-card timeline-card-reasoning';
   node.appendChild(createTimelineMeta('思考'));
   node.appendChild(createMessageBody(renderMarkdown(entry.text)));
+  if (entry.timestampMs) {
+    node.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+  }
 }
 
 function populateThinkingEntry(node, entry) {
@@ -4034,6 +4242,9 @@ function populatePermissionPromptEntry(node, entry) {
   current.className = 'approval-meta';
   current.textContent = `当前预设: ${formatPermissionPresetLabel(entry.presetValue, { includeDescription: true })}`;
   node.appendChild(current);
+  if (entry.timestampMs) {
+    node.appendChild(createTimestampNode(entry.timestampMs, 'approval-timestamp'));
+  }
 
   const actions = document.createElement('div');
   actions.className = 'approval-actions permission-prompt-actions';
@@ -4162,6 +4373,10 @@ function populateMessageNode(node, entry) {
   if (entry.kind === 'user') {
     node.className = 'message user msg-bubble msg-bubble-user';
     appendUserMessageContent(node, entry.content);
+    const timestamp = createTimestampNode(entry.timestampMs);
+    if (timestamp) {
+      node.appendChild(timestamp);
+    }
     return;
   }
 
@@ -4182,6 +4397,10 @@ function populateMessageNode(node, entry) {
       cursor.className = 'cursor';
       cursor.textContent = ' ▌';
       body.appendChild(cursor);
+    }
+    const timestamp = createTimestampNode(entry.timestampMs);
+    if (timestamp) {
+      node.appendChild(timestamp);
     }
     return;
   }
@@ -4264,6 +4483,10 @@ function populateServerRequestNode(node, request) {
   title.className = 'item-label';
   title.textContent = describeServerRequestTitle(request);
   node.appendChild(title);
+  const timestamp = createTimestampNode(request.createdAt, 'approval-timestamp');
+  if (timestamp) {
+    node.appendChild(timestamp);
+  }
 
   if (request.reason) {
     const reason = document.createElement('div');
@@ -4309,6 +4532,32 @@ function populateServerRequestNode(node, request) {
       changes.appendChild(line);
     });
     node.appendChild(changes);
+  }
+
+  if (request.kind === 'file_change_approval' || request.kind === 'file_change_approval_legacy') {
+    const patch = String(request.patch || '').trim();
+    const normalizedChanges = normalizeFileChanges(
+      request.changes,
+      patch
+    );
+
+    if (normalizedChanges.length) {
+      const changes = document.createElement('div');
+      changes.className = 'file-change-list';
+      normalizedChanges.forEach((change) => {
+        const line = document.createElement('div');
+        line.className = `file-change-entry kind-${getNormalizedFileChangeKind(change.kind)}`;
+        line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}`;
+        changes.appendChild(line);
+      });
+      node.appendChild(changes);
+    }
+
+    if (patch) {
+      node.appendChild(createDiffBlock(patch));
+    } else if (!normalizedChanges.length) {
+      node.appendChild(createTimelinePlaceholder('等待文件变更详情…'));
+    }
   }
 
   if (request.kind === 'user_input') {
