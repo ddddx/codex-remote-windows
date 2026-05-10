@@ -10,6 +10,7 @@ const { WebSocketServer } = require('ws');
 
 const { CodexAppServerClient } = require('./codexAppServerClient');
 const { CodexWindowManager } = require('./windowManager');
+const { createWindowAttachmentService } = require('./windowAttachment');
 const { applyLocalConfig } = require('./localConfig');
 const { WorkspaceManager } = require('./workspaceManager');
 
@@ -79,6 +80,7 @@ const pendingWindowOpens = new Map();
 const pendingServerRequests = new Map();
 let shuttingDown = false;
 let windowStatusTimer = null;
+let windowAttachments = null;
 
 process.on('uncaughtException', (error) => {
   console.error('[fatal] uncaught exception in web server:', error?.stack || error);
@@ -495,17 +497,7 @@ function pruneClosedTabTimers() {
 }
 
 function markTabClosed(threadId) {
-  const tab = tabs.get(threadId);
-  if (!tab) {
-    return;
-  }
-
-  windows.clearPid(threadId);
-  tab.windowStatus = 'closed';
-  tab.windowPid = null;
-  tab.updatedAt = nowUnix();
-  clearClosedTabCleanup(threadId);
-  broadcast({ type: 'tab_updated', tab });
+  return windowAttachments?.markTabClosed(threadId) || null;
 }
 
 function removeTab(threadId, options = {}) {
@@ -552,6 +544,15 @@ function broadcast(payload) {
     send(client, payload);
   }
 }
+
+windowAttachments = createWindowAttachmentService({
+  tabs,
+  windows,
+  pendingWindowOpens,
+  nowUnix,
+  clearClosedTabCleanup,
+  broadcast,
+});
 
 function toClientServerRequest(request) {
   const { rawRequestId, ...clientRequest } = request;
@@ -617,51 +618,15 @@ function broadcastUnreadIfNeeded(threadId) {
 
 async function ensureWindowForThread(threadId) {
   assertThreadId(threadId);
-  const tab = tabs.get(threadId);
-  const pid = windows.getPid(threadId) || tab?.windowPid;
-  let alive = false;
-  if (pid) {
-    try {
-      alive = await windows.isPidAlive(pid);
-    } catch (error) {
-      console.log(`[window] failed checking pid ${pid} for ${threadId}: ${error.message}`);
-      alive = false;
-    }
-  }
-
-  if (alive) {
-    if (tab) {
-      tab.windowPid = pid;
-      tab.windowStatus = 'attached';
-      tab.updatedAt = nowUnix();
-      clearClosedTabCleanup(threadId);
-      broadcast({ type: 'tab_updated', tab });
-    }
+  if (!windowAttachments) {
     return;
   }
-
-  if (pid) {
-    windows.clearPid(threadId);
-  }
-
-  let pendingOpen = pendingWindowOpens.get(threadId);
-  if (!pendingOpen) {
-    pendingOpen = windows.openWindow(threadId).finally(() => {
-      pendingWindowOpens.delete(threadId);
-    });
-    pendingWindowOpens.set(threadId, pendingOpen);
-  }
-
-  const newPid = await pendingOpen;
-  if (!tab) {
-    return;
-  }
-
-  tab.windowPid = newPid;
-  tab.windowStatus = 'attached';
-  tab.updatedAt = nowUnix();
-  clearClosedTabCleanup(threadId);
-  broadcast({ type: 'tab_updated', tab });
+  await windowAttachments.refreshTabWindowStatus(threadId, {
+    allowDiscovery: true,
+    allowLaunch: true,
+    broadcastUpdate: true,
+    touchUpdatedAt: true,
+  });
 }
 
 async function syncThreadToClients(ws, threadId) {
@@ -703,49 +668,13 @@ async function syncThreadToClients(ws, threadId) {
 }
 
 async function refreshAllTabWindowStatus() {
-  const changedTabs = [];
-  const checks = [];
-
-  for (const tab of tabs.values()) {
-    checks.push((async () => {
-      const currentTab = tabs.get(tab.threadId);
-      if (!currentTab) {
-        return;
-      }
-
-      const pid = windows.getPid(currentTab.threadId) || currentTab.windowPid;
-      if (!pid) {
-        // No window PID known — cannot determine liveness.
-        return;
-      }
-
-      let alive = false;
-      try {
-        alive = await windows.isPidAlive(pid);
-      } catch (error) {
-        console.log(`[bootstrap-window-check] failed checking pid ${pid} for ${currentTab.threadId}: ${error.message}`);
-      }
-
-      if (alive) {
-        currentTab.windowPid = pid;
-        currentTab.windowStatus = 'attached';
-        return;
-      }
-
-      windows.clearPid(currentTab.threadId);
-      currentTab.windowPid = null;
-      currentTab.windowStatus = 'closed';
-      currentTab.updatedAt = nowUnix();
-      clearClosedTabCleanup(currentTab.threadId);
-      changedTabs.push(currentTab);
-    })());
+  if (!windowAttachments) {
+    return;
   }
-
-  await Promise.allSettled(checks);
-
-  for (const tab of changedTabs) {
-    broadcast({ type: 'tab_updated', tab });
-  }
+  await windowAttachments.refreshAllTabsWindowStatus({
+    broadcastUpdates: true,
+    touchUpdatedAt: true,
+  });
 }
 
 function normalizeClientMessage(raw) {
@@ -1535,6 +1464,14 @@ async function bootstrap() {
   await codex.start();
   windows.load();
   const threadList = await codex.listThreads(BOOTSTRAP_THREAD_LIMIT);
+  let discoveredWindows = null;
+  if (windowAttachments) {
+    try {
+      discoveredWindows = await windowAttachments.snapshotDiscoveredWindows();
+    } catch (error) {
+      console.log(`[bootstrap-window-discovery] failed: ${error.message}`);
+    }
+  }
 
   await Promise.allSettled(threadList.map(async (thread) => {
     let verifiedThread = thread;
@@ -1555,32 +1492,19 @@ async function bootstrap() {
     }
 
     const tab = ensureTab(verifiedThread);
-    const windowPid = windows.getPid(verifiedThread.id);
-    if (!windowPid) {
-      tab.windowStatus = 'closed';
-      tab.windowPid = null;
-      return;
-    }
-
-    let windowAlive = false;
-    try {
-      windowAlive = await windows.isPidAlive(windowPid);
-    } catch (error) {
-      console.log(`[bootstrap] failed checking pid ${windowPid} for ${verifiedThread.id}: ${error.message}`);
-      windowAlive = false;
-    }
-
-    if (!windowAlive) {
-      windows.clearPid(verifiedThread.id);
-      tab.windowStatus = 'closed';
-      tab.windowPid = null;
-      return;
-    }
-
-    // Lazy: only register tab metadata, load full data on click
     tab.status = 'idle';
-    tab.windowPid = windowPid;
-    tab.windowStatus = 'attached';
+    if (windowAttachments) {
+      await windowAttachments.refreshTabWindowStatus(verifiedThread.id, {
+        allowDiscovery: true,
+        allowLaunch: false,
+        broadcastUpdate: false,
+        touchUpdatedAt: false,
+        discoveredWindows,
+      });
+    } else {
+      tab.windowPid = null;
+      tab.windowStatus = 'closed';
+    }
   }));
 
   server.listen(PORT, () => {
