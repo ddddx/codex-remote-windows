@@ -3,6 +3,13 @@ import {
   renderContextUsage,
   renderHeaderStatus,
 } from './header.js';
+import {
+  compareTabs,
+  getSessionName,
+  getWorkspacePath,
+  getWorkspaceFolder,
+  renderTabs as renderTabsView,
+} from './tabs.js';
 
 let reconnectTimer = null;
 let reconnectAttempt = 0;
@@ -11,7 +18,6 @@ const WEBSOCKET_TOKEN_STORAGE_KEY = 'codex-remote-ws-token';
 const EMPTY_THREAD_KEY = '__empty__';
 const RECONNECT_BASE_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 30000;
-const DEFAULT_SESSION_NAME = '未命名会话';
 const DEFAULT_PROMPT_PLACEHOLDER = '给当前会话发送指令...';
 const COMPOSER_PREFS_STORAGE_KEY = 'codex-remote-composer-prefs';
 const THEME_STORAGE_KEY = 'codex-remote-theme';
@@ -2844,7 +2850,7 @@ function setActiveTab(threadId, options = {}) {
   if (!state.tabs.some((entry) => entry.threadId === threadId)) {
     upsertTab({
       threadId,
-      name: DEFAULT_SESSION_NAME,
+      name: '未命名会话',
       cwd: '',
       status: 'idle',
       createdAt: Math.floor(Date.now() / 1000),
@@ -2866,28 +2872,6 @@ function setActiveTab(threadId, options = {}) {
     });
   }
   render();
-}
-
-function getSessionName(tab) {
-  const name = typeof tab?.name === 'string' ? tab.name.trim() : '';
-  if (!name || name === 'New Tab') {
-    return DEFAULT_SESSION_NAME;
-  }
-  return name;
-}
-
-function getWorkspacePath(tab) {
-  return typeof tab?.cwd === 'string' ? tab.cwd.trim() : '';
-}
-
-function getWorkspaceFolder(cwd) {
-  const normalized = String(cwd || '').replace(/[\\/]+$/, '');
-  if (!normalized) {
-    return '';
-  }
-
-  const parts = normalized.split(/[\\/]+/).filter(Boolean);
-  return parts[parts.length - 1] || normalized;
 }
 
 function getDefaultWorkspacePath(shortcuts) {
@@ -3064,47 +3048,13 @@ function finalizeItem(threadId, turnId, item) {
 }
 
 function renderTabs() {
-  tabList.innerHTML = '';
-  menuBtn.classList.toggle('has-unread', hasUnreadInInactiveTabs());
-  for (const tab of state.tabs) {
-    const status = normalizeTabStatus(tab.status);
-    const isWindowClosed = tab.windowStatus === 'closed';
-    const isWaitingApproval = !isWindowClosed && hasPendingServerRequest(tab.threadId);
-    const hasUnread = state.unreadThreadIds.has(tab.threadId) && tab.threadId !== state.activeThreadId;
-    const node = tabTpl.content.firstElementChild.cloneNode(true);
-    node.dataset.threadId = tab.threadId;
-    node.classList.toggle('active', tab.threadId === state.activeThreadId);
-    node.classList.toggle('closed', isWindowClosed);
-    node.classList.toggle('has-unread', hasUnread);
-    node.querySelector('.name').textContent = getSessionName(tab);
-    const cwd = getWorkspacePath(tab);
-    const workspace = node.querySelector('.workspace');
-    workspace.textContent = cwd ? `工作区 · ${getWorkspaceFolder(cwd)}` : '工作区未提供';
-    workspace.title = cwd || '工作区未提供';
-    node.title = cwd ? `${getSessionName(tab)}\n${cwd}` : getSessionName(tab);
-    const meta = node.querySelector('.meta');
-    meta.replaceChildren();
-    const statusDot = document.createElement('span');
-    statusDot.className = `status-dot ${isWindowClosed ? 'closed' : (isWaitingApproval ? 'waiting' : 'open')}`;
-    const statusText = document.createElement('span');
-    statusText.className = 'status-text';
-    if (isWindowClosed) {
-      statusText.textContent = '窗口已关闭';
-    } else if (status === 'running' || status === 'active') {
-      statusText.textContent = '进行中';
-    } else {
-      statusText.textContent = isWaitingApproval ? '待批准' : '在线';
-    }
-    meta.append(statusDot, statusText);
-
-    node.querySelector('.close').addEventListener('click', (event) => {
-      event.stopPropagation();
-      send({ type: 'tab_close', threadId: tab.threadId });
-    });
-
-    node.addEventListener('click', () => setActiveTab(tab.threadId));
-    tabList.appendChild(node);
-  }
+  renderTabsView(tabList, menuBtn, tabTpl, state, {
+    hasUnreadInInactiveTabs,
+    hasPendingServerRequest,
+    normalizeTabStatus,
+    setActiveTab,
+    send,
+  });
 }
 
 function normalizeTabStatus(status) {
