@@ -1536,7 +1536,7 @@ async function bootstrap() {
   windows.load();
   const threadList = await codex.listThreads(BOOTSTRAP_THREAD_LIMIT);
 
-  await Promise.all(threadList.map(async (thread) => {
+  await Promise.allSettled(threadList.map(async (thread) => {
     let verifiedThread = thread;
     try {
       verifiedThread = await codex.readThread(thread.id);
@@ -1545,7 +1545,8 @@ async function bootstrap() {
         console.log(`[bootstrap] skip missing thread ${thread.id}`);
         return;
       }
-      throw error;
+      console.log(`[bootstrap] skip unreadable thread ${thread.id}: ${getErrorMessage(error) || error.message}`);
+      return;
     }
 
     const status = normalizeStatus(verifiedThread.status, 'idle');
