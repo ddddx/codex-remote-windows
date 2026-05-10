@@ -237,6 +237,7 @@ export function createSocketController(deps) {
     connect,
     disconnectSocket,
     getWebSocketToken,
+    isSocketConnected: () => !!(window._ws && window._ws.readyState === WebSocket.OPEN),
     markAuthFailed,
     promptForWebSocketToken,
     reconnectNow,
