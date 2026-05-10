@@ -33,6 +33,12 @@ export function createSessionModalController(deps) {
     sessionModalConfirmBtn,
   } = elements;
 
+  let modalGeneration = 0;
+
+  function isActiveModalGeneration(generation) {
+    return sessionModalState.resolve && generation === modalGeneration;
+  }
+
   function updateSessionWorkspacePath(path) {
     sessionWorkspaceInput.value = path || '';
   }
@@ -133,7 +139,11 @@ export function createSessionModalController(deps) {
     });
   }
 
-  async function browseWorkspacePath(targetPath = '') {
+  async function browseWorkspacePath(targetPath = '', options = {}) {
+    const generation = options.generation ?? modalGeneration;
+    if (!isActiveModalGeneration(generation)) {
+      return;
+    }
     sessionModalState.browserLoading = true;
     renderSessionModal();
     setSessionModalHint('正在加载目录...');
@@ -144,34 +154,56 @@ export function createSessionModalController(deps) {
         url.searchParams.set('path', targetPath);
       }
       const result = await apiFetchJson(url);
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       sessionModalState.browserPath = result.path || '';
       sessionModalState.browserParentPath = result.parentPath || '';
       sessionModalState.browserEntries = Array.isArray(result.entries) ? result.entries : [];
       updateSessionWorkspacePath(sessionModalState.browserPath);
       setSessionModalHint('已同步目录列表，可继续进入子目录或直接使用当前目录。');
     } catch (error) {
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       setSessionModalHint(`读取目录失败：${error.message}`, true);
     } finally {
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       sessionModalState.browserLoading = false;
       renderSessionModal();
     }
   }
 
-  async function loadWorkspaceShortcuts() {
+  async function loadWorkspaceShortcuts(options = {}) {
+    const generation = options.generation ?? modalGeneration;
+    if (!isActiveModalGeneration(generation)) {
+      return;
+    }
     sessionModalState.loadingShortcuts = true;
     renderSessionModal();
     setSessionModalHint('正在读取常用工作区...');
 
     try {
       const shortcuts = await apiFetchJson('/api/workspace/shortcuts');
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       sessionModalState.shortcuts = shortcuts;
       if (!sessionWorkspaceInput.value.trim()) {
         updateSessionWorkspacePath(getDefaultWorkspacePath(shortcuts));
       }
       setSessionModalHint('支持直接输入主机路径，也可以用下面的快捷路径。');
     } catch (error) {
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       setSessionModalHint(`读取工作区失败：${error.message}`, true);
     } finally {
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       sessionModalState.loadingShortcuts = false;
       renderSessionModal();
     }
@@ -184,6 +216,7 @@ export function createSessionModalController(deps) {
 
     const resolve = sessionModalState.resolve;
     sessionModalState.resolve = null;
+    modalGeneration += 1;
     sessionModal.classList.remove('open');
     sessionModal.setAttribute('aria-hidden', 'true');
     resolve(value);
@@ -198,6 +231,8 @@ export function createSessionModalController(deps) {
       closeSessionModal(null);
     }
 
+    modalGeneration += 1;
+    const generation = modalGeneration;
     sessionModalState.previousFocus = document.activeElement;
     sessionModalState.shortcuts = null;
     sessionModalState.loadingShortcuts = false;
@@ -218,10 +253,13 @@ export function createSessionModalController(deps) {
     });
 
     void (async () => {
-      await loadWorkspaceShortcuts();
+      await loadWorkspaceShortcuts({ generation });
+      if (!isActiveModalGeneration(generation)) {
+        return;
+      }
       const defaultPath = sessionWorkspaceInput.value.trim() || getDefaultWorkspacePath(sessionModalState.shortcuts);
       if (defaultPath) {
-        await browseWorkspacePath(defaultPath);
+        await browseWorkspacePath(defaultPath, { generation });
       }
     })();
 

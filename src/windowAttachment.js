@@ -118,6 +118,16 @@ function createWindowAttachmentService(options) {
       return { status: 'missing', tab: null, pid: null, source: 'missing' };
     }
 
+    if (!allowLaunch && tab.windowStatus === 'closed') {
+      return {
+        status: 'closed',
+        tab,
+        pid: null,
+        source: 'manual-close',
+        changed: false,
+      };
+    }
+
     let attachment = null;
     if (allowDiscovery) {
       const discovered = await findDiscoveredWindow(threadId, discoveredWindows);

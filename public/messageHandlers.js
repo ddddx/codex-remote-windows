@@ -97,6 +97,12 @@ export function createMessageHandler(deps) {
       return;
     }
 
+    if (msg.type === 'server_request_reset') {
+      state.serverRequests = [];
+      render();
+      return;
+    }
+
     if (msg.type === 'tab_updated') {
       upsertTab(msg.tab);
       render();

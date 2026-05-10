@@ -1261,6 +1261,7 @@ codex.on('server_request', (msg) => {
 codex.on('exit', ({ code, signal }) => {
   pendingServerRequests.clear();
   if (!shuttingDown) {
+    broadcast({ type: 'server_request_reset' });
     broadcast({ type: 'backend_error', message: `codex app-server exited (code=${code}, signal=${signal})` });
   }
 });
