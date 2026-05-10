@@ -48,7 +48,8 @@ export function compareTabs(a, b) {
   return String(a?.threadId || '').localeCompare(String(b?.threadId || ''));
 }
 
-let inactiveTabsCollapsed = true;
+let detachedTabsCollapsed = true;
+let closedTabsCollapsed = true;
 
 function createStatusMeta(tab, state, helpers) {
   const {
@@ -106,22 +107,67 @@ function renderTabItem(tabListEl, tabTpl, tab, state, helpers) {
   tabListEl.appendChild(node);
 }
 
+function renderCollapsibleSection(tabListEl, tabTpl, tabs, state, helpers, options) {
+  const {
+    requestRenderTabs,
+  } = helpers;
+  const {
+    collapsed,
+    count,
+    isExpanded,
+    title,
+    onToggle,
+  } = options;
+  const section = document.createElement('section');
+  section.className = `tab-section${collapsed ? ' collapsed' : ' expanded'}`;
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'tab-section-toggle';
+  toggleBtn.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+  toggleBtn.innerHTML = `
+    <span class="tab-section-title-group">
+      <span class="tab-section-title">${title}</span>
+      <span class="tab-section-count">${count}</span>
+    </span>
+    <span class="tab-section-chevron" aria-hidden="true">${isExpanded ? '▾' : '▸'}</span>
+  `;
+  toggleBtn.addEventListener('click', () => {
+    onToggle();
+    requestRenderTabs?.();
+  });
+  section.appendChild(toggleBtn);
+
+  if (isExpanded) {
+    const sectionList = document.createElement('div');
+    sectionList.className = 'tab-section-list';
+    for (const tab of tabs) {
+      renderTabItem(sectionList, tabTpl, tab, state, helpers);
+    }
+    section.appendChild(sectionList);
+  }
+
+  tabListEl.appendChild(section);
+}
+
 export function renderTabs(tabListEl, menuBtnEl, tabTpl, state, helpers) {
   const {
     hasUnreadInInactiveTabs,
-    requestRenderTabs,
   } = helpers;
 
   tabListEl.innerHTML = '';
   menuBtnEl.classList.toggle('has-unread', hasUnreadInInactiveTabs());
 
   const activeTabs = [];
-  const inactiveTabs = [];
+  const detachedTabs = [];
+  const closedTabs = [];
   for (const tab of state.tabs) {
     if (tab.windowStatus === 'attached') {
       activeTabs.push(tab);
+    } else if (tab.windowStatus === 'closed') {
+      closedTabs.push(tab);
     } else {
-      inactiveTabs.push(tab);
+      detachedTabs.push(tab);
     }
   }
 
@@ -129,40 +175,31 @@ export function renderTabs(tabListEl, menuBtnEl, tabTpl, state, helpers) {
     renderTabItem(tabListEl, tabTpl, tab, state, helpers);
   }
 
-  if (!inactiveTabs.length) {
-    return;
+  if (detachedTabs.length) {
+    const hasActiveDetachedTab = detachedTabs.some((tab) => tab.threadId === state.activeThreadId);
+    const showDetachedTabs = hasActiveDetachedTab || !detachedTabsCollapsed;
+    renderCollapsibleSection(tabListEl, tabTpl, detachedTabs, state, helpers, {
+      collapsed: !showDetachedTabs,
+      count: detachedTabs.length,
+      isExpanded: showDetachedTabs,
+      title: '未打开',
+      onToggle: () => {
+        detachedTabsCollapsed = !detachedTabsCollapsed;
+      },
+    });
   }
 
-  const hasActiveInactiveTab = inactiveTabs.some((tab) => tab.threadId === state.activeThreadId);
-  const showInactiveTabs = hasActiveInactiveTab || !inactiveTabsCollapsed;
-  const section = document.createElement('section');
-  section.className = `tab-section tab-section-inactive${showInactiveTabs ? ' expanded' : ' collapsed'}`;
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'tab-section-toggle';
-  toggleBtn.setAttribute('aria-expanded', showInactiveTabs ? 'true' : 'false');
-  toggleBtn.innerHTML = `
-    <span class="tab-section-title-group">
-      <span class="tab-section-title">已关闭 / 未打开</span>
-      <span class="tab-section-count">${inactiveTabs.length}</span>
-    </span>
-    <span class="tab-section-chevron" aria-hidden="true">${showInactiveTabs ? '▾' : '▸'}</span>
-  `;
-  toggleBtn.addEventListener('click', () => {
-    inactiveTabsCollapsed = !inactiveTabsCollapsed;
-    requestRenderTabs?.();
-  });
-  section.appendChild(toggleBtn);
-
-  if (showInactiveTabs) {
-    const sectionList = document.createElement('div');
-    sectionList.className = 'tab-section-list';
-    for (const tab of inactiveTabs) {
-      renderTabItem(sectionList, tabTpl, tab, state, helpers);
-    }
-    section.appendChild(sectionList);
+  if (closedTabs.length) {
+    const hasActiveClosedTab = closedTabs.some((tab) => tab.threadId === state.activeThreadId);
+    const showClosedTabs = hasActiveClosedTab || !closedTabsCollapsed;
+    renderCollapsibleSection(tabListEl, tabTpl, closedTabs, state, helpers, {
+      collapsed: !showClosedTabs,
+      count: closedTabs.length,
+      isExpanded: showClosedTabs,
+      title: '已关闭',
+      onToggle: () => {
+        closedTabsCollapsed = !closedTabsCollapsed;
+      },
+    });
   }
-
-  tabListEl.appendChild(section);
 }

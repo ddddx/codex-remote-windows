@@ -102,7 +102,8 @@ export function createMessageHandler(deps) {
         text: payload?.message || '',
         createdAt: payload?.createdAt || Date.now(),
         noticeKind: payload?.noticeKind || '',
-        _turnId: state.currentTurnIdByThread.get(threadId) || null,
+        _turnId: payload?.turnId || null,
+        _supplemental: true,
       };
       const index = items.findIndex((item) => item?.id === noticeId);
       if (index >= 0) {
