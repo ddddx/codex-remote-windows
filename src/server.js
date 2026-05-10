@@ -694,7 +694,12 @@ async function syncThreadToClients(ws, threadId) {
   }
   const tab = ensureTab(thread);
   send(ws, { type: 'tab_updated', tab });
-  send(ws, { type: 'thread_sync', threadId, turns: thread.turns || [] });
+  send(ws, {
+    type: 'thread_sync',
+    threadId,
+    turns: thread.turns || [],
+    tokenUsage: thread.tokenUsage || thread.token_usage || null,
+  });
   return { thread, materialized };
 }
 
