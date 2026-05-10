@@ -16,6 +16,7 @@ export function createAppState() {
     unreadThreadIds: new Set(),
     pendingUserMessages: new Map(),
     serverRequests: [],
+    globalNotices: [],
     availableModels: [],
     composerOptionsLoading: false,
     composerOptionsLoaded: false,

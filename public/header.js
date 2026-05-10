@@ -175,30 +175,35 @@ export function renderHeaderStatus(activeStatusEl, tab, state, helpers) {
   const { hasPendingServerRequest, normalizeTabStatus } = helpers;
 
   if (state.authFailed) {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '鉴权失败';
     activeStatusEl.className = 'status-badge failed';
     return;
   }
 
   if (state.creatingTab) {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '创建中';
     activeStatusEl.className = 'status-badge running';
     return;
   }
 
   if (tab && hasPendingServerRequest(tab.threadId)) {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '待批准';
     activeStatusEl.className = 'status-badge waiting';
     return;
   }
 
   if (tab?.windowStatus === 'closed') {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '窗口已关闭';
     activeStatusEl.className = 'status-badge closed';
     return;
   }
 
   if (tab?.windowStatus === 'detached') {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '窗口未打开';
     activeStatusEl.className = 'status-badge closed';
     return;
@@ -206,11 +211,13 @@ export function renderHeaderStatus(activeStatusEl, tab, state, helpers) {
 
   const status = tab ? normalizeTabStatus(tab.status) : '';
   if (status === 'failed' || status === 'systemError') {
+    activeStatusEl.hidden = false;
     activeStatusEl.textContent = '失败';
     activeStatusEl.className = 'status-badge failed';
     return;
   }
 
+  activeStatusEl.hidden = true;
   activeStatusEl.textContent = '';
   activeStatusEl.className = 'status-badge';
 }

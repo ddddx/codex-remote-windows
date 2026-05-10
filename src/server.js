@@ -39,6 +39,8 @@ const STREAM_ITEM_DELTA_METHODS = new Set([
   'item/reasoning/summaryPartAdded',
   'item/reasoning/textDelta',
 ]);
+const TRUSTED_ACCESS_FOR_CYBER_VERIFICATION = 'TrustedAccessForCyber';
+const TRUSTED_ACCESS_FOR_CYBER_WARNING = 'Your conversations have multiple flags for possible cybersecurity risk. Responses may take longer because extra safety checks are on. To get authorized for security work, join the Trusted Access for Cyber program: https://chatgpt.com/cyber';
 const IMAGE_CONTENT_TYPES = new Map([
   ['image/png', '.png'],
   ['image/jpeg', '.jpg'],
@@ -1022,6 +1024,35 @@ function normalizeObject(value, fieldName) {
   return value;
 }
 
+function pushSystemNotice(threadId, kind, text, extra = {}) {
+  const normalizedThreadId = typeof threadId === 'string' && threadId.trim() ? threadId.trim() : null;
+  broadcast({
+    type: kind === 'error' ? 'error_notice' : 'warning',
+    threadId: normalizedThreadId,
+    message: text,
+    ...extra,
+  });
+}
+
+function formatConfigWarningMessage(params = {}) {
+  const summary = typeof params.summary === 'string' ? params.summary.trim() : '';
+  const details = typeof params.details === 'string' ? params.details.trim() : '';
+  if (summary && details) {
+    return `${summary}: ${details}`;
+  }
+  return summary || details || '配置警告';
+}
+
+function hasTrustedAccessForCyberVerification(params = {}) {
+  const verifications = Array.isArray(params.verifications) ? params.verifications : [];
+  return verifications.some((entry) => {
+    if (typeof entry === 'string') {
+      return entry === TRUSTED_ACCESS_FOR_CYBER_VERIFICATION;
+    }
+    return entry?.type === TRUSTED_ACCESS_FOR_CYBER_VERIFICATION || entry?.value === TRUSTED_ACCESS_FOR_CYBER_VERIFICATION;
+  });
+}
+
 function normalizeRequiredString(value, maxLength, fieldName) {
   if (typeof value !== 'string') {
     throw new Error(`${fieldName} required`);
@@ -1389,6 +1420,42 @@ codex.on('notification', (msg) => {
 
   if (method === 'error') {
     broadcast({ type: 'codex_error', threadId: params.threadId, error: params.error });
+    return;
+  }
+
+  if (method === 'warning') {
+    pushSystemNotice(params.threadId || null, 'warning', params.message || '警告');
+    return;
+  }
+
+  if (method === 'guardianWarning') {
+    pushSystemNotice(params.threadId || null, 'warning', params.message || 'Guardian 警告');
+    return;
+  }
+
+  if (method === 'deprecationNotice') {
+    const summary = typeof params.summary === 'string' ? params.summary.trim() : '';
+    const details = typeof params.details === 'string' ? params.details.trim() : '';
+    const message = details ? `${summary}\n\n${details}` : (summary || '功能弃用提醒');
+    pushSystemNotice(null, 'warning', message, { noticeKind: 'deprecation' });
+    return;
+  }
+
+  if (method === 'configWarning') {
+    pushSystemNotice(null, 'warning', formatConfigWarningMessage(params), { noticeKind: 'config' });
+    return;
+  }
+
+  if (method === 'modelVerification') {
+    if (hasTrustedAccessForCyberVerification(params)) {
+      pushSystemNotice(params.threadId || null, 'warning', TRUSTED_ACCESS_FOR_CYBER_WARNING, {
+        noticeKind: 'modelVerification',
+      });
+    }
+    return;
+  }
+
+  if (method === 'terminalInteraction') {
     return;
   }
 

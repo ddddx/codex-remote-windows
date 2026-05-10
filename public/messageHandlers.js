@@ -51,6 +51,7 @@ export function createMessageHandler(deps) {
         upsertTab(tab);
       }
       state.serverRequests = [];
+      state.globalNotices = [];
       for (const request of msg.serverRequests || []) {
         upsertServerRequest(request);
       }
@@ -390,6 +391,16 @@ export function createMessageHandler(deps) {
 
     if (msg.type === 'warning') {
       const threadId = msg.threadId || state.activeThreadId;
+      if (!threadId) {
+        state.globalNotices.push({
+          type: '_warning',
+          id: createLocalId('global-warn'),
+          text: msg.message,
+          createdAt: Date.now(),
+        });
+        renderMessages();
+        return;
+      }
       const items = ensureItems(threadId);
       items.push({
         type: '_warning',

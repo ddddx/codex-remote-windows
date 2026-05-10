@@ -14,7 +14,6 @@ export function createMessageEntryBuilder(deps) {
     isItemInActiveTurn,
     getFileChangeOutput,
     getFileChangePatch,
-    getThreadTurnDiff,
     getThreadTurnPlan,
     normalizeFileChanges,
     getEffectiveComposerSelection,
@@ -25,16 +24,19 @@ export function createMessageEntryBuilder(deps) {
   function buildMessageEntries(threadId) {
     const connectionEntries = state.connectionError
       ? [{
-        key: '__connection_error__',
+          key: '__connection_error__',
         kind: '_error',
         text: state.connectionError,
-        signature: JSON.stringify(['connection_error', state.connectionError]),
-      }]
+          signature: JSON.stringify(['connection_error', state.connectionError]),
+        }]
       : [];
+    const globalNoticeEntries = (Array.isArray(state.globalNotices) ? state.globalNotices : [])
+      .map((item, index) => buildEntryFromItem('', item, new Map(), index))
+      .filter(Boolean);
 
     if (!threadId) {
-      if (connectionEntries.length) {
-        return connectionEntries;
+      if (connectionEntries.length || globalNoticeEntries.length) {
+        return connectionEntries.concat(globalNoticeEntries);
       }
       if (state.creatingTab) {
         return [{
@@ -70,7 +72,7 @@ export function createMessageEntryBuilder(deps) {
       });
     }
 
-    return connectionEntries.concat(entries);
+    return connectionEntries.concat(globalNoticeEntries, entries);
   }
 
   function buildSemanticTimelineEntries(threadId) {
@@ -156,10 +158,6 @@ export function createMessageEntryBuilder(deps) {
       const planEntry = buildTurnPlanEntry(threadId, group.turnId);
       if (planEntry) {
         group.turnMetaEntries.push(planEntry);
-      }
-      const diffEntry = buildTurnDiffEntry(threadId, group.turnId);
-      if (diffEntry) {
-        group.turnMetaEntries.push(diffEntry);
       }
     }
 
@@ -532,6 +530,59 @@ export function createMessageEntryBuilder(deps) {
       };
     }
 
+    if (item.type === 'imageGeneration') {
+      const renderVersion = ensureItemRenderVersion(item);
+      const timestampMs = extractItemTimestampMs(item);
+      return {
+        key,
+        kind: 'imageGeneration',
+        status: item.status || '',
+        result: item.result || '',
+        revisedPrompt: item.revisedPrompt || item.revised_prompt || '',
+        savedPath: item.savedPath || item.saved_path || '',
+        timestampMs,
+        signature: JSON.stringify([
+          'imageGeneration',
+          key,
+          renderVersion,
+          item.status || '',
+          item.result || '',
+          item.revisedPrompt || item.revised_prompt || '',
+          item.savedPath || item.saved_path || '',
+          timestampMs || 0,
+        ]),
+      };
+    }
+
+    if (item.type === 'hookPrompt') {
+      const renderVersion = ensureItemRenderVersion(item);
+      const fragments = Array.isArray(item.fragments)
+        ? item.fragments
+          .map((fragment) => ({
+            text: typeof fragment?.text === 'string' ? fragment.text : '',
+            hookRunId: fragment?.hookRunId || fragment?.hook_run_id || '',
+          }))
+          .filter((fragment) => fragment.text)
+        : [];
+      if (!fragments.length) {
+        return null;
+      }
+      const timestampMs = extractItemTimestampMs(item);
+      return {
+        key,
+        kind: 'hookPrompt',
+        fragments,
+        timestampMs,
+        signature: JSON.stringify([
+          'hookPrompt',
+          key,
+          renderVersion,
+          JSON.stringify(fragments),
+          timestampMs || 0,
+        ]),
+      };
+    }
+
     if (item.type === 'enteredReviewMode') {
       const timestampMs = extractItemTimestampMs(item);
       return {
@@ -648,22 +699,6 @@ export function createMessageEntryBuilder(deps) {
       plan: planState.plan,
       timestampMs: normalizeTimestampMs(planState.updatedAt) || null,
       signature: JSON.stringify(['turnPlan', turnId, explanation, JSON.stringify(planState.plan), normalizeTimestampMs(planState.updatedAt) || 0]),
-    };
-  }
-
-  function buildTurnDiffEntry(threadId, turnId) {
-    const diffState = getThreadTurnDiff(threadId, turnId);
-    const diff = String(diffState?.diff || '').trim();
-    if (!diff) {
-      return null;
-    }
-    return {
-      key: `turn-diff:${turnId}`,
-      kind: 'turnDiff',
-      diff,
-      changes: normalizeFileChanges([], diff),
-      timestampMs: normalizeTimestampMs(diffState.updatedAt) || null,
-      signature: JSON.stringify(['turnDiff', turnId, diff, normalizeTimestampMs(diffState.updatedAt) || 0]),
     };
   }
 

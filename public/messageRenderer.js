@@ -437,43 +437,6 @@ export function createMessageRenderer(deps) {
     }
   }
 
-  function populateTurnDiffEntry(node, entry) {
-    node.className = 'timeline-card timeline-card-file-change turn-diff-card';
-    const detailStateKey = getDetailStateKey(entry, 'turnDiff');
-    const preservedState = preserveDetailOpenState(node);
-    const details = document.createElement('details');
-    details.className = 'timeline-inline-detail-row';
-    applyDetailOpenState(details, preservedState, false, detailStateKey);
-
-    const summary = document.createElement('summary');
-    summary.appendChild(createTimelineTitle(`🧩 ${compactText(summarizeFileChanges(entry.changes) || '本轮聚合变更', 120)}`));
-    summary.appendChild(createTimelineMeta('Turn Diff'));
-    if (entry.timestampMs) {
-      summary.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
-    }
-    details.appendChild(summary);
-
-    const body = createDetailContent();
-    if (entry.changes?.length) {
-      const changes = document.createElement('div');
-      changes.className = 'file-change-list';
-      for (const change of entry.changes) {
-        const line = document.createElement('div');
-        line.className = `file-change-entry kind-${getNormalizedFileChangeKind(change.kind)}`;
-        line.appendChild(document.createTextNode(`${formatFileChangePrefix(change.kind)} ${change.path}`));
-        const statsNode = createFileChangeLineStatsNode(change);
-        if (statsNode) {
-          line.appendChild(statsNode);
-        }
-        changes.appendChild(line);
-      }
-      body.appendChild(changes);
-    }
-    body.appendChild(createDiffBlock(entry.diff));
-    details.appendChild(body);
-    node.appendChild(details);
-  }
-
   function populateMcpToolCallEntry(node, entry) {
     node.className = 'timeline-card timeline-card-tool';
     node.appendChild(createTimelineTitle(`MCP · ${entry.server}.${entry.tool}`));
@@ -568,6 +531,38 @@ export function createMessageRenderer(deps) {
     }
   }
 
+  function populateImageGenerationEntry(node, entry) {
+    node.className = 'timeline-card timeline-card-tool timeline-card-image-generation';
+    node.appendChild(createTimelineTitle('生成图片'));
+    node.appendChild(createTimelineMeta(formatExecutionStatusText(entry.status)));
+    if (entry.revisedPrompt) {
+      node.appendChild(createMessageBody(renderMarkdown(entry.revisedPrompt)));
+    }
+    if (entry.savedPath) {
+      node.appendChild(createTimelineMeta(entry.savedPath));
+    } else if (entry.result) {
+      node.appendChild(createTimelineMeta(entry.result));
+    }
+    if (entry.timestampMs) {
+      node.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+    }
+  }
+
+  function populateHookPromptEntry(node, entry) {
+    node.className = 'timeline-card timeline-card-hook-prompt';
+    node.appendChild(createTimelineTitle('Hook Prompt'));
+    const fragments = Array.isArray(entry.fragments) ? entry.fragments : [];
+    for (const fragment of fragments) {
+      node.appendChild(createTimelinePre(fragment.text || '', 'timeline-inline-pre-output'));
+      if (fragment.hookRunId) {
+        node.appendChild(createTimelineMeta(`hook run: ${fragment.hookRunId}`));
+      }
+    }
+    if (entry.timestampMs) {
+      node.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+    }
+  }
+
   function populateThinkingEntry(node, entry) {
     node.className = 'timeline-card timeline-card-thinking';
     const title = createTimelineTitle('思考中…');
@@ -586,6 +581,9 @@ export function createMessageRenderer(deps) {
   function populateNoticeEntry(node, entry) {
     node.className = `timeline-system timeline-system-${entry.kind === '_error' ? 'error' : 'warning'}`;
     node.textContent = entry.text;
+    if (entry.timestampMs) {
+      node.appendChild(createTimestampNode(entry.timestampMs, 'timeline-entry-timestamp'));
+    }
   }
 
   function populatePermissionPromptEntry(node, entry) {
@@ -786,11 +784,6 @@ export function createMessageRenderer(deps) {
       return;
     }
 
-    if (entry.kind === 'turnDiff') {
-      populateTurnDiffEntry(node, entry);
-      return;
-    }
-
     if (entry.kind === 'tool') {
       populateToolEntry(node, entry);
       return;
@@ -833,6 +826,16 @@ export function createMessageRenderer(deps) {
 
     if (entry.kind === 'imageView') {
       populateImageViewEntry(node, entry);
+      return;
+    }
+
+    if (entry.kind === 'imageGeneration') {
+      populateImageGenerationEntry(node, entry);
+      return;
+    }
+
+    if (entry.kind === 'hookPrompt') {
+      populateHookPromptEntry(node, entry);
       return;
     }
 
