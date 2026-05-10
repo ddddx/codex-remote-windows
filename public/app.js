@@ -2867,6 +2867,15 @@ function markThreadUnread(threadId) {
   return state.unreadThreadIds.size !== sizeBefore;
 }
 
+function hasUnreadInInactiveTabs() {
+  for (const threadId of state.unreadThreadIds) {
+    if (threadId && threadId !== state.activeThreadId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function normalizeServerRequestStatus(status) {
   return status === 'submitting' ? 'submitting' : 'pending';
 }
@@ -3238,6 +3247,7 @@ function finalizeItem(threadId, turnId, item) {
 
 function renderTabs() {
   tabList.innerHTML = '';
+  menuBtn.classList.toggle('has-unread', hasUnreadInInactiveTabs());
   for (const tab of state.tabs) {
     const status = normalizeTabStatus(tab.status);
     const isClosed = status === 'closed';

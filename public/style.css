@@ -572,6 +572,22 @@ body {
   background: var(--bg);
 }
 
+.btn-icon.has-unread {
+  position: relative;
+}
+
+.btn-icon.has-unread::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--unread-dot);
+  box-shadow: 0 0 0 2px var(--card);
+}
+
 .theme-select-group {
   display: inline-flex;
   align-items: center;
