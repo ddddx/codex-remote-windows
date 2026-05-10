@@ -418,22 +418,25 @@ export function createThreadStore(deps) {
   }
 
   function dedupeFileChanges(changes) {
-    const seen = new Set();
-    const result = [];
+    const merged = new Map();
     for (const change of changes) {
       const path = String(change?.path || '').trim();
       if (!path) {
         continue;
       }
       const kind = getNormalizedFileChangeKind(change.kind);
+      const addedLines = Math.max(0, Number.parseInt(change?.addedLines, 10) || 0);
+      const deletedLines = Math.max(0, Number.parseInt(change?.deletedLines, 10) || 0);
       const key = `${kind}:${path}`;
-      if (seen.has(key)) {
+      const existing = merged.get(key);
+      if (existing) {
+        existing.addedLines += addedLines;
+        existing.deletedLines += deletedLines;
         continue;
       }
-      seen.add(key);
-      result.push({ path, kind });
+      merged.set(key, { path, kind, addedLines, deletedLines });
     }
-    return result;
+    return Array.from(merged.values());
   }
 
   function parseFileChangesFromPatch(patch) {
@@ -445,23 +448,41 @@ export function createThreadStore(deps) {
     const changes = [];
     const lines = text.split(/\r?\n/);
     let currentDiffPath = '';
+    let currentChange = null;
+
+    function ensureCurrentChange(kind, path) {
+      const normalizedPath = String(path || '').trim();
+      if (!normalizedPath) {
+        currentChange = null;
+        return null;
+      }
+      currentDiffPath = normalizedPath;
+      currentChange = {
+        path: normalizedPath,
+        kind: getNormalizedFileChangeKind(kind),
+        addedLines: 0,
+        deletedLines: 0,
+      };
+      changes.push(currentChange);
+      return currentChange;
+    }
 
     for (const line of lines) {
       let match = line.match(/^\*\*\* Add File: (.+)$/);
       if (match) {
-        changes.push({ kind: 'add', path: match[1].trim() });
+        ensureCurrentChange('add', match[1].trim());
         continue;
       }
 
       match = line.match(/^\*\*\* Delete File: (.+)$/);
       if (match) {
-        changes.push({ kind: 'delete', path: match[1].trim() });
+        ensureCurrentChange('delete', match[1].trim());
         continue;
       }
 
       match = line.match(/^\*\*\* Update File: (.+)$/);
       if (match) {
-        changes.push({ kind: 'update', path: match[1].trim() });
+        ensureCurrentChange('update', match[1].trim());
         continue;
       }
 
@@ -469,24 +490,59 @@ export function createThreadStore(deps) {
       if (match) {
         currentDiffPath = (match[2] || match[1] || '').trim();
         if (currentDiffPath) {
-          changes.push({ kind: 'update', path: currentDiffPath });
+          ensureCurrentChange('update', currentDiffPath);
         }
         continue;
       }
 
       match = line.match(/^rename to (.+)$/);
       if (match) {
-        changes.push({ kind: 'update', path: match[1].trim() });
+        ensureCurrentChange('update', match[1].trim());
         continue;
       }
 
       if (line.startsWith('new file mode ') && currentDiffPath) {
-        changes.push({ kind: 'add', path: currentDiffPath });
+        ensureCurrentChange('add', currentDiffPath);
         continue;
       }
 
       if (line.startsWith('deleted file mode ') && currentDiffPath) {
-        changes.push({ kind: 'delete', path: currentDiffPath });
+        ensureCurrentChange('delete', currentDiffPath);
+        continue;
+      }
+
+      if (line.startsWith('*** Move to: ')) {
+        const movedPath = line.replace(/^\*\*\* Move to:\s*/, '').trim();
+        if (movedPath) {
+          currentDiffPath = movedPath;
+          if (currentChange) {
+            currentChange.path = movedPath;
+          }
+        }
+        continue;
+      }
+
+      if (line.startsWith('+++ ') || line.startsWith('--- ') || line.startsWith('@@') || line.startsWith('index ') || line.startsWith('Binary files ') || line.startsWith('rename from ')) {
+        continue;
+      }
+
+      if (line.startsWith('+') && !line.startsWith('+++ ')) {
+        if (!currentChange && currentDiffPath) {
+          currentChange = ensureCurrentChange('update', currentDiffPath);
+        }
+        if (currentChange) {
+          currentChange.addedLines += 1;
+        }
+        continue;
+      }
+
+      if (line.startsWith('-') && !line.startsWith('--- ')) {
+        if (!currentChange && currentDiffPath) {
+          currentChange = ensureCurrentChange('update', currentDiffPath);
+        }
+        if (currentChange) {
+          currentChange.deletedLines += 1;
+        }
       }
     }
 
@@ -494,22 +550,42 @@ export function createThreadStore(deps) {
   }
 
   function normalizeFileChanges(changes, patch = '') {
+    const patchChanges = parseFileChangesFromPatch(patch);
+    const patchStatsByPath = new Map();
+    for (const change of patchChanges) {
+      const path = String(change?.path || '').trim();
+      if (!path) {
+        continue;
+      }
+      patchStatsByPath.set(path, {
+        kind: getNormalizedFileChangeKind(change.kind),
+        addedLines: Math.max(0, Number.parseInt(change?.addedLines, 10) || 0),
+        deletedLines: Math.max(0, Number.parseInt(change?.deletedLines, 10) || 0),
+      });
+    }
+
     const normalized = dedupeFileChanges(
       (Array.isArray(changes) ? changes : []).map((change) => ({
         path: change?.path || change?.filePath || change?.file || '',
         kind: stringifyFileChangeKind(change?.kind || change?.type || ''),
+        addedLines: change?.addedLines ?? patchStatsByPath.get(String(change?.path || change?.filePath || change?.file || '').trim())?.addedLines ?? 0,
+        deletedLines: change?.deletedLines ?? patchStatsByPath.get(String(change?.path || change?.filePath || change?.file || '').trim())?.deletedLines ?? 0,
       }))
     );
     if (normalized.length) {
       return normalized;
     }
-    return parseFileChangesFromPatch(patch);
+    return patchChanges;
   }
 
   function summarizeFileChanges(changes) {
     const counts = { add: 0, update: 0, delete: 0 };
+    let addedLines = 0;
+    let deletedLines = 0;
     for (const change of changes) {
       counts[getNormalizedFileChangeKind(change.kind)] += 1;
+      addedLines += Math.max(0, Number.parseInt(change?.addedLines, 10) || 0);
+      deletedLines += Math.max(0, Number.parseInt(change?.deletedLines, 10) || 0);
     }
 
     const parts = [];
@@ -521,6 +597,9 @@ export function createThreadStore(deps) {
     }
     if (counts.delete) {
       parts.push(`删除 ${counts.delete}`);
+    }
+    if (addedLines || deletedLines) {
+      parts.push(`+${addedLines} / -${deletedLines}`);
     }
     return parts.join(' · ');
   }

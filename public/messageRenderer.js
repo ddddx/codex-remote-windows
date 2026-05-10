@@ -317,7 +317,7 @@ export function createMessageRenderer(deps) {
     for (const change of entry.changes) {
       const line = document.createElement('div');
       line.className = `file-change-entry kind-${getNormalizedFileChangeKind(change.kind)}`;
-      line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}`;
+      line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}${formatFileChangeLineStats(change)}`;
       changes.appendChild(line);
     }
     body.appendChild(changes);
@@ -625,6 +625,15 @@ export function createMessageRenderer(deps) {
     return '~ 修改';
   }
 
+  function formatFileChangeLineStats(change) {
+    const addedLines = Math.max(0, Number.parseInt(change?.addedLines, 10) || 0);
+    const deletedLines = Math.max(0, Number.parseInt(change?.deletedLines, 10) || 0);
+    if (!addedLines && !deletedLines) {
+      return '';
+    }
+    return ` (+${addedLines} / -${deletedLines})`;
+  }
+
   function populateServerRequestNode(node, request) {
     const title = document.createElement('div');
     title.className = 'item-label';
@@ -694,7 +703,7 @@ export function createMessageRenderer(deps) {
         normalizedChanges.forEach((change) => {
           const line = document.createElement('div');
           line.className = `file-change-entry kind-${getNormalizedFileChangeKind(change.kind)}`;
-          line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}`;
+          line.textContent = `${formatFileChangePrefix(change.kind)} ${change.path}${formatFileChangeLineStats(change)}`;
           changes.appendChild(line);
         });
         node.appendChild(changes);

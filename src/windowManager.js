@@ -39,7 +39,7 @@ class CodexWindowManager {
     const escapedCmd = this.codexCmd.replace(/'/g, "''");
     const escapedWs = this.appServerWs.replace(/'/g, "''");
     const escapedThread = threadId.replace(/'/g, "''");
-    const commandLine = `""${escapedCmd}" --remote ${escapedWs} resume ${escapedThread}"`;
+    const commandLine = `""${escapedCmd}" -c check_for_update_on_startup=false --remote ${escapedWs} resume ${escapedThread}"`;
 
     const script = [
       "$ErrorActionPreference = 'Stop'",
