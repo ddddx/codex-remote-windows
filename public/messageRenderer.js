@@ -1057,27 +1057,7 @@ export function createMessageRenderer(deps) {
         });
       }, 'btn-secondary'));
     } else {
-      actions.appendChild(createActionButton('批准', submitting, () => {
-        submitServerRequestResponse(request, {
-          decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
-            ? 'approved'
-            : 'accept',
-        });
-      }));
-      actions.appendChild(createActionButton('本会话允许', submitting, () => {
-        submitServerRequestResponse(request, {
-          decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
-            ? 'approved_for_session'
-            : 'acceptForSession',
-        });
-      }));
-      actions.appendChild(createActionButton('拒绝', submitting, () => {
-        submitServerRequestResponse(request, {
-          decision: request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy')
-            ? 'denied'
-            : 'decline',
-        });
-      }, 'btn-secondary'));
+      appendApprovalDecisionActions(actions, request, submitting);
     }
 
     node.appendChild(actions);
@@ -1354,6 +1334,51 @@ export function createMessageRenderer(deps) {
       return '⏳ Dynamic Tool 调用';
     }
     return '⏳ 命令执行待批准';
+  }
+
+  function appendApprovalDecisionActions(actions, request, submitting) {
+    const legacy = request.kind.startsWith('file_change_approval_legacy') || request.kind.startsWith('command_approval_legacy');
+    const fallback = legacy
+      ? ['approved', 'approved_for_session', 'denied']
+      : ['accept', 'acceptForSession', 'decline'];
+    const decisions = Array.isArray(request.availableDecisions) && request.availableDecisions.length
+      ? request.availableDecisions
+      : fallback;
+
+    decisions.forEach((decision) => {
+      const label = formatApprovalDecisionLabel(decision);
+      if (!label) {
+        return;
+      }
+      const isReject = decision === 'decline' || decision === 'denied' || decision === 'cancel';
+      actions.appendChild(createActionButton(label, submitting, () => {
+        submitServerRequestResponse(request, { decision });
+      }, isReject ? 'btn-secondary' : ''));
+    });
+  }
+
+  function formatApprovalDecisionLabel(decision) {
+    if (decision === 'accept' || decision === 'approved') {
+      return '批准';
+    }
+    if (decision === 'acceptForSession' || decision === 'approved_for_session') {
+      return '本会话允许';
+    }
+    if (decision === 'decline' || decision === 'denied') {
+      return '拒绝';
+    }
+    if (decision === 'cancel') {
+      return '取消';
+    }
+    if (typeof decision === 'object' && decision) {
+      if (decision.acceptWithExecpolicyAmendment) {
+        return '按规则允许';
+      }
+      if (decision.applyNetworkPolicyAmendment) {
+        return '应用网络规则';
+      }
+    }
+    return '';
   }
 
   function normalizePlanStepStatus(status) {

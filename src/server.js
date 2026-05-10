@@ -1057,10 +1057,13 @@ function createServerRequestRecord(msg) {
       command: params.command || '',
       cwd: params.cwd || '',
       commandActions: Array.isArray(params.commandActions) ? params.commandActions : [],
+      networkApprovalContext: params.networkApprovalContext || null,
+      additionalPermissions: params.additionalPermissions || null,
       proposedExecpolicyAmendment: params.proposedExecpolicyAmendment || null,
       proposedNetworkPolicyAmendments: Array.isArray(params.proposedNetworkPolicyAmendments)
         ? params.proposedNetworkPolicyAmendments
         : [],
+      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
     };
   }
 

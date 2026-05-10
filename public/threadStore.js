@@ -976,6 +976,10 @@ export function createThreadStore(deps) {
 
     reconcilePendingUserMessagesFromSync(threadId, syncedItems);
 
+    const lastTurn = turns?.[turns.length - 1];
+    const lastTurnStatus = normalizeTurnStatus(lastTurn?.status);
+    const shouldPreserveLivePartials = lastTurnStatus === 'inProgress'
+      || (!lastTurnStatus && state.turnActiveByThread.get(threadId));
     const existing = state.itemsByThread.get(threadId) || [];
     const syncedIds = new Set(syncedItems.map((item) => item.id));
     const partials = state.partialByThread.get(threadId) || new Map();
@@ -988,14 +992,8 @@ export function createThreadStore(deps) {
         merged.push(item);
         continue;
       }
-      if (isPartial && !syncedIds.has(item.id)) {
-        partials.delete(item.id);
-      }
-    }
-
-    for (const itemId of Array.from(partials.keys())) {
-      if (!syncedIds.has(itemId)) {
-        partials.delete(itemId);
+      if (shouldPreserveLivePartials && isPartial && !syncedIds.has(item.id)) {
+        merged.push(item);
       }
     }
 
@@ -1007,7 +1005,6 @@ export function createThreadStore(deps) {
     }
     prunePendingUserMessages(threadId);
 
-    const lastTurn = turns?.[turns.length - 1];
     if (!lastTurn) {
       state.partialByThread.delete(threadId);
       state.turnActiveByThread.set(threadId, false);
@@ -1015,7 +1012,6 @@ export function createThreadStore(deps) {
       clearTurnStartedAt(threadId);
       return;
     }
-    const lastTurnStatus = normalizeTurnStatus(lastTurn?.status);
     if (['completed', 'failed', 'cancelled', 'aborted', 'idle'].includes(lastTurnStatus)) {
       state.partialByThread.delete(threadId);
       state.turnActiveByThread.set(threadId, false);

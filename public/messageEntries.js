@@ -217,6 +217,7 @@ export function createMessageEntryBuilder(deps) {
           turnId: activeTurnId,
           userEntry: null,
           assistantEntries: [],
+          turnMetaEntries: [],
           isActive: true,
           isPendingLocal: false,
         });
@@ -267,6 +268,7 @@ export function createMessageEntryBuilder(deps) {
 
     if (entry.kind === 'turn') {
       return entry.isActive
+        || (entry.turnMetaEntries || []).some((metaEntry) => hasLiveEntryActivity(metaEntry))
         || entry.assistantEntries.some((assistantEntry) => hasLiveEntryActivity(assistantEntry));
     }
 
@@ -280,6 +282,23 @@ export function createMessageEntryBuilder(deps) {
       threadId,
       signature: JSON.stringify(['thinking', key, threadId]),
     };
+  }
+
+  function createContentDigest(value) {
+    let text = '';
+    try {
+      text = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch {
+      text = String(value || '');
+    }
+    if (!text) {
+      return '';
+    }
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+    }
+    return `${text.length}:${hash >>> 0}`;
   }
 
   function buildEntryFromItem(threadId, item, partials, index) {
@@ -381,7 +400,7 @@ export function createMessageEntryBuilder(deps) {
         output,
         timestampMs,
         threadId: activeThreadId,
-        signature: JSON.stringify(['command', key, renderVersion, status, activeThreadId, timestampMs || 0]),
+        signature: JSON.stringify(['command', key, renderVersion, status, activeThreadId, createContentDigest(output), timestampMs || 0]),
       };
     }
 
@@ -405,7 +424,17 @@ export function createMessageEntryBuilder(deps) {
         patch,
         timestampMs,
         threadId: activeThreadId,
-        signature: JSON.stringify(['fileChange', key, renderVersion, status, activeThreadId, timestampMs || 0]),
+        signature: JSON.stringify([
+          'fileChange',
+          key,
+          renderVersion,
+          status,
+          activeThreadId,
+          createContentDigest(changes),
+          createContentDigest(output),
+          createContentDigest(patch),
+          timestampMs || 0,
+        ]),
       };
     }
 
@@ -422,7 +451,16 @@ export function createMessageEntryBuilder(deps) {
         result: item.result || null,
         error: item.error || null,
         timestampMs,
-        signature: JSON.stringify(['mcpToolCall', key, renderVersion, item.status || '', timestampMs || 0]),
+        signature: JSON.stringify([
+          'mcpToolCall',
+          key,
+          renderVersion,
+          item.status || '',
+          createContentDigest(item.arguments),
+          createContentDigest(item.result || null),
+          createContentDigest(item.error || null),
+          timestampMs || 0,
+        ]),
       };
     }
 
@@ -440,7 +478,19 @@ export function createMessageEntryBuilder(deps) {
         prompt: item.prompt || '',
         agentStatus: item.agentStatus || '',
         timestampMs,
-        signature: JSON.stringify(['collabToolCall', key, renderVersion, item.status || '', item.tool || '', timestampMs || 0]),
+        signature: JSON.stringify([
+          'collabToolCall',
+          key,
+          renderVersion,
+          item.status || '',
+          item.tool || '',
+          item.agentStatus || '',
+          item.senderThreadId || '',
+          item.receiverThreadId || '',
+          item.newThreadId || '',
+          createContentDigest(item.prompt || ''),
+          timestampMs || 0,
+        ]),
       };
     }
 
@@ -457,7 +507,17 @@ export function createMessageEntryBuilder(deps) {
         success: typeof item.success === 'boolean' ? item.success : null,
         contentItems: Array.isArray(item.contentItems) ? item.contentItems : [],
         timestampMs,
-        signature: JSON.stringify(['dynamicToolCall', key, renderVersion, item.status || '', item.tool || '', item.success, timestampMs || 0]),
+        signature: JSON.stringify([
+          'dynamicToolCall',
+          key,
+          renderVersion,
+          item.status || '',
+          item.tool || '',
+          item.success,
+          createContentDigest(item.arguments),
+          createContentDigest(item.contentItems || []),
+          timestampMs || 0,
+        ]),
       };
     }
 
@@ -552,6 +612,7 @@ export function createMessageEntryBuilder(deps) {
       JSON.stringify(request.permissions || {}),
       JSON.stringify(request.questions || []),
       JSON.stringify(request.fileChanges || {}),
+      JSON.stringify(request.availableDecisions || []),
     ]);
 
     return {
