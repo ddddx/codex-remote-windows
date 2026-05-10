@@ -22,7 +22,7 @@ import {
   normalizeUserMessageContent,
   renderMarkdown,
 } from './messageContent.js';
-import { createApiFetchJson } from './apiClient.js';
+import { createApiFetchJson, isUnauthorizedApiError } from './apiClient.js';
 import { createSocketController } from './socket.js';
 import { createSessionModalController } from './sessionModal.js';
 import { createMessageHandler } from './messageHandlers.js';
@@ -85,7 +85,7 @@ const workspaceUpBtn = document.getElementById('workspaceUpBtn');
 const workspaceRefreshBtn = document.getElementById('workspaceRefreshBtn');
 const createWorkspaceBtn = document.getElementById('createWorkspaceBtn');
 const useCurrentWorkspaceBtn = document.getElementById('useCurrentWorkspaceBtn');
-const workspaceShortcutList = document.getElementById('workspaceShortcutList');
+const workspaceShortcutSelect = document.getElementById('workspaceShortcutSelect');
 const workspaceBrowserPath = document.getElementById('workspaceBrowserPath');
 const workspaceBrowserList = document.getElementById('workspaceBrowserList');
 const sessionModalHint = document.getElementById('sessionModalHint');
@@ -142,6 +142,7 @@ const state = {
   turnStartedAtByThread: new Map(),
   tokenUsageByThread: new Map(),
   composerAttachmentsByThread: new Map(),
+  composerDraftByThread: new Map(),
   composerUploadsInFlightByThread: new Map(),
   unreadThreadIds: new Set(),
   pendingUserMessages: new Map(),
@@ -173,6 +174,13 @@ const sessionModalState = {
   browserEntries: [],
 };
 
+let renderMessages = () => {};
+let forgetThread = () => {};
+let handleMessage = () => {};
+let focusServerRequestCard = () => false;
+let refreshLiveWorkingLabels = () => {};
+let submitServerRequestResponse = () => {};
+
 function getComposerAttachments(threadId = state.activeThreadId) {
   if (!threadId) {
     return [];
@@ -188,6 +196,37 @@ function setComposerAttachments(threadId, attachments) {
     return;
   }
   state.composerAttachmentsByThread.set(threadId, Array.isArray(attachments) ? attachments : []);
+}
+
+function getComposerDraft(threadId = state.activeThreadId) {
+  if (!threadId) {
+    return '';
+  }
+  return state.composerDraftByThread.get(threadId) || '';
+}
+
+function setComposerDraft(threadId, text) {
+  if (!threadId) {
+    return;
+  }
+  const normalized = typeof text === 'string' ? text : '';
+  if (normalized) {
+    state.composerDraftByThread.set(threadId, normalized);
+  } else {
+    state.composerDraftByThread.delete(threadId);
+  }
+}
+
+function persistActiveComposerDraft() {
+  if (!state.activeThreadId) {
+    return;
+  }
+  setComposerDraft(state.activeThreadId, promptInput.value);
+}
+
+function restoreComposerDraft(threadId) {
+  promptInput.value = getComposerDraft(threadId);
+  autoResizePromptInput();
 }
 
 function clearComposerAttachments(threadId = state.activeThreadId) {
@@ -269,6 +308,7 @@ function submitTurnMessage(threadId, text, attachments, options = {}) {
   }
 
   promptInput.value = '';
+  setComposerDraft(threadId, '');
   clearComposerAttachments(threadId);
   autoResizePromptInput();
   closeSlashMenu();
@@ -326,7 +366,9 @@ async function loadComposerOptions(options = {}) {
     if (requestId !== composerOptionsRequestSerial) {
       return;
     }
-    console.error('failed loading codex options', error);
+    if (!isUnauthorizedApiError(error)) {
+      console.error('failed loading codex options', error);
+    }
   } finally {
     if (requestId === composerOptionsRequestSerial) {
       state.composerOptionsLoading = false;
@@ -679,8 +721,10 @@ const threadStore = createThreadStore({
   clearTurnStartedAt,
   getTurnStartedAtFromTurn,
   loadComposerOptions,
+  persistActiveComposerDraft,
+  restoreComposerDraft,
   send: (payload) => send(payload),
-  forgetThread,
+  forgetThread: (...args) => forgetThread(...args),
   render,
 });
 
@@ -777,7 +821,7 @@ const {
     workspaceRefreshBtn,
     createWorkspaceBtn,
     useCurrentWorkspaceBtn,
-    workspaceShortcutList,
+    workspaceShortcutSelect,
     workspaceBrowserPath,
     workspaceBrowserList,
     sessionModalHint,
@@ -856,13 +900,13 @@ const messageRenderer = createMessageRenderer({
   render,
 });
 
-const {
+({
   focusServerRequestCard,
   forgetThread,
   refreshLiveWorkingLabels,
   renderMessages,
   submitServerRequestResponse,
-} = messageRenderer;
+} = messageRenderer);
 
 slashController = createSlashController({
   state,
@@ -928,7 +972,7 @@ const { uploadComposerImageFiles } = createUploadController({
   setComposerUploadCount,
 });
 
-const handleMessage = createMessageHandler({
+handleMessage = createMessageHandler({
   state,
   promptInput,
   render,
@@ -939,6 +983,7 @@ const handleMessage = createMessageHandler({
   send,
   markAuthFailed,
   scheduleRender,
+  loadComposerOptions,
   ensureItems,
   upsertTab,
   removeTab,
@@ -970,7 +1015,6 @@ const handleMessage = createMessageHandler({
 });
 
 socketController.connect();
-void loadComposerOptions({ render: false });
 
 function toggleSidebar(event) {
   if (event) {
@@ -1031,6 +1075,15 @@ workspaceRefreshBtn.addEventListener('click', () => {
     return;
   }
   void browseWorkspacePath(sessionModalState.browserPath);
+});
+
+workspaceShortcutSelect.addEventListener('change', () => {
+  const nextPath = workspaceShortcutSelect.value.trim();
+  if (!nextPath) {
+    return;
+  }
+  updateSessionWorkspacePath(nextPath);
+  void browseWorkspacePath(nextPath);
 });
 
 createWorkspaceBtn.addEventListener('click', () => {
@@ -1106,6 +1159,7 @@ promptInput.addEventListener('keydown', (event) => {
 });
 
 promptInput.addEventListener('input', () => {
+  persistActiveComposerDraft();
   slashController.handlePromptInput();
 });
 

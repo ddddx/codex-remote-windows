@@ -10,6 +10,7 @@ export function createMessageHandler(deps) {
     send,
     markAuthFailed,
     scheduleRender,
+    loadComposerOptions,
     ensureItems,
     upsertTab,
     removeTab,
@@ -61,6 +62,7 @@ export function createMessageHandler(deps) {
         send({ type: 'thread_sync', threadId: state.activeThreadId });
       }
       render();
+      void loadComposerOptions({ render: false });
       return;
     }
 

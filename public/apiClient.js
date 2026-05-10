@@ -17,3 +17,7 @@ export function createApiFetchJson(getWebSocketToken) {
     return data;
   };
 }
+
+export function isUnauthorizedApiError(error) {
+  return error instanceof Error && error.message === 'Unauthorized';
+}

@@ -25,7 +25,7 @@ export function createSessionModalController(deps) {
     workspaceRefreshBtn,
     createWorkspaceBtn,
     useCurrentWorkspaceBtn,
-    workspaceShortcutList,
+    workspaceShortcutSelect,
     workspaceBrowserPath,
     workspaceBrowserList,
     sessionModalHint,
@@ -50,7 +50,7 @@ export function createSessionModalController(deps) {
 
   function renderSessionModal() {
     const shortcuts = sessionModalState.shortcuts || {};
-    workspaceShortcutList.replaceChildren();
+    workspaceShortcutSelect.replaceChildren();
 
     const shortcutItems = [
       { label: '项目目录', path: shortcuts.projectRoot },
@@ -62,30 +62,25 @@ export function createSessionModalController(deps) {
       })) : []),
     ];
 
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = sessionModalState.loadingShortcuts ? '正在读取快捷路径...' : '请选择快捷路径';
+    workspaceShortcutSelect.appendChild(placeholderOption);
+
     shortcutItems.forEach((shortcut) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'btn btn-secondary workspace-shortcut';
-      button.disabled = !shortcut.path || sessionModalState.loadingShortcuts || sessionModalState.browserLoading || sessionModalState.creatingWorkspace;
-
-      const label = document.createElement('span');
-      label.className = 'workspace-shortcut-label';
-      label.textContent = `${shortcut.label}: ${shortcut.path || '不可用'}`;
-      button.appendChild(label);
-
-      button.addEventListener('click', async () => {
-        if (!shortcut.path) {
-          return;
-        }
-        updateSessionWorkspacePath(shortcut.path);
-        await browseWorkspacePath(shortcut.path);
-      });
-      workspaceShortcutList.appendChild(button);
+      if (!shortcut.path) {
+        return;
+      }
+      const option = document.createElement('option');
+      option.value = shortcut.path;
+      option.textContent = `${shortcut.label} · ${shortcut.path}`;
+      workspaceShortcutSelect.appendChild(option);
     });
 
     const busy = sessionModalState.loadingShortcuts || sessionModalState.browserLoading || sessionModalState.creatingWorkspace;
     sessionNameInput.disabled = busy;
     sessionWorkspaceInput.disabled = busy;
+    workspaceShortcutSelect.disabled = busy || shortcutItems.every((shortcut) => !shortcut.path);
     browseWorkspaceBtn.disabled = busy;
     workspaceUpBtn.disabled = busy || !sessionModalState.browserParentPath;
     workspaceRefreshBtn.disabled = busy || !sessionModalState.browserPath;
@@ -95,6 +90,9 @@ export function createSessionModalController(deps) {
     sessionModalConfirmBtn.disabled = busy;
     browseWorkspaceBtn.textContent = sessionModalState.browserLoading ? '加载中...' : '进入路径';
     createWorkspaceBtn.textContent = sessionModalState.creatingWorkspace ? '正在创建...' : '新建文件夹';
+    workspaceShortcutSelect.value = shortcutItems.some((shortcut) => shortcut.path === sessionWorkspaceInput.value.trim())
+      ? sessionWorkspaceInput.value.trim()
+      : '';
 
     workspaceBrowserPath.textContent = sessionModalState.browserPath || '尚未加载目录';
     workspaceBrowserList.replaceChildren();

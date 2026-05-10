@@ -128,7 +128,12 @@
               <button id="useCurrentWorkspaceBtn" class="btn" type="button">使用当前目录</button>
             </div>
 
-            <div id="workspaceShortcutList" class="workspace-shortcut-list"></div>
+            <div class="workspace-shortcut-panel">
+              <label class="modal-label workspace-shortcut-label-block" for="workspaceShortcutSelect">快捷路径</label>
+              <select id="workspaceShortcutSelect" class="modal-input workspace-shortcut-select">
+                <option value="">请选择快捷路径</option>
+              </select>
+            </div>
             <div class="workspace-browser">
               <div id="workspaceBrowserPath" class="workspace-browser-path"></div>
               <div id="workspaceBrowserList" class="workspace-browser-list"></div>
@@ -154,6 +159,6 @@
     </template>
 
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js" crossorigin="anonymous"></script>
-    <script type="module" src="/app.js?v=34"></script>
+    <script type="module" src="/app.js?v=39"></script>
   </body>
 </html>

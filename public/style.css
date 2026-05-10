@@ -2342,24 +2342,16 @@ body {
   flex: 1;
 }
 
-.workspace-shortcut-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+.workspace-shortcut-panel {
+  margin-top: 14px;
 }
 
-.workspace-shortcut {
-  max-width: 100%;
+.workspace-shortcut-label-block {
+  margin-bottom: 6px;
 }
 
-.workspace-shortcut-label {
-  display: inline-block;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
+.workspace-shortcut-select {
+  width: 100%;
 }
 
 .session-modal-hint {
@@ -2566,25 +2558,8 @@ body {
     flex: 0 0 auto;
   }
 
-  .workspace-shortcut-list {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 8px;
-    padding-bottom: 2px;
-    margin-right: -2px;
-  }
-
-  .workspace-shortcut {
-    flex: 0 0 auto;
-    min-width: min(78vw, 280px);
-  }
-
-  .workspace-shortcut-label {
-    max-width: none;
-    display: block;
-    white-space: normal;
-    line-height: 1.4;
+  .workspace-shortcut-panel {
+    margin-top: 12px;
   }
 
   .workspace-browser {

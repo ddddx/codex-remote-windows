@@ -13,6 +13,8 @@ export function createThreadStore(deps) {
     clearTurnStartedAt,
     getTurnStartedAtFromTurn,
     loadComposerOptions,
+    persistActiveComposerDraft,
+    restoreComposerDraft,
     send,
     forgetThread,
     render,
@@ -749,6 +751,7 @@ export function createThreadStore(deps) {
     state.currentTurnIdByThread.delete(threadId);
     state.tokenUsageByThread.delete(threadId);
     state.composerAttachmentsByThread.delete(threadId);
+    state.composerDraftByThread.delete(threadId);
     state.composerUploadsInFlightByThread.delete(threadId);
     state.composerPrefsByThread.delete(threadId);
     state.serverRequests = state.serverRequests.filter((entry) => entry.threadId !== threadId);
@@ -772,6 +775,10 @@ export function createThreadStore(deps) {
       return;
     }
 
+    if (state.activeThreadId && state.activeThreadId !== threadId) {
+      persistActiveComposerDraft();
+    }
+
     if (!state.tabs.some((entry) => entry.threadId === threadId)) {
       upsertTab({
         threadId,
@@ -786,6 +793,7 @@ export function createThreadStore(deps) {
 
     state.activeThreadId = threadId;
     state.unreadThreadIds.delete(threadId);
+    restoreComposerDraft(threadId);
     void loadComposerOptions({ render: false });
     if (!skipSync && !send({ type: 'thread_sync', threadId })) {
       const items = ensureItems(threadId);

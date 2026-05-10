@@ -178,7 +178,6 @@ export function createSocketController(deps) {
       clearReconnectTimer();
       clearConnectionError();
       const cleared = clearTransientConnectionNotices();
-      void loadComposerOptions({ render: false });
       if (state.activeThreadId) {
         send({ type: 'thread_sync', threadId: state.activeThreadId });
       }
