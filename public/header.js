@@ -198,6 +198,12 @@ export function renderHeaderStatus(activeStatusEl, tab, state, helpers) {
     return;
   }
 
+  if (tab?.windowStatus === 'detached') {
+    activeStatusEl.textContent = '窗口未打开';
+    activeStatusEl.className = 'status-badge closed';
+    return;
+  }
+
   const status = tab ? normalizeTabStatus(tab.status) : '';
   if (status === 'failed' || status === 'systemError') {
     activeStatusEl.textContent = '失败';

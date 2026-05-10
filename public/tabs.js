@@ -20,10 +20,19 @@ export function getWorkspaceFolder(cwd) {
 }
 
 export function compareTabs(a, b) {
-  const aWindowClosed = a?.windowStatus === 'closed';
-  const bWindowClosed = b?.windowStatus === 'closed';
-  if (aWindowClosed !== bWindowClosed) {
-    return aWindowClosed ? 1 : -1;
+  const rankWindowStatus = (value) => {
+    if (value === 'attached') {
+      return 0;
+    }
+    if (value === 'detached') {
+      return 1;
+    }
+    return 2;
+  };
+
+  const statusDiff = rankWindowStatus(a?.windowStatus) - rankWindowStatus(b?.windowStatus);
+  if (statusDiff !== 0) {
+    return statusDiff;
   }
 
   const updatedDiff = (b?.updatedAt || 0) - (a?.updatedAt || 0);
@@ -52,8 +61,10 @@ export function renderTabs(tabListEl, menuBtnEl, tabTpl, state, helpers) {
   menuBtnEl.classList.toggle('has-unread', hasUnreadInInactiveTabs());
   for (const tab of state.tabs) {
     const status = normalizeTabStatus(tab.status);
+    const isWindowAttached = tab.windowStatus === 'attached';
+    const isWindowDetached = tab.windowStatus === 'detached';
     const isWindowClosed = tab.windowStatus === 'closed';
-    const isWaitingApproval = !isWindowClosed && hasPendingServerRequest(tab.threadId);
+    const isWaitingApproval = isWindowAttached && hasPendingServerRequest(tab.threadId);
     const hasUnread = state.unreadThreadIds.has(tab.threadId) && tab.threadId !== state.activeThreadId;
     const node = tabTpl.content.firstElementChild.cloneNode(true);
     node.dataset.threadId = tab.threadId;
@@ -69,11 +80,13 @@ export function renderTabs(tabListEl, menuBtnEl, tabTpl, state, helpers) {
     const meta = node.querySelector('.meta');
     meta.replaceChildren();
     const statusDot = document.createElement('span');
-    statusDot.className = `status-dot ${isWindowClosed ? 'closed' : (isWaitingApproval ? 'waiting' : 'open')}`;
+    statusDot.className = `status-dot ${isWindowClosed ? 'closed' : (isWaitingApproval ? 'waiting' : (isWindowAttached ? 'open' : 'closed'))}`;
     const statusText = document.createElement('span');
     statusText.className = 'status-text';
     if (isWindowClosed) {
       statusText.textContent = '窗口已关闭';
+    } else if (isWindowDetached) {
+      statusText.textContent = '窗口未打开';
     } else if (status === 'running' || status === 'active') {
       statusText.textContent = '进行中';
     } else {

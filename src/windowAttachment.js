@@ -26,12 +26,14 @@ function createWindowAttachmentService(options) {
     }
 
     const nextPid = normalizePid(nextState?.windowPid);
-    const nextStatus = nextState?.windowStatus === 'attached' ? 'attached' : 'closed';
+    const nextStatus = nextState?.windowStatus === 'attached'
+      ? 'attached'
+      : (nextState?.windowStatus === 'closed' ? 'closed' : 'detached');
     const changed = tab.windowPid !== nextPid || tab.windowStatus !== nextStatus;
 
     tab.windowPid = nextPid;
     tab.windowStatus = nextStatus;
-    if (nextStatus !== 'closed') {
+    if (nextStatus === 'attached') {
       clearClosedTabCleanup(threadId);
     }
     if (touchUpdatedAt && changed) {
@@ -171,13 +173,13 @@ function createWindowAttachmentService(options) {
     windows.clearPid(threadId);
     const result = applyTabWindowState(threadId, {
       windowPid: null,
-      windowStatus: 'closed',
+      windowStatus: 'detached',
     }, {
       broadcastUpdate,
       touchUpdatedAt,
     });
     return {
-      status: 'closed',
+      status: 'detached',
       tab: result.tab,
       pid: null,
       source: 'none',

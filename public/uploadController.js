@@ -14,6 +14,10 @@ export function createUploadController(deps) {
     setComposerUploadCount,
   } = deps;
 
+  function incrementUploadCount(threadId, delta) {
+    setComposerUploadCount(threadId, Math.max(0, getComposerUploadCount(threadId) + delta));
+  }
+
   async function uploadComposerImageFiles(fileList) {
     const threadId = state.activeThreadId;
     if (!threadId) {
@@ -25,7 +29,7 @@ export function createUploadController(deps) {
       return;
     }
 
-    setComposerUploadCount(threadId, getComposerUploadCount(threadId) + files.length);
+    incrementUploadCount(threadId, files.length);
     renderComposer();
 
     const uploaded = [];
@@ -45,14 +49,14 @@ export function createUploadController(deps) {
           name: result.name || file.name || getAttachmentFileName(result.filePath),
           previewUrl: result.url ? withAuthTokenQuery(result.url) : buildUploadPreviewUrl(result.filePath),
         });
-        setComposerUploadCount(threadId, Math.max(0, getComposerUploadCount(threadId) - 1));
+        incrementUploadCount(threadId, -1);
         renderComposer();
       }
     } catch (error) {
       if (uploaded.length) {
         setComposerAttachments(threadId, getComposerAttachments(threadId).concat(uploaded));
       }
-      setComposerUploadCount(threadId, 0);
+      incrementUploadCount(threadId, -Math.max(1, files.length - uploaded.length));
       addThreadNotice(threadId, `图片上传失败：${error.message || '请稍后重试。'}`, '_error');
       render();
       return;

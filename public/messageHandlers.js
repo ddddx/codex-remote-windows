@@ -310,17 +310,12 @@ export function createMessageHandler(deps) {
 
       if (msg.code === 'THREAD_NOT_FOUND' && msg.op === 'turn_start') {
         const marked = markTabClosedLocally(threadId);
-        const items = ensureItems(threadId);
-        items.push({
-          type: '_error',
-          id: createLocalId('thread-missing'),
-          text: msg.message || '该会话在 Codex 中不存在，已从列表移除。',
-          _turnId: state.currentTurnIdByThread.get(threadId) || null,
-        });
-        if (threadId === state.activeThreadId) {
-          render();
-        } else if (marked) {
-          renderTabs();
+        if (!marked) {
+          if (threadId === state.activeThreadId) {
+            render();
+          } else {
+            renderTabs();
+          }
         }
         return;
       }

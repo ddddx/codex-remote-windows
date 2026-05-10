@@ -292,11 +292,12 @@ function getEffectiveComposerSelection(threadId = state.activeThreadId) {
   return { model, effort, approvalPolicy, sandboxMode };
 }
 
-async function loadComposerOptions(options = {}) {
-  if (state.composerOptionsLoading) {
-    return;
-  }
+let composerOptionsRequestSerial = 0;
 
+async function loadComposerOptions(options = {}) {
+  const activeTab = state.tabs.find((entry) => entry.threadId === state.activeThreadId);
+  const activeCwd = activeTab?.cwd || '';
+  const requestId = ++composerOptionsRequestSerial;
   state.composerOptionsLoading = true;
   if (options.render !== false) {
     renderComposer();
@@ -304,26 +305,33 @@ async function loadComposerOptions(options = {}) {
 
   try {
     const url = new URL('/api/codex/options', window.location.origin);
-    const activeTab = state.tabs.find((entry) => entry.threadId === state.activeThreadId);
     if (activeTab?.cwd) {
       url.searchParams.set('cwd', activeTab.cwd);
     }
     const result = await apiFetchJson(url);
+    if (requestId !== composerOptionsRequestSerial) {
+      return;
+    }
     state.availableModels = Array.isArray(result.models) ? result.models : [];
     state.composerModelDefault = normalizeComposerModel(result.defaults?.model)
       || normalizeComposerModel(state.availableModels.find((model) => model.isDefault)?.model);
     state.composerEffortDefault = normalizeComposerEffort(result.defaults?.reasoningEffort)
       || normalizeComposerEffort(
         state.availableModels.find((model) => normalizeComposerModel(model.model) === state.composerModelDefault)?.defaultReasoningEffort
-      );
+    );
     state.composerApprovalPolicyDefault = normalizeComposerApprovalPolicy(result.defaults?.approvalPolicy);
     state.composerSandboxModeDefault = normalizeComposerSandboxMode(result.defaults?.sandboxMode);
     state.composerOptionsLoaded = true;
   } catch (error) {
+    if (requestId !== composerOptionsRequestSerial) {
+      return;
+    }
     console.error('failed loading codex options', error);
   } finally {
-    state.composerOptionsLoading = false;
-    renderComposer();
+    if (requestId === composerOptionsRequestSerial) {
+      state.composerOptionsLoading = false;
+      renderComposer();
+    }
   }
 }
 

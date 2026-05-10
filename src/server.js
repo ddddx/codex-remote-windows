@@ -437,7 +437,7 @@ function ensureTab(thread) {
     windowPid: detectedWindowPid
       || (Number.isFinite(existingWindowPid) && existingWindowPid > 0 ? existingWindowPid : null)
       || (Number.isFinite(threadWindowPid) && threadWindowPid > 0 ? threadWindowPid : null),
-    windowStatus: existing?.windowStatus || 'attached',
+    windowStatus: existing?.windowStatus || 'detached',
   };
 
   if (threadApprovalPolicy) {
@@ -1503,7 +1503,7 @@ async function bootstrap() {
       });
     } else {
       tab.windowPid = null;
-      tab.windowStatus = 'closed';
+      tab.windowStatus = 'detached';
     }
   }));
 
