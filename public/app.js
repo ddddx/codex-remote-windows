@@ -2945,18 +2945,14 @@ function upsertTab(tab) {
     state.tabs.push(tab);
   }
 
-  if (normalizeTabStatus(tab?.status) === 'closed') {
-    clearActiveTabIfMatches(tab.threadId);
-  }
-
   state.tabs.sort(compareTabs);
 }
 
 function compareTabs(a, b) {
-  const aClosed = normalizeTabStatus(a?.status) === 'closed';
-  const bClosed = normalizeTabStatus(b?.status) === 'closed';
-  if (aClosed !== bClosed) {
-    return aClosed ? 1 : -1;
+  const aWindowClosed = a?.windowStatus === 'closed';
+  const bWindowClosed = b?.windowStatus === 'closed';
+  if (aWindowClosed !== bWindowClosed) {
+    return aWindowClosed ? 1 : -1;
   }
 
   const updatedDiff = (b?.updatedAt || 0) - (a?.updatedAt || 0);
@@ -3001,19 +2997,7 @@ function removeTab(threadId) {
 }
 
 function markTabClosedLocally(threadId) {
-  if (!threadId) {
-    return false;
-  }
-  const tab = state.tabs.find((entry) => entry.threadId === threadId);
-  if (!tab) {
-    return false;
-  }
-
-  tab.status = 'closed';
-  tab.updatedAt = Math.floor(Date.now() / 1000);
-  state.turnActiveByThread.set(threadId, false);
-  state.currentTurnIdByThread.delete(threadId);
-  clearActiveTabIfMatches(threadId);
+  removeTab(threadId);
   return true;
 }
 
@@ -3250,13 +3234,13 @@ function renderTabs() {
   menuBtn.classList.toggle('has-unread', hasUnreadInInactiveTabs());
   for (const tab of state.tabs) {
     const status = normalizeTabStatus(tab.status);
-    const isClosed = status === 'closed';
-    const isWaitingApproval = !isClosed && hasPendingServerRequest(tab.threadId);
+    const isWindowClosed = tab.windowStatus === 'closed';
+    const isWaitingApproval = !isWindowClosed && hasPendingServerRequest(tab.threadId);
     const hasUnread = state.unreadThreadIds.has(tab.threadId) && tab.threadId !== state.activeThreadId;
     const node = tabTpl.content.firstElementChild.cloneNode(true);
     node.dataset.threadId = tab.threadId;
     node.classList.toggle('active', tab.threadId === state.activeThreadId);
-    node.classList.toggle('closed', isClosed);
+    node.classList.toggle('closed', isWindowClosed);
     node.classList.toggle('has-unread', hasUnread);
     node.querySelector('.name').textContent = getSessionName(tab);
     const cwd = getWorkspacePath(tab);
@@ -3267,10 +3251,16 @@ function renderTabs() {
     const meta = node.querySelector('.meta');
     meta.replaceChildren();
     const statusDot = document.createElement('span');
-    statusDot.className = `status-dot ${isClosed ? 'closed' : (isWaitingApproval ? 'waiting' : 'open')}`;
+    statusDot.className = `status-dot ${isWindowClosed ? 'closed' : (isWaitingApproval ? 'waiting' : 'open')}`;
     const statusText = document.createElement('span');
     statusText.className = 'status-text';
-    statusText.textContent = isClosed ? '已关闭' : (isWaitingApproval ? '待批准' : '在线');
+    if (isWindowClosed) {
+      statusText.textContent = '窗口已关闭';
+    } else if (status === 'running' || status === 'active') {
+      statusText.textContent = '进行中';
+    } else {
+      statusText.textContent = isWaitingApproval ? '待批准' : '在线';
+    }
     meta.append(statusDot, statusText);
 
     node.querySelector('.close').addEventListener('click', (event) => {
@@ -3336,10 +3326,12 @@ function renderHeader() {
   }
 
   const status = tab ? normalizeTabStatus(tab.status) : '';
-  if (status === 'running' || status === 'active') {
+  if (tab?.windowStatus === 'closed') {
+    activeStatus.textContent = '窗口已关闭';
+  } else if (status === 'running' || status === 'active') {
     activeStatus.textContent = '进行中';
   } else {
-    activeStatus.textContent = status === 'closed' ? '已关闭' : status;
+    activeStatus.textContent = status || '在线';
   }
   activeStatus.className = 'status-badge';
   if (status === 'running' || status === 'active') {
@@ -3348,7 +3340,7 @@ function renderHeader() {
   if (status === 'failed' || status === 'systemError') {
     activeStatus.classList.add('failed');
   }
-  if (status === 'closed') {
+  if (tab?.windowStatus === 'closed') {
     activeStatus.classList.add('closed');
   }
 }

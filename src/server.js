@@ -435,6 +435,7 @@ function ensureTab(thread) {
     windowPid: detectedWindowPid
       || (Number.isFinite(existingWindowPid) && existingWindowPid > 0 ? existingWindowPid : null)
       || (Number.isFinite(threadWindowPid) && threadWindowPid > 0 ? threadWindowPid : null),
+    windowStatus: existing?.windowStatus || 'attached',
   };
 
   if (threadApprovalPolicy) {
@@ -500,7 +501,7 @@ function markTabClosed(threadId) {
   }
 
   windows.clearPid(threadId);
-  tab.status = 'closed';
+  tab.windowStatus = 'closed';
   tab.windowPid = null;
   tab.updatedAt = nowUnix();
   clearClosedTabCleanup(threadId);
@@ -521,10 +522,10 @@ function tabsList() {
 }
 
 function compareTabs(a, b) {
-  const aClosed = normalizeStatus(a?.status, 'idle') === 'closed';
-  const bClosed = normalizeStatus(b?.status, 'idle') === 'closed';
-  if (aClosed !== bClosed) {
-    return aClosed ? 1 : -1;
+  const aWindowClosed = a?.windowStatus === 'closed';
+  const bWindowClosed = b?.windowStatus === 'closed';
+  if (aWindowClosed !== bWindowClosed) {
+    return aWindowClosed ? 1 : -1;
   }
 
   const updatedDiff = (b?.updatedAt || 0) - (a?.updatedAt || 0);
@@ -631,9 +632,7 @@ async function ensureWindowForThread(threadId) {
   if (alive) {
     if (tab) {
       tab.windowPid = pid;
-    }
-    if (tab && tab.status === 'closed') {
-      tab.status = 'idle';
+      tab.windowStatus = 'attached';
       tab.updatedAt = nowUnix();
       clearClosedTabCleanup(threadId);
       broadcast({ type: 'tab_updated', tab });
@@ -659,7 +658,7 @@ async function ensureWindowForThread(threadId) {
   }
 
   tab.windowPid = newPid;
-  tab.status = 'idle';
+  tab.windowStatus = 'attached';
   tab.updatedAt = nowUnix();
   clearClosedTabCleanup(threadId);
   broadcast({ type: 'tab_updated', tab });
@@ -710,7 +709,7 @@ async function refreshAllTabWindowStatus() {
   for (const tab of tabs.values()) {
     checks.push((async () => {
       const currentTab = tabs.get(tab.threadId);
-      if (!currentTab || currentTab.status === 'closed') {
+      if (!currentTab) {
         return;
       }
 
@@ -729,12 +728,13 @@ async function refreshAllTabWindowStatus() {
 
       if (alive) {
         currentTab.windowPid = pid;
+        currentTab.windowStatus = 'attached';
         return;
       }
 
       windows.clearPid(currentTab.threadId);
       currentTab.windowPid = null;
-      currentTab.status = 'closed';
+      currentTab.windowStatus = 'closed';
       currentTab.updatedAt = nowUnix();
       clearClosedTabCleanup(currentTab.threadId);
       changedTabs.push(currentTab);
@@ -1431,7 +1431,7 @@ wss.on('connection', (ws, request) => {
           }
         } catch (error) {
           if (isThreadNotFoundError(error)) {
-            markTabClosed(message.threadId);
+            removeTab(message.threadId, { broadcastRemoval: true });
             send(ws, {
               type: 'error',
               code: 'THREAD_NOT_FOUND',
@@ -1496,7 +1496,22 @@ wss.on('connection', (ws, request) => {
 
       if (message.type === 'thread_sync') {
         ws.activeThreadId = message.threadId;
-        const syncResult = await syncThreadToClients(ws, message.threadId);
+        let syncResult;
+        try {
+          syncResult = await syncThreadToClients(ws, message.threadId);
+        } catch (error) {
+          if (isThreadNotFoundError(error)) {
+            removeTab(message.threadId, { broadcastRemoval: true });
+            send(ws, {
+              type: 'error',
+              code: 'THREAD_NOT_FOUND',
+              threadId: message.threadId,
+              message: '该会话在 Codex 中不存在，已从列表移除。',
+            });
+            return;
+          }
+          throw error;
+        }
         if (!syncResult.materialized) {
           return;
         }
@@ -1541,7 +1556,7 @@ async function bootstrap() {
     const tab = ensureTab(verifiedThread);
     const windowPid = windows.getPid(verifiedThread.id);
     if (!windowPid) {
-      tab.status = 'closed';
+      tab.windowStatus = 'closed';
       tab.windowPid = null;
       return;
     }
@@ -1556,7 +1571,7 @@ async function bootstrap() {
 
     if (!windowAlive) {
       windows.clearPid(verifiedThread.id);
-      tab.status = 'closed';
+      tab.windowStatus = 'closed';
       tab.windowPid = null;
       return;
     }
@@ -1564,6 +1579,7 @@ async function bootstrap() {
     // Lazy: only register tab metadata, load full data on click
     tab.status = 'idle';
     tab.windowPid = windowPid;
+    tab.windowStatus = 'attached';
   }));
 
   server.listen(PORT, () => {
