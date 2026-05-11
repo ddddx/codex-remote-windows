@@ -11,6 +11,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:integration": "node --test --import tsx tests/integration/**/*.test.ts test/migration-script.test.ts",
+    "test:e2e": "playwright test",
     "build": "npm run build --workspaces --if-present",
     "migrate:legacy-state": "node --import tsx scripts/migrate-legacy-state.ts",
     "dev:web": "npm run dev --workspace @codex-remote/web",
@@ -24,6 +25,7 @@
     "web": "npm run web --workspace @codex-remote/remote"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.15.31",
     "tsx": "^4.20.6",
     "typescript": "^5.8.3"

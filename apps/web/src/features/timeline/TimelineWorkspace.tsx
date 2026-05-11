@@ -51,12 +51,21 @@ function InlineApprovalCard({ request }: { request: ServerRequestItem }) {
 
 export function TimelineWorkspace() {
   const activeSessionId = useAppStore((state) => state.sessions.activeSessionId);
-  const entries = useAppStore((state) => activeSessionId ? (state.timeline.entriesBySessionId[activeSessionId] || []) : []);
+  const entriesBySessionId = useAppStore((state) => state.timeline.entriesBySessionId);
   const health = useAppStore((state) => state.health.data);
   const error = useAppStore((state) => state.health.error || state.connection.error || '');
   const turnState = useAppStore((state) => activeSessionId ? state.turns.activeBySessionId[activeSessionId] : undefined);
   const usage = useAppStore((state) => activeSessionId ? state.tokenUsage.bySessionId[activeSessionId] : null);
-  const approvals = useAppStore((state) => activeSessionId ? state.approvals.items.filter((item) => item.threadId === activeSessionId) : []);
+  const approvalItems = useAppStore((state) => state.approvals.items);
+
+  const entries = useMemo(
+    () => activeSessionId ? (entriesBySessionId[activeSessionId] || []) : [],
+    [activeSessionId, entriesBySessionId],
+  );
+  const approvals = useMemo(
+    () => activeSessionId ? approvalItems.filter((item) => item.threadId === activeSessionId) : [],
+    [activeSessionId, approvalItems],
+  );
 
   const groups = useMemo(
     () => buildTimelineGroups(entries, approvals, turnState),

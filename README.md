@@ -1,144 +1,160 @@
-# Codex Remote 远程会话控制
+# Codex Remote Rebuild
 
-通过手机或 PC 远程控制本机 Codex，会话以列表显示，并映射到本机多个 Codex 窗口。
+用于远程控制本机 Codex 会话的新架构版本。当前主链路已经切到 monorepo：
 
-## 功能
+- `apps/server`: Fastify + WebSocket server
+- `apps/web`: React + Vite 控制台
+- `apps/remote`: 兼容现有启动封装
+- `packages/protocol`: shared HTTP / WS types 与 schemas
+- `packages/domain`: domain entities / factories / repositories
+- `packages/adapters`: SQLite 与 legacy import adapters
 
-- 控制端新建会话 -> PC 创建新的 Codex 会话线程，并尝试打开一个本地 Codex 窗口
-- 控制端关闭会话窗口 -> 仅关闭对应本地 Codex 窗口，会话线程仍保留在列表中，后续可继续恢复
-- 支持在控制端发送提示词到指定会话
-- 支持流式查看助手输出（delta）
-- 手机/PC 都可访问（响应式 Web UI）
-- 左侧边栏会话管理，支持打开/隐藏
-- Markdown 渲染（代码块、加粗、列表、标题）
-- 发送后显示思考动画，流式回复实时显示
-- WebSocket 断开自动重连
-- 支持网页端处理命令批准、文件修改批准和 `request_user_input`
+旧 `public/` 和旧 `src/` 仍保留为兼容参考，但不再是新开发主链路。
 
-## 运行要求
+## 能力
+
+- 会话列表、会话创建、线程同步
+- prompt 发送与实时 timeline
+- turn 分组、reasoning / plan / command / file change 语义展示
+- 内联审批与 inspector 审批面板
+- workspace 浏览与建目录
+- 图片上传与附件发送
+- SQLite 持久化
+- legacy JSON 状态导入
+
+## 环境
 
 - Windows
 - Node.js 22+
-- 已安装 Codex 命令行（`codex.cmd` 需在 PATH 中，或通过 `CODEX_CMD` 环境变量指定路径）
+- 已安装 Codex CLI
 
-## 快速启动
+## 安装
 
 ```bash
 npm install
+```
+
+## 启动
+
+新 web:
+
+```bash
+npm run dev:web
+```
+
+新 server:
+
+```bash
+npm run dev:server
+```
+
+兼容启动封装:
+
+```bash
 npm run remote:restart
 ```
 
-Windows 下也可以直接双击：
+默认地址:
+
+- web: `http://127.0.0.1:5173`
+- server: `http://127.0.0.1:18637`
+
+## 关键命令
+
+类型检查:
 
 ```bash
-start-codex-remote.bat
+npm run typecheck
 ```
 
-如果你只是调试某一层，再单独启动：
+workspace tests:
 
 ```bash
-npm run remote         # 只启动，不主动清理旧进程
-npm run remote:restart # 先杀旧进程再重启，推荐
-npm run remote:stop    # 停止当前远程控制服务
-npm run appserver   # 只启动 Codex 服务端
-npm run web         # 只启动 Web 控制端
+npm test
 ```
 
-默认地址：
+integration:
 
-- 本机：`http://localhost:18637`
-- 局域网：`http://<本机IP>:18637`
+```bash
+npm run test:integration
+```
+
+e2e:
+
+```bash
+npm run test:e2e
+```
+
+legacy state migration:
+
+```bash
+npm run migrate:legacy-state
+```
+
+可选参数:
+
+```bash
+npm run migrate:legacy-state -- --sqlite-file .codex-remote.sqlite --app-state .codex-remote-state.json --window-map .window-map.json
+```
 
 ## 配置
 
-默认会优先读取项目根目录下的 `config.local.json`；如果文件不存在，首次启动会自动生成一份，并写入随机 `WS_TOKEN`。如果同名环境变量已设置，则环境变量优先级更高。
+server 读取这些变量:
 
-可用配置项 / 环境变量：
+- `HOST`
+- `PORT`
+- `WS_TOKEN`
+- `NODE_ENV`
+- `MAX_IMAGE_UPLOAD_BYTES`
+- `SQLITE_FILE`
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `PORT` | `18637` | Web 控制端端口（浏览器/手机访问这个端口） |
-| `CODEX_HOME` | Codex 默认目录 | 可选；仅在你想强制切换到另一套 Codex 数据目录时设置 |
-| `CODEX_CMD` | `codex.cmd` | Codex 命令行路径 |
-| `CODEX_APP_SERVER_WS` | `ws://127.0.0.1:4792` | Codex 服务端 WebSocket 地址（项目内部连接，通常保持本机回环地址） |
-| `WS_TOKEN` | 首次启动自动生成 | WebSocket 鉴权 token；设置后，控制端连接必须携带同值 |
-
-本地配置文件示例：
-
-```json
-{
-  "PORT": 18637,
-  "CODEX_CMD": "codex.cmd",
-  "CODEX_APP_SERVER_WS": "ws://127.0.0.1:4792",
-  "WS_TOKEN": "your-secret-token"
-}
-```
-
-默认不设置 `CODEX_HOME`，这样远程控制的就是你平时在本机直接使用的那套 Codex。只有需要强制隔离时，才额外加上 `CODEX_HOME`。
-
-仓库里提供了模板文件 `config.local.example.json`，实际生效的是你本机的 `config.local.json`。如果你直接运行 `start-codex-remote.bat` 或 `npm run remote:restart`，首次启动缺少配置文件时会自动生成。
-
-也可以继续使用环境变量覆盖：
-
-```powershell
-$env:CODEX_CMD='C:\path\to\codex.cmd'
-$env:PORT='9000'
-$env:WS_TOKEN='your-secret-token'
-npm run remote:restart
-```
-
-如果设置了 `WS_TOKEN`，首次访问后可通过页面右上角的 `Token` / `设置 Token` 按钮输入并保存在浏览器本地。`start-codex-remote.bat` 启动时会在控制台打印当前 token。为了避免 token 暴露在地址栏、浏览器历史或截图里，不建议再用 `?token=` 方式访问。
-
-## 远程访问（手机）
-
-1. 让手机和 PC 在同一局域网。
-2. 在 PC 上放开 `18637` 端口（只对内网）。
-3. 手机浏览器访问 `http://<PC局域网IP>:18637`。
-
-如果要公网访问，建议使用反向代理 + HTTPS + 强认证，不要直接暴露端口。
+legacy Codex 桥接仍会读取 `config.local.json`。
 
 ## 项目结构
 
-```
+```text
 cc-workspace/
-├── public/           # 前端静态文件
-│   ├── app.js                 # 前端启动入口与事件装配
-│   ├── appDom.js              # 顶层 DOM 查询与必需节点校验
-│   ├── appRuntime.js          # 时间戳 / 渲染调度 / textarea 自适应
-│   ├── appShell.js            # 顶层页壳渲染（header / tabs / composer）
-│   ├── appState.js            # 应用状态与 composer 草稿/附件辅助
-│   ├── apiClient.js           # 带鉴权 token 的 HTTP 请求封装
-│   ├── composer.js            # 输入区渲染
-│   ├── composerSettings.js    # 模型 / 权限 / 主题设置
-│   ├── header.js              # 顶栏与上下文用量
-│   ├── index.html
-│   ├── messageContent.js      # 消息内容标准化与 markdown
-│   ├── messageEntries.js      # 消息语义分组
-│   ├── messageHandlers.js     # WebSocket 消息分发
-│   ├── messageRenderer.js     # 消息渲染
-│   ├── sessionModal.js        # 新建会话弹窗
-│   ├── slashController.js     # 斜杠菜单与快捷动作
-│   ├── socket.js              # WebSocket 控制器
-│   ├── style.css
-│   ├── tabs.js                # 左侧会话列表
-│   ├── textModal.js           # 通用文本输入弹窗
-│   ├── threadStore.js         # 前端线程状态存储
-│   └── uploadController.js    # 图片上传流程
-├── src/              # 后端源码
-│   ├── server.js     # Web 服务器 + WebSocket
-│   ├── codexAppServerClient.js  # Codex 服务端客户端
-│   ├── localConfig.js           # 本地配置读取
-│   ├── windowAttachment.js      # 会话线程与本地窗口状态同步
-│   ├── workspaceManager.js      # 工作区目录浏览与状态管理
-│   └── windowManager.js         # 窗口管理
-├── restart-codex-remote.js # 统一启动脚本：start/restart/stop/appserver/web
-├── start-codex-remote.bat  # Windows 一键重启入口
-├── stop-codex-remote.bat   # Windows 一键停止入口
-└── package.json
+├── apps/
+│   ├── remote/
+│   ├── server/
+│   └── web/
+├── packages/
+│   ├── adapters/
+│   ├── domain/
+│   └── protocol/
+├── docs/
+├── scripts/
+├── test/
+├── tests/
+│   ├── e2e/
+│   └── integration/
+├── public/        # legacy frontend reference
+└── src/           # legacy backend reference
 ```
 
-## 当前限制
+## 迁移与切换
 
-- 左侧“关闭”只关闭本地 Codex 窗口，不会归档或删除线程；线程仍可继续同步和恢复窗口。
-- “本地窗口映射”依赖 Windows `Start-Process`；若权限策略限制，仍可远程控制会话线程，但不会自动弹出本地窗口。
-- 工作区浏览默认允许选择本机任意目录，因此这个项目的安全边界前提是“受信局域网/受信设备”；如果要对外暴露，必须额外加反向代理、强鉴权和更严格的路径策略。
+执行顺序:
+
+1. `npm run typecheck`
+2. `npm test`
+3. `npm run test:integration`
+4. `npm run test:e2e`
+5. `npm run migrate:legacy-state`
+
+详细执行文档见:
+
+- `docs/migration-runbook.md`
+- `docs/implementation-roadmap.md`
+- `docs/rebuild-plan.md`
+
+## 当前状态
+
+当前 rebuild 已完成以下验证:
+
+- workspace typecheck 通过
+- package tests 通过
+- integration tests 通过
+- Playwright E2E 通过
+
+剩余 legacy 目录主要作为兼容桥与行为参考，不承载新架构开发。

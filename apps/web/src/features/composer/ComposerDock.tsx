@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { writeStoredToken } from '../../lib/storage.js';
 import { useAppStore } from '../../store/appStore.js';
 import { uploadImage } from '../../transport/http/uploads.js';
@@ -25,12 +26,13 @@ export function ComposerDock({
   const setToken = useAppStore((state) => state.setToken);
   const activeSessionId = useAppStore((state) => state.sessions.activeSessionId);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const attachments = useAppStore((state) => {
-    const key = activeSessionId || '__new__';
-    return state.composer.attachmentsBySessionId[key] || [];
-  });
+  const attachmentsBySessionId = useAppStore((state) => state.composer.attachmentsBySessionId);
   const addAttachment = useAppStore((state) => state.addAttachment);
   const removeAttachment = useAppStore((state) => state.removeAttachment);
+  const attachments = useMemo(() => {
+    const key = activeSessionId || '__new__';
+    return attachmentsBySessionId[key] || [];
+  }, [activeSessionId, attachmentsBySessionId]);
 
   return (
     <footer className="panel composer-dock">
