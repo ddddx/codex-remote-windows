@@ -30,6 +30,10 @@ export type ServerRequestItem = {
   cwd?: string;
   tool?: string;
   serverName?: string;
+  patch?: string;
+  questions?: Array<{ id?: string; question?: string; header?: string }>;
+  permissions?: unknown;
+  availableDecisions?: Array<string | Record<string, unknown>>;
   createdAt?: number;
 };
 
@@ -139,6 +143,10 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
     cwd: typeof request?.cwd === 'string' ? request.cwd : undefined,
     tool: typeof request?.tool === 'string' ? request.tool : undefined,
     serverName: typeof request?.serverName === 'string' ? request.serverName : undefined,
+    patch: typeof request?.patch === 'string' ? request.patch : undefined,
+    questions: Array.isArray(request?.questions) ? request.questions : undefined,
+    permissions: request?.permissions ?? undefined,
+    availableDecisions: Array.isArray(request?.availableDecisions) ? request.availableDecisions : undefined,
     createdAt: typeof request?.createdAt === 'number' ? request.createdAt : undefined,
   };
 }

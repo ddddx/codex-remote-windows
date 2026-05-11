@@ -90,6 +90,15 @@ async function buildTestApp() {
 
 test('GET /health returns runtime status', async () => {
   const app = await buildTestApp();
+  app.runtimeState.tabsById.set('thread-1', {
+    threadId: 'thread-1',
+    name: 'Demo',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    updatedAt: 1,
+    createdAt: 1,
+    windowStatus: 'detached',
+  });
   const response = await app.inject({
     method: 'GET',
     url: '/health',
@@ -98,6 +107,7 @@ test('GET /health returns runtime status', async () => {
   assert.equal(response.statusCode, 200);
   const payload = response.json();
   assert.equal(payload.status, 'ok');
+  assert.equal(payload.tabs, 1);
   assert.equal(payload.websocketClients, 0);
   await app.close();
 });

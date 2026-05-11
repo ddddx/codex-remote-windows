@@ -47,6 +47,8 @@ function buildApprovalSummary(request: {
   tool?: string;
   serverName?: string;
   message?: string;
+  patch?: string;
+  questions?: Array<{ question?: string; header?: string }>;
 }): string {
   if (request.reason) {
     return request.reason;
@@ -63,7 +65,45 @@ function buildApprovalSummary(request: {
   if (request.serverName) {
     return `Server: ${request.serverName}`;
   }
+  if (request.questions?.length) {
+    return request.questions
+      .map((entry) => entry.question || entry.header || '')
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (request.patch) {
+    return request.patch.slice(0, 240);
+  }
   return request.kind || 'Pending approval';
+}
+
+function getDecisionLabel(decision: string | Record<string, unknown>): string {
+  if (typeof decision === 'string') {
+    if (decision === 'accept' || decision === 'approved') {
+      return 'Approve';
+    }
+    if (decision === 'acceptForSession' || decision === 'approved_for_session') {
+      return 'Approve for session';
+    }
+    if (decision === 'decline' || decision === 'denied') {
+      return 'Reject';
+    }
+    if (decision === 'cancel') {
+      return 'Cancel';
+    }
+    return decision;
+  }
+
+  if (decision && typeof decision === 'object') {
+    if ('acceptWithExecpolicyAmendment' in decision) {
+      return 'Approve with policy';
+    }
+    if ('acceptWithNetworkPolicyAmendments' in decision) {
+      return 'Approve network';
+    }
+  }
+
+  return 'Respond';
 }
 
 function SessionRail() {
@@ -178,7 +218,11 @@ function TimelineWorkspace() {
   );
 }
 
-function InspectorPanel() {
+type InspectorPanelProps = {
+  onRespond: (request: ServerRequestItem, response: unknown) => void;
+};
+
+function InspectorPanel({ onRespond }: InspectorPanelProps) {
   const health = useAppStore((state) => state.health.data);
   const connection = useAppStore((state) => state.connection);
   const token = useAppStore((state) => state.auth.token);
@@ -235,36 +279,24 @@ function InspectorPanel() {
                     <span>{request.requestId}</span>
                   </div>
                   <div className="approval-actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={request.status === 'submitting'}
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('codex-approval-respond', {
-                          detail: {
-                            request,
-                            response: { decision: 'decline' },
-                          },
-                        }));
-                      }}
-                    >
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      className="primary-button small"
-                      disabled={request.status === 'submitting'}
-                      onClick={() => {
-                        window.dispatchEvent(new CustomEvent('codex-approval-respond', {
-                          detail: {
-                            request,
-                            response: { decision: 'accept' },
-                          },
-                        }));
-                      }}
-                    >
-                      Approve
-                    </button>
+                    {(request.availableDecisions?.length
+                      ? request.availableDecisions
+                      : ['accept', 'decline']).map((decision, index) => {
+                        const key = typeof decision === 'string' ? decision : JSON.stringify(decision);
+                        const isPrimary = index === 0;
+                        const response = typeof decision === 'string' ? { decision } : decision;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className={isPrimary ? 'primary-button small' : 'secondary-button'}
+                            disabled={request.status === 'submitting'}
+                            onClick={() => onRespond(request, response)}
+                          >
+                            {getDecisionLabel(decision)}
+                          </button>
+                        );
+                    })}
                   </div>
                 </article>
               ))}
@@ -425,6 +457,12 @@ export function App() {
       attachments: [],
     });
     if (sent) {
+      appendTimelineEntry(activeSessionId, {
+        id: `local-user-${Date.now()}`,
+        type: 'message',
+        role: 'user',
+        text: queuedPrompt,
+      });
       setQueuedPrompt('');
       setComposerError('');
       setDraft('');
@@ -432,26 +470,6 @@ export function App() {
       setComposerError('Failed to send the queued prompt.');
     }
   }, [activeSessionId, connectionStatus, queuedPrompt, socketClient]);
-
-  useEffect(() => {
-    function handleApprovalRespond(event: Event) {
-      const customEvent = event as CustomEvent<{ request: ServerRequestItem; response: unknown }>;
-      const detail = customEvent.detail;
-      if (!detail?.request?.requestId) {
-        return;
-      }
-      socketClient.send({
-        type: 'server_request_respond',
-        requestId: detail.request.requestId,
-        response: detail.response,
-      });
-    }
-
-    window.addEventListener('codex-approval-respond', handleApprovalRespond as EventListener);
-    return () => {
-      window.removeEventListener('codex-approval-respond', handleApprovalRespond as EventListener);
-    };
-  }, [socketClient]);
 
   function submitComposer() {
     const text = draft.trim();
@@ -503,6 +521,18 @@ export function App() {
     setDraft('');
   }
 
+  function respondApproval(request: ServerRequestItem, response: unknown) {
+    const sent = socketClient.send({
+      type: 'server_request_respond',
+      requestId: request.requestId,
+      response,
+    });
+
+    if (!sent) {
+      setComposerError('Failed to respond to approval request.');
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -515,7 +545,7 @@ export function App() {
       <main className="workspace-grid">
         <SessionRail />
         <TimelineWorkspace />
-        <InspectorPanel />
+        <InspectorPanel onRespond={respondApproval} />
       </main>
       <ComposerDock
         draft={draft}

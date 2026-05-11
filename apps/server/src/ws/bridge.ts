@@ -77,6 +77,7 @@ function createServerRequestRecord(msg: { id: string | number; method: string; p
       reason: typeof params.reason === 'string' ? params.reason : '',
       command: typeof params.command === 'string' ? params.command : '',
       cwd: typeof params.cwd === 'string' ? params.cwd : '',
+      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
       raw: params,
     };
   }
@@ -95,6 +96,7 @@ function createServerRequestRecord(msg: { id: string | number; method: string; p
       reason: typeof params.reason === 'string' ? params.reason : '',
       patch: typeof params.patch === 'string' ? params.patch : '',
       changes: Array.isArray(params.changes) ? params.changes : [],
+      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
       raw: params,
     };
   }
@@ -113,6 +115,7 @@ function createServerRequestRecord(msg: { id: string | number; method: string; p
       reason: typeof params.reason === 'string' ? params.reason : '',
       cwd: typeof params.cwd === 'string' ? params.cwd : '',
       permissions: params.permissions ?? null,
+      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
       raw: params,
     };
   }
@@ -129,6 +132,39 @@ function createServerRequestRecord(msg: { id: string | number; method: string; p
       turnId: typeof params.turnId === 'string' ? params.turnId : null,
       itemId: typeof params.itemId === 'string' ? params.itemId : null,
       questions: Array.isArray(params.questions) ? params.questions : [],
+      raw: params,
+    };
+  }
+
+  if (msg.method === 'item/tool/call') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method: msg.method,
+      kind: 'dynamic_tool_call',
+      status: 'pending' as const,
+      createdAt: Date.now(),
+      threadId: typeof params.threadId === 'string' ? params.threadId : null,
+      turnId: typeof params.turnId === 'string' ? params.turnId : null,
+      itemId: typeof params.callId === 'string' ? params.callId : null,
+      tool: typeof params.tool === 'string' ? params.tool : '',
+      raw: params,
+    };
+  }
+
+  if (msg.method === 'mcpServer/elicitation/request') {
+    return {
+      requestId,
+      rawRequestId: msg.id,
+      method: msg.method,
+      kind: 'mcp_server_elicitation',
+      status: 'pending' as const,
+      createdAt: Date.now(),
+      threadId: typeof params.threadId === 'string' ? params.threadId : null,
+      turnId: typeof params.turnId === 'string' ? params.turnId : null,
+      itemId: null,
+      serverName: typeof params.serverName === 'string' ? params.serverName : '',
+      message: typeof params.message === 'string' ? params.message : '',
       raw: params,
     };
   }
