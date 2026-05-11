@@ -5,7 +5,8 @@
     "lib": [
       "ES2022",
       "DOM"
-    ]
+    ],
+    "jsx": "react-jsx"
   },
   "include": [
     "src/**/*.ts",
