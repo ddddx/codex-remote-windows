@@ -1,7 +1,22 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerMessage } from '@codex-remote/protocol';
-import { createPendingRequestRecord, createSessionRecord, createThreadPreferenceRecord } from '@codex-remote/domain';
-import type { GlobalNoticeSnapshot, SupplementalItemSnapshot, TurnDiffSnapshot, TurnPlanSnapshot } from '../state/runtime-state.js';
+import { createSessionRecord, createThreadPreferenceRecord } from '@codex-remote/domain';
+import {
+  createServerRequestRecord,
+  listServerRequests,
+  persistServerRequest,
+  type RuntimeServerRequest,
+} from '../application/services/server-requests.js';
+import {
+  listSupplementalItems,
+  listTurnDiffs,
+  listTurnPlans,
+  pushGlobalNotice,
+  setCachedTurnDiff,
+  setCachedTurnPlan,
+  upsertSupplementalItem,
+} from '../application/services/runtime-cache.js';
+import type { GlobalNoticeSnapshot } from '../state/runtime-state.js';
 
 type RuntimeTab = {
   threadId: string;
@@ -13,38 +28,6 @@ type RuntimeTab = {
   windowStatus: string;
   approvalPolicy?: string;
   sandboxMode?: string;
-};
-
-type RuntimeServerRequest = {
-  requestId: string;
-  rawRequestId: string | number;
-  method: string;
-  kind: string;
-  status: 'pending' | 'submitting';
-  createdAt: number;
-  submittedAt?: number | null;
-  threadId: string | null;
-  turnId: string | null;
-  itemId: string | null;
-  reason?: string;
-  command?: string;
-  cwd?: string;
-  patch?: string;
-  changes?: unknown[];
-  permissions?: unknown;
-  availableDecisions?: unknown[];
-  questions?: unknown[];
-  tool?: string;
-  namespace?: string;
-  arguments?: Record<string, unknown>;
-  serverName?: string;
-  message?: string;
-  mode?: string;
-  url?: string;
-  elicitationId?: string;
-  requestedSchema?: Record<string, unknown> | null;
-  meta?: unknown;
-  raw?: Record<string, unknown>;
 };
 
 function nowUnix(): number {
@@ -111,317 +94,6 @@ function listRuntimeTabs(app: FastifyInstance): RuntimeTab[] {
   });
 }
 
-function createServerRequestRecord(msg: { id: string | number; method: string; params?: Record<string, unknown> }): RuntimeServerRequest {
-  const params = msg.params || {};
-  const requestId = String(msg.id);
-
-  if (msg.method === 'item/commandExecution/requestApproval') {
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'command_approval',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: typeof params.itemId === 'string' ? params.itemId : null,
-      reason: typeof params.reason === 'string' ? params.reason : '',
-      command: typeof params.command === 'string' ? params.command : '',
-      cwd: typeof params.cwd === 'string' ? params.cwd : '',
-      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
-      raw: params,
-    };
-  }
-
-  if (msg.method === 'item/fileChange/requestApproval') {
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'file_change_approval',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: typeof params.itemId === 'string' ? params.itemId : null,
-      reason: typeof params.reason === 'string' ? params.reason : '',
-      patch: typeof params.patch === 'string' ? params.patch : '',
-      changes: Array.isArray(params.changes) ? params.changes : [],
-      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
-      raw: params,
-    };
-  }
-
-  if (msg.method === 'item/permissions/requestApproval') {
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'permissions_approval',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: typeof params.itemId === 'string' ? params.itemId : null,
-      reason: typeof params.reason === 'string' ? params.reason : '',
-      cwd: typeof params.cwd === 'string' ? params.cwd : '',
-      permissions: params.permissions ?? null,
-      availableDecisions: Array.isArray(params.availableDecisions) ? params.availableDecisions : [],
-      raw: params,
-    };
-  }
-
-  if (msg.method === 'item/tool/requestUserInput') {
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'user_input',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: typeof params.itemId === 'string' ? params.itemId : null,
-      questions: Array.isArray(params.questions) ? params.questions : [],
-      raw: params,
-    };
-  }
-
-  if (msg.method === 'item/tool/call') {
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'dynamic_tool_call',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: typeof params.callId === 'string' ? params.callId : null,
-      tool: typeof params.tool === 'string' ? params.tool : '',
-      namespace: typeof params.namespace === 'string' ? params.namespace : '',
-      arguments: params.arguments && typeof params.arguments === 'object' ? params.arguments as Record<string, unknown> : {},
-      raw: params,
-    };
-  }
-
-  if (msg.method === 'mcpServer/elicitation/request') {
-    const mode = params.mode === 'url' ? 'url' : 'form';
-    return {
-      requestId,
-      rawRequestId: msg.id,
-      method: msg.method,
-      kind: 'mcp_server_elicitation',
-      status: 'pending' as const,
-      createdAt: Date.now(),
-      submittedAt: null,
-      threadId: typeof params.threadId === 'string' ? params.threadId : null,
-      turnId: typeof params.turnId === 'string' ? params.turnId : null,
-      itemId: null,
-      serverName: typeof params.serverName === 'string' ? params.serverName : '',
-      message: typeof params.message === 'string' ? params.message : '',
-      mode,
-      url: mode === 'url' && typeof params.url === 'string' ? params.url : '',
-      elicitationId: mode === 'url' && typeof params.elicitationId === 'string' ? params.elicitationId : '',
-      requestedSchema: mode === 'form' && params.requestedSchema && typeof params.requestedSchema === 'object'
-        ? params.requestedSchema as Record<string, unknown>
-        : null,
-      meta: Object.prototype.hasOwnProperty.call(params, '_meta') ? params._meta : null,
-      raw: params,
-    };
-  }
-
-  return {
-    requestId,
-    rawRequestId: msg.id,
-    method: msg.method,
-    kind: 'unknown',
-    status: 'pending' as const,
-    createdAt: Date.now(),
-    submittedAt: null,
-    threadId: typeof params.threadId === 'string' ? params.threadId : null,
-    turnId: typeof params.turnId === 'string' ? params.turnId : null,
-    itemId: typeof params.itemId === 'string' ? params.itemId : null,
-    raw: params,
-  };
-}
-
-function listServerRequests(app: FastifyInstance): unknown[] {
-  return Array.from(app.runtimeState.serverRequestsById.values()).sort((left, right) => left.createdAt - right.createdAt);
-}
-
-function persistServerRequest(app: FastifyInstance, request: {
-  requestId: string;
-  threadId?: string | null;
-  turnId?: string | null;
-  itemId?: string | null;
-  kind: string;
-  method: string;
-  status: 'pending' | 'submitting';
-  createdAt: number;
-  submittedAt?: number | null;
-}): void {
-  app.repositories.pendingRequests.upsertPendingRequest(createPendingRequestRecord({
-    requestId: request.requestId,
-    threadId: request.threadId ?? null,
-    turnId: request.turnId ?? null,
-    itemId: request.itemId ?? null,
-    kind: request.kind,
-    method: request.method,
-    status: request.status,
-    payloadJson: JSON.stringify(request),
-    createdAt: request.createdAt,
-    submittedAt: request.submittedAt ?? null,
-  }));
-}
-
-function ensureTurnPlanMap(app: FastifyInstance, threadId?: string): Map<string, TurnPlanSnapshot> | null {
-  if (!threadId) {
-    return null;
-  }
-  if (!app.runtimeState.turnPlansByThread.has(threadId)) {
-    app.runtimeState.turnPlansByThread.set(threadId, new Map());
-  }
-  return app.runtimeState.turnPlansByThread.get(threadId) || null;
-}
-
-function ensureTurnDiffMap(app: FastifyInstance, threadId?: string): Map<string, TurnDiffSnapshot> | null {
-  if (!threadId) {
-    return null;
-  }
-  if (!app.runtimeState.turnDiffsByThread.has(threadId)) {
-    app.runtimeState.turnDiffsByThread.set(threadId, new Map());
-  }
-  return app.runtimeState.turnDiffsByThread.get(threadId) || null;
-}
-
-function ensureSupplementalMap(app: FastifyInstance, threadId?: string): Map<string, SupplementalItemSnapshot> | null {
-  if (!threadId) {
-    return null;
-  }
-  if (!app.runtimeState.supplementalItemsByThread.has(threadId)) {
-    app.runtimeState.supplementalItemsByThread.set(threadId, new Map());
-  }
-  return app.runtimeState.supplementalItemsByThread.get(threadId) || null;
-}
-
-function setCachedTurnPlan(app: FastifyInstance, threadId?: string, turnId?: string, payload?: Record<string, unknown>): void {
-  const plans = ensureTurnPlanMap(app, threadId);
-  if (!plans || !turnId) {
-    return;
-  }
-  plans.set(turnId, {
-    turnId,
-    explanation: typeof payload?.explanation === 'string' ? payload.explanation : '',
-    plan: Array.isArray(payload?.plan) ? payload.plan as Array<{ step?: string; status?: string }> : [],
-    updatedAt: Date.now(),
-  });
-}
-
-function setCachedTurnDiff(app: FastifyInstance, threadId?: string, turnId?: string, diff?: unknown): void {
-  const diffs = ensureTurnDiffMap(app, threadId);
-  if (!diffs || !turnId) {
-    return;
-  }
-  const text = typeof diff === 'string' ? diff : '';
-  if (text.trim()) {
-    diffs.set(turnId, {
-      turnId,
-      diff: text,
-      updatedAt: Date.now(),
-    });
-  } else {
-    diffs.delete(turnId);
-  }
-}
-
-function upsertSupplementalItem(app: FastifyInstance, threadId: string | undefined, item: SupplementalItemSnapshot): void {
-  const store = ensureSupplementalMap(app, threadId);
-  if (!store || !item.id) {
-    return;
-  }
-  const existing = store.get(item.id);
-  store.set(item.id, {
-    ...(existing || {}),
-    ...item,
-    updatedAt: Date.now(),
-    createdAt: item.createdAt || existing?.createdAt || Date.now(),
-  });
-}
-
-function removeSupplementalItem(app: FastifyInstance, threadId: string | undefined, itemId: string | undefined): void {
-  if (!threadId || !itemId) {
-    return;
-  }
-  app.runtimeState.supplementalItemsByThread.get(threadId)?.delete(itemId);
-}
-
-function listTurnPlans(app: FastifyInstance, threadId: string, turns: Array<Record<string, unknown>>): TurnPlanSnapshot[] {
-  const merged = new Map<string, TurnPlanSnapshot>();
-  for (const turn of turns) {
-    const turnId = typeof turn?.id === 'string' ? turn.id : '';
-    const plan = Array.isArray(turn?.plan) ? turn.plan : [];
-    const explanation = typeof turn?.explanation === 'string' ? turn.explanation : '';
-    if (!turnId || !plan.length) {
-      continue;
-    }
-    merged.set(turnId, {
-      turnId,
-      explanation,
-      plan: plan as Array<{ step?: string; status?: string }>,
-      updatedAt: Date.now(),
-    });
-  }
-  for (const [turnId, snapshot] of app.runtimeState.turnPlansByThread.get(threadId) || new Map()) {
-    merged.set(turnId, snapshot);
-  }
-  return Array.from(merged.values());
-}
-
-function listTurnDiffs(app: FastifyInstance, threadId: string, turns: Array<Record<string, unknown>>): TurnDiffSnapshot[] {
-  const merged = new Map<string, TurnDiffSnapshot>();
-  for (const turn of turns) {
-    const turnId = typeof turn?.id === 'string' ? turn.id : '';
-    const diff = typeof turn?.diff === 'string' ? turn.diff : '';
-    if (!turnId || !diff.trim()) {
-      continue;
-    }
-    merged.set(turnId, {
-      turnId,
-      diff,
-      updatedAt: Date.now(),
-    });
-  }
-  for (const [turnId, snapshot] of app.runtimeState.turnDiffsByThread.get(threadId) || new Map()) {
-    merged.set(turnId, snapshot);
-  }
-  return Array.from(merged.values());
-}
-
-function listSupplementalItems(app: FastifyInstance, threadId: string): SupplementalItemSnapshot[] {
-  const store = app.runtimeState.supplementalItemsByThread.get(threadId);
-  if (!store) {
-    return [];
-  }
-  return Array.from(store.values()).sort((left, right) => {
-    const leftTime = Number(left.completedAt || left.startedAt || left.createdAt || left.updatedAt || 0);
-    const rightTime = Number(right.completedAt || right.startedAt || right.createdAt || right.updatedAt || 0);
-    return leftTime - rightTime;
-  });
-}
-
-function pushGlobalNotice(app: FastifyInstance, notice: GlobalNoticeSnapshot): void {
-  app.runtimeState.globalNotices.push(notice);
-  while (app.runtimeState.globalNotices.length > 50) {
-    app.runtimeState.globalNotices.shift();
-  }
-}
 
 function handleNotification(app: FastifyInstance, msg: { method?: string; params?: Record<string, unknown> }): void {
   const method = msg.method || '';
@@ -524,7 +196,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'item/plan/delta' && typeof params.threadId === 'string') {
-    setCachedTurnPlan(app, params.threadId, typeof params.turnId === 'string' ? params.turnId : undefined, {
+    setCachedTurnPlan(app.runtimeState, params.threadId, typeof params.turnId === 'string' ? params.turnId : undefined, {
       explanation: '',
       plan: [],
     });
@@ -555,7 +227,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
     const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
     const runId = typeof run.id === 'string' ? run.id : '';
     if (runId) {
-      upsertSupplementalItem(app, params.threadId, {
+      upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: runId,
         type: 'hookEvent',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
@@ -579,7 +251,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
     const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
     const runId = typeof run.id === 'string' ? run.id : '';
     if (runId) {
-      upsertSupplementalItem(app, params.threadId, {
+      upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: runId,
         type: 'hookEvent',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
@@ -602,7 +274,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   if (method === 'item/autoApprovalReview/started' && typeof params.threadId === 'string') {
     const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
     if (reviewId) {
-      upsertSupplementalItem(app, params.threadId, {
+      upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: reviewId,
         type: 'guardianReview',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
@@ -625,7 +297,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   if (method === 'item/autoApprovalReview/completed' && typeof params.threadId === 'string') {
     const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
     if (reviewId) {
-      upsertSupplementalItem(app, params.threadId, {
+      upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: reviewId,
         type: 'guardianReview',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
@@ -670,7 +342,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
 
   if (method === 'item/fileChange/patchUpdated') {
     if (typeof params.threadId === 'string' && typeof params.turnId === 'string' && typeof params.patch === 'string') {
-      setCachedTurnDiff(app, params.threadId, params.turnId, params.patch);
+      setCachedTurnDiff(app.runtimeState, params.threadId, params.turnId, params.patch);
     }
     const requestId = typeof params.requestId === 'string' || typeof params.requestId === 'number'
       ? String(params.requestId)
@@ -726,7 +398,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'warning') {
-    pushGlobalNotice(app, {
+    pushGlobalNotice(app.runtimeState, {
       id: typeof params.noticeId === 'string' ? params.noticeId : `warning:${Date.now()}`,
       type: '_warning',
       text: typeof params.message === 'string' ? params.message : 'Warning',
@@ -746,7 +418,7 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'error' && typeof params.threadId !== 'string') {
-    pushGlobalNotice(app, {
+    pushGlobalNotice(app.runtimeState, {
       id: typeof params.noticeId === 'string' ? params.noticeId : `error:${Date.now()}`,
       type: '_error',
       text: typeof params.message === 'string'
@@ -840,11 +512,11 @@ export function buildThreadSyncMessage(
     type: 'thread_sync',
     threadId,
     turns,
-    supplementalItems: listSupplementalItems(app, threadId),
+    supplementalItems: listSupplementalItems(app.runtimeState, threadId),
     globalSupplementalItems: [...app.runtimeState.globalNotices],
     tokenUsage: thread.tokenUsage ?? thread.token_usage ?? null,
-    turnPlans: listTurnPlans(app, threadId, turns),
-    turnDiffs: listTurnDiffs(app, threadId, turns),
+    turnPlans: listTurnPlans(app.runtimeState, threadId, turns),
+    turnDiffs: listTurnDiffs(app.runtimeState, threadId, turns),
   };
 }
 
