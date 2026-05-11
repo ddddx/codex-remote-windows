@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
-import { bootstrapTabs, broadcastMessage, ensureCodexReady, resetServerRequestPending, setServerRequestSubmitting, upsertRuntimeTab } from './bridge.js';
+import { bootstrapTabs, broadcastMessage, buildThreadSyncMessage, ensureCodexReady, resetServerRequestPending, setServerRequestSubmitting, upsertRuntimeTab } from './bridge.js';
 
 type WsLike = {
   send: (payload: string) => void;
@@ -8,22 +8,6 @@ type WsLike = {
 
 function sendMessage(socket: WsLike, message: ServerMessage): void {
   socket.send(JSON.stringify(message));
-}
-
-function buildThreadSyncMessage(
-  threadId: string,
-  thread: Record<string, unknown>
-): Extract<ServerMessage, { type: 'thread_sync' }> {
-  return {
-    type: 'thread_sync',
-    threadId,
-    turns: Array.isArray(thread.turns) ? thread.turns : [],
-    supplementalItems: [],
-    globalSupplementalItems: [],
-    tokenUsage: thread.tokenUsage ?? thread.token_usage ?? null,
-    turnPlans: [],
-    turnDiffs: [],
-  };
 }
 
 export async function routeClientMessage(app: FastifyInstance, socket: WsLike, message: ClientMessage): Promise<void> {
@@ -77,7 +61,7 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
     const thread = await app.codexClient.resumeThread(message.threadId);
     const tab = upsertRuntimeTab(app, thread);
     sendMessage(socket, { type: 'tab_updated', tab });
-    sendMessage(socket, buildThreadSyncMessage(message.threadId, thread));
+    sendMessage(socket, buildThreadSyncMessage(app, message.threadId, thread));
     return;
   }
 

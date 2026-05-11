@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerMessage } from '@codex-remote/protocol';
 import { createPendingRequestRecord, createSessionRecord, createThreadPreferenceRecord } from '@codex-remote/domain';
+import type { GlobalNoticeSnapshot, SupplementalItemSnapshot, TurnDiffSnapshot, TurnPlanSnapshot } from '../state/runtime-state.js';
 
 type RuntimeTab = {
   threadId: string;
@@ -263,6 +264,148 @@ function persistServerRequest(app: FastifyInstance, request: {
   }));
 }
 
+function ensureTurnPlanMap(app: FastifyInstance, threadId?: string): Map<string, TurnPlanSnapshot> | null {
+  if (!threadId) {
+    return null;
+  }
+  if (!app.runtimeState.turnPlansByThread.has(threadId)) {
+    app.runtimeState.turnPlansByThread.set(threadId, new Map());
+  }
+  return app.runtimeState.turnPlansByThread.get(threadId) || null;
+}
+
+function ensureTurnDiffMap(app: FastifyInstance, threadId?: string): Map<string, TurnDiffSnapshot> | null {
+  if (!threadId) {
+    return null;
+  }
+  if (!app.runtimeState.turnDiffsByThread.has(threadId)) {
+    app.runtimeState.turnDiffsByThread.set(threadId, new Map());
+  }
+  return app.runtimeState.turnDiffsByThread.get(threadId) || null;
+}
+
+function ensureSupplementalMap(app: FastifyInstance, threadId?: string): Map<string, SupplementalItemSnapshot> | null {
+  if (!threadId) {
+    return null;
+  }
+  if (!app.runtimeState.supplementalItemsByThread.has(threadId)) {
+    app.runtimeState.supplementalItemsByThread.set(threadId, new Map());
+  }
+  return app.runtimeState.supplementalItemsByThread.get(threadId) || null;
+}
+
+function setCachedTurnPlan(app: FastifyInstance, threadId?: string, turnId?: string, payload?: Record<string, unknown>): void {
+  const plans = ensureTurnPlanMap(app, threadId);
+  if (!plans || !turnId) {
+    return;
+  }
+  plans.set(turnId, {
+    turnId,
+    explanation: typeof payload?.explanation === 'string' ? payload.explanation : '',
+    plan: Array.isArray(payload?.plan) ? payload.plan as Array<{ step?: string; status?: string }> : [],
+    updatedAt: Date.now(),
+  });
+}
+
+function setCachedTurnDiff(app: FastifyInstance, threadId?: string, turnId?: string, diff?: unknown): void {
+  const diffs = ensureTurnDiffMap(app, threadId);
+  if (!diffs || !turnId) {
+    return;
+  }
+  const text = typeof diff === 'string' ? diff : '';
+  if (text.trim()) {
+    diffs.set(turnId, {
+      turnId,
+      diff: text,
+      updatedAt: Date.now(),
+    });
+  } else {
+    diffs.delete(turnId);
+  }
+}
+
+function upsertSupplementalItem(app: FastifyInstance, threadId: string | undefined, item: SupplementalItemSnapshot): void {
+  const store = ensureSupplementalMap(app, threadId);
+  if (!store || !item.id) {
+    return;
+  }
+  const existing = store.get(item.id);
+  store.set(item.id, {
+    ...(existing || {}),
+    ...item,
+    updatedAt: Date.now(),
+    createdAt: item.createdAt || existing?.createdAt || Date.now(),
+  });
+}
+
+function removeSupplementalItem(app: FastifyInstance, threadId: string | undefined, itemId: string | undefined): void {
+  if (!threadId || !itemId) {
+    return;
+  }
+  app.runtimeState.supplementalItemsByThread.get(threadId)?.delete(itemId);
+}
+
+function listTurnPlans(app: FastifyInstance, threadId: string, turns: Array<Record<string, unknown>>): TurnPlanSnapshot[] {
+  const merged = new Map<string, TurnPlanSnapshot>();
+  for (const turn of turns) {
+    const turnId = typeof turn?.id === 'string' ? turn.id : '';
+    const plan = Array.isArray(turn?.plan) ? turn.plan : [];
+    const explanation = typeof turn?.explanation === 'string' ? turn.explanation : '';
+    if (!turnId || !plan.length) {
+      continue;
+    }
+    merged.set(turnId, {
+      turnId,
+      explanation,
+      plan: plan as Array<{ step?: string; status?: string }>,
+      updatedAt: Date.now(),
+    });
+  }
+  for (const [turnId, snapshot] of app.runtimeState.turnPlansByThread.get(threadId) || new Map()) {
+    merged.set(turnId, snapshot);
+  }
+  return Array.from(merged.values());
+}
+
+function listTurnDiffs(app: FastifyInstance, threadId: string, turns: Array<Record<string, unknown>>): TurnDiffSnapshot[] {
+  const merged = new Map<string, TurnDiffSnapshot>();
+  for (const turn of turns) {
+    const turnId = typeof turn?.id === 'string' ? turn.id : '';
+    const diff = typeof turn?.diff === 'string' ? turn.diff : '';
+    if (!turnId || !diff.trim()) {
+      continue;
+    }
+    merged.set(turnId, {
+      turnId,
+      diff,
+      updatedAt: Date.now(),
+    });
+  }
+  for (const [turnId, snapshot] of app.runtimeState.turnDiffsByThread.get(threadId) || new Map()) {
+    merged.set(turnId, snapshot);
+  }
+  return Array.from(merged.values());
+}
+
+function listSupplementalItems(app: FastifyInstance, threadId: string): SupplementalItemSnapshot[] {
+  const store = app.runtimeState.supplementalItemsByThread.get(threadId);
+  if (!store) {
+    return [];
+  }
+  return Array.from(store.values()).sort((left, right) => {
+    const leftTime = Number(left.completedAt || left.startedAt || left.createdAt || left.updatedAt || 0);
+    const rightTime = Number(right.completedAt || right.startedAt || right.createdAt || right.updatedAt || 0);
+    return leftTime - rightTime;
+  });
+}
+
+function pushGlobalNotice(app: FastifyInstance, notice: GlobalNoticeSnapshot): void {
+  app.runtimeState.globalNotices.push(notice);
+  while (app.runtimeState.globalNotices.length > 50) {
+    app.runtimeState.globalNotices.shift();
+  }
+}
+
 function handleNotification(app: FastifyInstance, msg: { method?: string; params?: Record<string, unknown> }): void {
   const method = msg.method || '';
   const params = msg.params || {};
@@ -364,6 +507,10 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'item/plan/delta' && typeof params.threadId === 'string') {
+    setCachedTurnPlan(app, params.threadId, typeof params.turnId === 'string' ? params.turnId : undefined, {
+      explanation: '',
+      plan: [],
+    });
     broadcastMessage(app, {
       type: 'plan_delta',
       threadId: params.threadId,
@@ -388,6 +535,20 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'hook/started' && typeof params.threadId === 'string') {
+    const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
+    const runId = typeof run.id === 'string' ? run.id : '';
+    if (runId) {
+      upsertSupplementalItem(app, params.threadId, {
+        id: runId,
+        type: 'hookEvent',
+        _turnId: typeof params.turnId === 'string' ? params.turnId : null,
+        phase: 'started',
+        status: typeof run.status === 'string' ? run.status : '',
+        run,
+        startedAt: typeof run.startedAt === 'number' ? run.startedAt : Date.now(),
+        completedAt: typeof run.completedAt === 'number' ? run.completedAt : null,
+      });
+    }
     broadcastMessage(app, {
       type: 'hook_started',
       threadId: params.threadId,
@@ -398,6 +559,20 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'hook/completed' && typeof params.threadId === 'string') {
+    const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
+    const runId = typeof run.id === 'string' ? run.id : '';
+    if (runId) {
+      upsertSupplementalItem(app, params.threadId, {
+        id: runId,
+        type: 'hookEvent',
+        _turnId: typeof params.turnId === 'string' ? params.turnId : null,
+        phase: 'completed',
+        status: typeof run.status === 'string' ? run.status : '',
+        run,
+        startedAt: typeof run.startedAt === 'number' ? run.startedAt : Date.now(),
+        completedAt: typeof run.completedAt === 'number' ? run.completedAt : Date.now(),
+      });
+    }
     broadcastMessage(app, {
       type: 'hook_completed',
       threadId: params.threadId,
@@ -408,6 +583,20 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'item/autoApprovalReview/started' && typeof params.threadId === 'string') {
+    const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
+    if (reviewId) {
+      upsertSupplementalItem(app, params.threadId, {
+        id: reviewId,
+        type: 'guardianReview',
+        _turnId: typeof params.turnId === 'string' ? params.turnId : null,
+        phase: 'started',
+        status: 'running',
+        review: params.review as Record<string, unknown> | null,
+        action: params.action as Record<string, unknown> | null,
+        targetItemId: typeof params.targetItemId === 'string' ? params.targetItemId : null,
+        startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now(),
+      });
+    }
     broadcastMessage(app, {
       type: 'guardian_review_started',
       threadId: params.threadId,
@@ -417,6 +606,22 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'item/autoApprovalReview/completed' && typeof params.threadId === 'string') {
+    const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
+    if (reviewId) {
+      upsertSupplementalItem(app, params.threadId, {
+        id: reviewId,
+        type: 'guardianReview',
+        _turnId: typeof params.turnId === 'string' ? params.turnId : null,
+        phase: 'completed',
+        status: typeof (params.review as any)?.status === 'string' ? (params.review as any).status : 'completed',
+        review: params.review as Record<string, unknown> | null,
+        action: params.action as Record<string, unknown> | null,
+        targetItemId: typeof params.targetItemId === 'string' ? params.targetItemId : null,
+        decisionSource: typeof params.decisionSource === 'string' ? params.decisionSource : null,
+        startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now(),
+        completedAt: typeof params.completedAtMs === 'number' ? params.completedAtMs : Date.now(),
+      });
+    }
     broadcastMessage(app, {
       type: 'guardian_review_completed',
       threadId: params.threadId,
@@ -447,6 +652,9 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
   }
 
   if (method === 'item/fileChange/patchUpdated') {
+    if (typeof params.threadId === 'string' && typeof params.turnId === 'string' && typeof params.patch === 'string') {
+      setCachedTurnDiff(app, params.threadId, params.turnId, params.patch);
+    }
     const requestId = typeof params.requestId === 'string' || typeof params.requestId === 'number'
       ? String(params.requestId)
       : '';
@@ -498,6 +706,40 @@ function handleNotification(app: FastifyInstance, msg: { method?: string; params
       threadId: existing?.threadId || (typeof params.threadId === 'string' ? params.threadId : undefined),
     });
     return;
+  }
+
+  if (method === 'warning') {
+    pushGlobalNotice(app, {
+      id: typeof params.noticeId === 'string' ? params.noticeId : `warning:${Date.now()}`,
+      type: '_warning',
+      text: typeof params.message === 'string' ? params.message : 'Warning',
+      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'warning',
+      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
+    });
+    broadcastMessage(app, {
+      type: 'warning',
+      message: typeof params.message === 'string' ? params.message : 'Warning',
+      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
+      noticeId: typeof params.noticeId === 'string' ? params.noticeId : undefined,
+      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'warning',
+    });
+    return;
+  }
+
+  if (method === 'error' && typeof params.threadId !== 'string') {
+    pushGlobalNotice(app, {
+      id: typeof params.noticeId === 'string' ? params.noticeId : `error:${Date.now()}`,
+      type: '_error',
+      text: typeof params.message === 'string'
+        ? params.message
+        : typeof params.error === 'string'
+          ? params.error
+          : 'Error',
+      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'error',
+      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+    });
   }
 }
 
@@ -567,7 +809,25 @@ export function buildInitialState(app: FastifyInstance): Extract<ServerMessage, 
     type: 'state',
     tabs: listRuntimeTabs(app),
     serverRequests: listServerRequests(app),
-    globalSupplementalItems: [],
+    globalSupplementalItems: [...app.runtimeState.globalNotices],
+  };
+}
+
+export function buildThreadSyncMessage(
+  app: FastifyInstance,
+  threadId: string,
+  thread: Record<string, unknown>,
+): Extract<ServerMessage, { type: 'thread_sync' }> {
+  const turns = Array.isArray(thread.turns) ? thread.turns as Array<Record<string, unknown>> : [];
+  return {
+    type: 'thread_sync',
+    threadId,
+    turns,
+    supplementalItems: listSupplementalItems(app, threadId),
+    globalSupplementalItems: [...app.runtimeState.globalNotices],
+    tokenUsage: thread.tokenUsage ?? thread.token_usage ?? null,
+    turnPlans: listTurnPlans(app, threadId, turns),
+    turnDiffs: listTurnDiffs(app, threadId, turns),
   };
 }
 

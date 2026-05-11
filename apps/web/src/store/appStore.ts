@@ -354,6 +354,95 @@ function buildSystemTimelineEntry(
   };
 }
 
+function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { type: 'thread_sync' }>): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+
+  for (const planEntry of Array.isArray(message.turnPlans) ? message.turnPlans : []) {
+    const turnId = typeof (planEntry as any)?.turnId === 'string' ? (planEntry as any).turnId : '';
+    const plan = Array.isArray((planEntry as any)?.plan) ? (planEntry as any).plan : [];
+    if (!turnId || !plan.length) {
+      continue;
+    }
+    entries.push({
+      id: `turn-plan:${turnId}`,
+      type: 'turn_plan',
+      role: 'assistant',
+      title: 'Execution Plan',
+      text: typeof (planEntry as any)?.explanation === 'string' ? (planEntry as any).explanation : '',
+      meta: plan.map((step: any) => [step?.status, step?.step].filter(Boolean).join(': ')),
+      details: planEntry,
+    });
+  }
+
+  for (const diffEntry of Array.isArray(message.turnDiffs) ? message.turnDiffs : []) {
+    const turnId = typeof (diffEntry as any)?.turnId === 'string' ? (diffEntry as any).turnId : '';
+    const diff = typeof (diffEntry as any)?.diff === 'string' ? (diffEntry as any).diff : '';
+    if (!turnId || !diff.trim()) {
+      continue;
+    }
+    entries.push({
+      id: `turn-diff:${turnId}`,
+      type: 'turn_diff',
+      role: 'system',
+      title: 'Turn Diff',
+      text: 'Recovered diff snapshot',
+      patch: diff,
+      details: diffEntry,
+    });
+  }
+
+  for (const supplemental of Array.isArray(message.supplementalItems) ? message.supplementalItems : []) {
+    const item = supplemental as Record<string, unknown>;
+    const itemId = typeof item.id === 'string' ? item.id : '';
+    const itemType = typeof item.type === 'string' ? item.type : '';
+    if (!itemId || !itemType) {
+      continue;
+    }
+    if (itemType === 'hookEvent') {
+      entries.push({
+        id: itemId,
+        type: 'hook',
+        role: 'system',
+        title: 'Hook',
+        text: typeof item.phase === 'string' ? `Hook ${item.phase}` : 'Hook',
+        status: typeof item.status === 'string' ? item.status : undefined,
+        details: item,
+      });
+      continue;
+    }
+    if (itemType === 'guardianReview') {
+      entries.push({
+        id: itemId,
+        type: 'guardian_review',
+        role: 'system',
+        title: 'Guardian Review',
+        text: typeof item.phase === 'string' ? `Guardian ${item.phase}` : 'Guardian review',
+        status: typeof item.status === 'string' ? item.status : undefined,
+        details: item,
+      });
+    }
+  }
+
+  for (const notice of Array.isArray(message.globalSupplementalItems) ? message.globalSupplementalItems : []) {
+    const item = notice as Record<string, unknown>;
+    const itemId = typeof item.id === 'string' ? item.id : '';
+    const text = typeof item.text === 'string' ? item.text : '';
+    if (!itemId || !text) {
+      continue;
+    }
+    entries.push({
+      id: `notice:${itemId}`,
+      type: 'notice',
+      role: 'system',
+      title: typeof item.noticeKind === 'string' ? item.noticeKind : 'Notice',
+      text,
+      details: item,
+    });
+  }
+
+  return entries;
+}
+
 export const useAppStore = create<AppStore>((set) => ({
   health: {
     status: 'idle',
@@ -676,7 +765,8 @@ export const useAppStore = create<AppStore>((set) => ({
     timeline: {
       entriesBySessionId: {
         ...state.timeline.entriesBySessionId,
-        [threadId]: Array.isArray(message.turns)
+        [threadId]: [
+          ...(Array.isArray(message.turns)
           ? message.turns.flatMap((turn: any, index) => {
             const turnId = String(turn?.id || `${threadId}-${index}`);
             const entries: TimelineEntry[] = [];
@@ -704,7 +794,9 @@ export const useAppStore = create<AppStore>((set) => ({
               text: 'Empty turn',
             }];
           })
-          : [],
+          : []),
+          ...createTimelineEntriesFromThreadSync(message),
+        ],
       },
     },
     tokenUsage: {

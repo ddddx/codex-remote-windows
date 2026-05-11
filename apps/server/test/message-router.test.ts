@@ -159,6 +159,36 @@ function createAppStub() {
 test('thread_sync returns tab update and thread snapshot', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
+  app.runtimeState.turnPlansByThread.set('00000000-0000-0000-0000-000000000999', new Map([
+    ['turn-1', {
+      turnId: 'turn-1',
+      explanation: 'Explain',
+      plan: [{ step: 'Do it', status: 'in_progress' }],
+      updatedAt: 1,
+    }],
+  ]));
+  app.runtimeState.turnDiffsByThread.set('00000000-0000-0000-0000-000000000999', new Map([
+    ['turn-1', {
+      turnId: 'turn-1',
+      diff: '*** Begin Patch\n*** End Patch',
+      updatedAt: 1,
+    }],
+  ]));
+  app.runtimeState.supplementalItemsByThread.set('00000000-0000-0000-0000-000000000999', new Map([
+    ['hook-1', {
+      id: 'hook-1',
+      type: 'hookEvent',
+      phase: 'completed',
+      status: 'completed',
+      createdAt: 1,
+    }],
+  ]));
+  app.runtimeState.globalNotices.push({
+    id: 'notice-1',
+    type: '_warning',
+    text: 'Be careful',
+    createdAt: 1,
+  });
 
   await routeClientMessage(app, socket as any, {
     type: 'thread_sync',
@@ -170,6 +200,10 @@ test('thread_sync returns tab update and thread snapshot', async () => {
   assert.equal((socket.sent[0] as any).type, 'tab_updated');
   assert.equal((socket.sent[1] as any).type, 'thread_sync');
   assert.equal((socket.sent[1] as any).tokenUsage.totalTokens, 12);
+  assert.equal((socket.sent[1] as any).turnPlans.length, 1);
+  assert.equal((socket.sent[1] as any).turnDiffs.length, 1);
+  assert.equal((socket.sent[1] as any).supplementalItems.length, 1);
+  assert.equal((socket.sent[1] as any).globalSupplementalItems.length, 1);
 });
 
 test('tab_create creates thread and replies with tab_created', async () => {

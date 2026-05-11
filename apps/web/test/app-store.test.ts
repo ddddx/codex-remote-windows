@@ -143,3 +143,45 @@ test('item started and completed map command entries without duplicating ids', (
   assert.equal(entries[0]?.status, 'completed');
   assert.equal(entries[0]?.text, 'npm test');
 });
+
+test('thread sync restores plan diff supplemental and notice entries', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-restore',
+    turns: [],
+    tokenUsage: null,
+    turnPlans: [{
+      turnId: 'turn-a',
+      explanation: 'Why',
+      plan: [{ step: 'Refactor', status: 'completed' }],
+      updatedAt: 1,
+    }],
+    turnDiffs: [{
+      turnId: 'turn-a',
+      diff: '*** Begin Patch\n*** End Patch',
+      updatedAt: 1,
+    }],
+    supplementalItems: [{
+      id: 'hook-a',
+      type: 'hookEvent',
+      phase: 'completed',
+      status: 'completed',
+    }],
+    globalSupplementalItems: [{
+      id: 'notice-a',
+      type: '_warning',
+      noticeKind: 'warning',
+      text: 'Recovered warning',
+      createdAt: 1,
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-restore'] || [];
+  assert.equal(entries.length, 4);
+  assert.ok(entries.some((entry) => entry.type === 'turn_plan'));
+  assert.ok(entries.some((entry) => entry.type === 'turn_diff'));
+  assert.ok(entries.some((entry) => entry.type === 'hook'));
+  assert.ok(entries.some((entry) => entry.type === 'notice'));
+});

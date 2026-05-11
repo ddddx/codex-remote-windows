@@ -32,6 +32,46 @@ type ServerRequestRecord = {
   raw?: Record<string, unknown>;
 };
 
+export type TurnPlanSnapshot = {
+  turnId: string;
+  explanation: string;
+  plan: Array<{ step?: string; status?: string }>;
+  updatedAt: number;
+};
+
+export type TurnDiffSnapshot = {
+  turnId: string;
+  diff: string;
+  updatedAt: number;
+};
+
+export type SupplementalItemSnapshot = {
+  id: string;
+  type: string;
+  _turnId?: string | null;
+  phase?: string;
+  status?: string;
+  run?: Record<string, unknown>;
+  review?: Record<string, unknown> | null;
+  action?: Record<string, unknown> | null;
+  targetItemId?: string | null;
+  decisionSource?: string | null;
+  createdAt?: number;
+  updatedAt?: number;
+  startedAt?: number;
+  completedAt?: number | null;
+  [key: string]: unknown;
+};
+
+export type GlobalNoticeSnapshot = {
+  id: string;
+  type: string;
+  text: string;
+  noticeKind?: string;
+  createdAt: number;
+  [key: string]: unknown;
+};
+
 type RuntimeRepositories = {
   sessions: {
     listSessions: () => RuntimeTab[];
@@ -121,6 +161,10 @@ export type RuntimeState = {
   clients: Set<RuntimeWsClient>;
   tabsById: Map<string, RuntimeTab>;
   serverRequestsById: Map<string, ServerRequestRecord>;
+  turnPlansByThread: Map<string, Map<string, TurnPlanSnapshot>>;
+  turnDiffsByThread: Map<string, Map<string, TurnDiffSnapshot>>;
+  supplementalItemsByThread: Map<string, Map<string, SupplementalItemSnapshot>>;
+  globalNotices: GlobalNoticeSnapshot[];
   repositories: RuntimeRepositories | null;
 };
 
@@ -134,6 +178,10 @@ export function createRuntimeState(): RuntimeState {
     clients: new Set(),
     tabsById: new Map(),
     serverRequestsById: new Map(),
+    turnPlansByThread: new Map(),
+    turnDiffsByThread: new Map(),
+    supplementalItemsByThread: new Map(),
+    globalNotices: [],
     repositories: null,
   };
 }
