@@ -13,6 +13,18 @@ export function createSocketClient(handlers: Handlers) {
   let reconnectTimer: number | null = null;
   let reconnectAttempt = 0;
   let currentToken = '';
+  let queuedMessages: ClientMessage[] = [];
+
+  function flushQueuedMessages() {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !queuedMessages.length) {
+      return;
+    }
+    const pending = queuedMessages;
+    queuedMessages = [];
+    for (const message of pending) {
+      socket.send(JSON.stringify(message));
+    }
+  }
 
   function clearReconnectTimer() {
     if (reconnectTimer == null) {
@@ -56,6 +68,7 @@ export function createSocketClient(handlers: Handlers) {
     socket.onopen = () => {
       reconnectAttempt = 0;
       notifyStatus('connected');
+      flushQueuedMessages();
     };
 
     socket.onmessage = (event) => {
@@ -82,15 +95,23 @@ export function createSocketClient(handlers: Handlers) {
   }
 
   function send(message: ClientMessage): boolean {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message));
+      return true;
+    }
+    if (!currentToken) {
       return false;
     }
-    socket.send(JSON.stringify(message));
+    queuedMessages = [...queuedMessages, message].slice(-100);
+    if (!socket) {
+      void connect(currentToken);
+    }
     return true;
   }
 
   function disconnect() {
     currentToken = '';
+    queuedMessages = [];
     clearReconnectTimer();
     if (socket) {
       socket.close();

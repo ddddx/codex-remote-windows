@@ -405,3 +405,30 @@ test('pending local user message is promoted when real turn output arrives after
   assert.equal(userEntry?.turnId, 'turn-real');
   assert.equal(assistantEntry?.turnId, 'turn-real');
 });
+
+test('turn_send error removes optimistic local user entry and raises notification', () => {
+  resetStore();
+
+  useAppStore.getState().appendTimelineEntry('thread-send-error', {
+    id: 'local-user:web-123',
+    type: 'message',
+    role: 'user',
+    turnId: 'thread-send-error:pending-turn',
+    text: 'hello',
+    createdAt: 1,
+  });
+
+  mapServerMessageToStore({
+    type: 'error',
+    op: 'turn_send',
+    threadId: 'thread-send-error',
+    clientMessageId: 'web-123',
+    message: 'start turn failed',
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-send-error'] || [];
+  const notifications = useAppStore.getState().notifications.items;
+  assert.ok(!entries.some((entry) => entry.id === 'local-user:web-123'));
+  assert.ok(entries.some((entry) => entry.type === 'notice' && entry.text === 'start turn failed'));
+  assert.ok(notifications.some((item) => item.id === 'send-error:web-123'));
+});

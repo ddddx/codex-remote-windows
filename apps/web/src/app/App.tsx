@@ -216,6 +216,10 @@ function buildSessionCreatePayload(draft: SessionDraft, prefs: ComposerPrefs) {
   };
 }
 
+function buildClientMessageId(): string {
+  return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function App() {
   const setHealthLoading = useAppStore((state) => state.setHealthLoading);
   const setHealthReady = useAppStore((state) => state.setHealthReady);
@@ -382,14 +386,16 @@ export function App() {
   }, [activeSessionId, socketClient]);
 
   useEffect(() => {
-    if (!queuedPrompt.trim() || !activeSessionId || connectionStatus !== 'connected') {
+    if (!queuedPrompt.trim() || !activeSessionId) {
       return;
     }
+    const clientMessageId = buildClientMessageId();
     const attachments = useAppStore.getState().composer.attachmentsBySessionId[activeSessionId] || [];
     const sent = socketClient.send({
       type: 'turn_send',
       threadId: activeSessionId,
       text: queuedPrompt,
+      clientMessageId,
       attachments: attachments.map((item) => ({
         path: item.filePath,
         name: item.name,
@@ -401,7 +407,7 @@ export function App() {
     });
     if (sent) {
       appendTimelineEntry(activeSessionId, {
-        id: `local-user-${Date.now()}`,
+        id: `local-user:${clientMessageId}`,
         type: 'message',
         role: 'user',
         turnId: `${activeSessionId}:pending-turn`,
@@ -416,7 +422,7 @@ export function App() {
     } else {
       setComposerError('发送暂存消息失败。');
     }
-  }, [activePrefs, activeSessionId, appendTimelineEntry, clearAttachments, connectionStatus, queuedPrompt, socketClient]);
+  }, [activePrefs, activeSessionId, appendTimelineEntry, clearAttachments, queuedPrompt, socketClient]);
 
   useEffect(() => {
     if (!sessionModalOpen) {
@@ -463,8 +469,8 @@ export function App() {
       setTokenDraft(token);
       return;
     }
-    if (connectionStatus !== 'connected') {
-      setComposerError('连接还没有成功建立。');
+    if (connectionStatus === 'auth_failed') {
+      setComposerError('鉴权失败，请先更新 Token。');
       return;
     }
 
@@ -481,11 +487,13 @@ export function App() {
       return;
     }
 
+    const clientMessageId = buildClientMessageId();
     const attachments = useAppStore.getState().composer.attachmentsBySessionId[activeSessionId] || [];
     const sent = socketClient.send({
       type: 'turn_send',
       threadId: activeSessionId,
       text,
+      clientMessageId,
       attachments: attachments.map((item) => ({
         path: item.filePath,
         name: item.name,
@@ -502,7 +510,7 @@ export function App() {
     }
 
     appendTimelineEntry(activeSessionId, {
-      id: `local-user-${Date.now()}`,
+      id: `local-user:${clientMessageId}`,
       type: 'message',
       role: 'user',
       turnId: `${activeSessionId}:pending-turn`,

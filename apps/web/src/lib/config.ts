@@ -3,6 +3,11 @@ function normalizeBaseUrl(value: string | undefined, fallback: string): string {
   return raw || fallback;
 }
 
+function readImportMetaEnv(name: string): string | undefined {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  return env?.[name];
+}
+
 function detectBrowserBaseUrl(): string {
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
@@ -11,7 +16,7 @@ function detectBrowserBaseUrl(): string {
 }
 
 export const apiBaseUrl = normalizeBaseUrl(
-  import.meta.env.VITE_API_BASE_URL as string | undefined,
+  readImportMetaEnv('VITE_API_BASE_URL'),
   detectBrowserBaseUrl(),
 );
 
@@ -20,7 +25,7 @@ export function buildApiUrl(pathname: string): string {
 }
 
 export function buildWsUrl(token?: string): string {
-  const explicit = import.meta.env.VITE_WS_URL as string | undefined;
+  const explicit = readImportMetaEnv('VITE_WS_URL');
   const base = explicit?.trim()
     || new URL('/ws', apiBaseUrl.replace(/^http/, 'ws')).toString();
   const url = new URL(base);

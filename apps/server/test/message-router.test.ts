@@ -275,6 +275,26 @@ test('turn_send starts a turn and updates runtime tab status', async () => {
   assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.status, 'running');
 });
 
+test('turn_send failure returns correlated error payload', async () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.codexClient.startTurn = async () => {
+    throw new Error('turn failed');
+  };
+
+  await routeClientMessage(app, socket as any, {
+    type: 'turn_send',
+    threadId: '00000000-0000-0000-0000-000000000123',
+    text: 'hello',
+    attachments: [],
+    clientMessageId: 'web-123',
+  });
+
+  assert.equal((socket.sent[0] as any).type, 'error');
+  assert.equal((socket.sent[0] as any).op, 'turn_send');
+  assert.equal((socket.sent[0] as any).clientMessageId, 'web-123');
+});
+
 test('server_request_respond replies through codex client', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();

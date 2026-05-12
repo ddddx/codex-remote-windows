@@ -180,6 +180,7 @@ type AppStore = {
   setTokenUsage: (threadId: string, usage: unknown) => void;
   setThreadSync: (threadId: string, message: Extract<ServerMessage, { type: 'thread_sync' }>) => void;
   appendTimelineEntry: (threadId: string, entry: TimelineEntry) => void;
+  removeTimelineEntry: (threadId: string, entryId: string) => void;
   appendAssistantDelta: (
     threadId: string,
     itemId: string,
@@ -1194,6 +1195,14 @@ export const useAppStore = create<AppStore>((set) => ({
       },
     },
   })),
+  removeTimelineEntry: (threadId, entryId) => set((state) => ({
+    timeline: {
+      entriesBySessionId: {
+        ...state.timeline.entriesBySessionId,
+        [threadId]: (state.timeline.entriesBySessionId[threadId] || []).filter((entry) => entry.id !== entryId),
+      },
+    },
+  })),
   appendAssistantDelta: (threadId, itemId, delta, options) => set((state) => {
     const entries = [
       ...promotePendingUserEntriesForTurn(
@@ -1679,6 +1688,17 @@ export function mapServerMessageToStore(message: ServerMessage) {
   if (message.type === 'error') {
     if (!message.threadId) {
       return;
+    }
+    if (message.op === 'turn_send' && message.clientMessageId) {
+      store.removeTimelineEntry(message.threadId, `local-user:${message.clientMessageId}`);
+      store.pushNotification({
+        id: `send-error:${message.clientMessageId}`,
+        level: 'error',
+        title: '消息未发送',
+        message: message.message,
+        threadId: message.threadId,
+        createdAt: Date.now(),
+      });
     }
     store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'notice', {
       id: `request-error:${message.threadId}:${Date.now()}`,

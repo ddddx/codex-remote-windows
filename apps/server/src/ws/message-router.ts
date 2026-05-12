@@ -20,7 +20,17 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
   }
 
   if (message.type === 'turn_send') {
-    await app.services.turns.startTurn(message);
+    try {
+      await app.services.turns.startTurn(message);
+    } catch (error) {
+      sendMessage(socket, {
+        type: 'error',
+        op: 'turn_send',
+        threadId: message.threadId,
+        clientMessageId: message.clientMessageId,
+        message: error instanceof Error ? error.message : '发送消息失败',
+      });
+    }
     return;
   }
 
