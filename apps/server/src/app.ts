@@ -13,6 +13,7 @@ import { CodexWindowManager } from './platform/window-manager.js';
 import { WorkspaceManager } from './platform/workspace-manager.js';
 import { buildRequireAuth, buildTokenVerifier } from './plugins/auth.js';
 import { registerRoutes } from './routes/index.js';
+import { repoRoot } from './runtime-paths.js';
 import { createRuntimeState } from './state/runtime-state.js';
 import { registerWsGateway } from './ws/gateway.js';
 
@@ -24,7 +25,7 @@ export async function createApp(config: ServerConfig) {
     logger: true,
   });
   const sqlite = createSqliteDatabase({
-    filePath: path.resolve(process.cwd(), config.sqliteFile),
+    filePath: path.resolve(repoRoot, config.sqliteFile),
   });
   const repositories = createSqliteRepositories(sqlite);
 
@@ -34,13 +35,13 @@ export async function createApp(config: ServerConfig) {
   app.decorate('repositories', repositories);
   app.decorate('workspaceManager', new WorkspaceManager({
     app,
-    projectRoot: process.cwd(),
+    projectRoot: repoRoot,
   }));
   app.decorate('appServerSupervisor', new CodexAppServerSupervisor({
-    cwd: process.cwd(),
+    cwd: repoRoot,
   }));
   app.decorate('codexClient', new CodexAppServerClient({
-    cwd: process.cwd(),
+    cwd: repoRoot,
   }));
   app.decorate('windowManager', new CodexWindowManager());
   app.decorate('windowAttachments', null as any);

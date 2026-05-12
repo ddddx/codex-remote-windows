@@ -105,9 +105,8 @@ server 读取这些变量:
 - `CODEX_HOME`
 - `CODEX_CONNECT_TIMEOUT`
 - `CODEX_REQUEST_TIMEOUT`
-- `LOCAL_CONFIG_PATH`
 
-`config.local.json` 仅作为新 server 的本地环境文件来源。
+`config.local.json` 固定放在仓库根目录，仅作为新 server 的本地环境文件来源。
 
 ## 项目结构
 

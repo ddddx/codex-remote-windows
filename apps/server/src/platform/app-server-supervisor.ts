@@ -1,7 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import { URL } from 'node:url';
+import { terminateProcessTree } from './process-termination.js';
 
 type AppServerSupervisorOptions = {
   codexCmd?: string;
@@ -61,7 +62,7 @@ export class CodexAppServerSupervisor {
   readonly wsUrl: string | null;
   readonly cwd: string;
   readonly connectTimeoutMs: number;
-  proc: ChildProcessWithoutNullStreams | null;
+  proc: ChildProcess | null;
   managed: boolean;
 
   constructor(options: AppServerSupervisorOptions = {}) {
@@ -110,21 +111,23 @@ export class CodexAppServerSupervisor {
     }
 
     this.proc = spawn(
-      'cmd.exe',
-      ['/d', '/s', '/c', `"${this.codexCmd}" app-server --listen ${this.wsUrl}`],
+      this.codexCmd,
+      ['app-server', '--listen', this.wsUrl],
       {
         cwd: this.cwd,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        shell: true,
       },
     );
 
-    this.proc.stdout.setEncoding('utf8');
-    this.proc.stderr.setEncoding('utf8');
-    this.proc.stdout.on('data', () => {});
-    this.proc.stderr.on('data', () => {});
-    this.proc.on('exit', () => {
+    const proc = this.proc;
+    proc.stdout?.setEncoding('utf8');
+    proc.stderr?.setEncoding('utf8');
+    proc.stdout?.on('data', () => {});
+    proc.stderr?.on('data', () => {});
+    proc.on('exit', () => {
       this.proc = null;
       this.managed = false;
     });
@@ -151,22 +154,11 @@ export class CodexAppServerSupervisor {
 
       proc.once('exit', finish);
       try {
-        proc.kill('SIGTERM');
+        void terminateProcessTree(proc.pid).finally(finish);
       } catch {
         finish();
         return;
       }
-
-      setTimeout(() => {
-        if (proc.exitCode === null && proc.signalCode === null) {
-          try {
-            proc.kill('SIGKILL');
-          } catch {
-            // Ignore forced-kill errors.
-          }
-        }
-        finish();
-      }, 3000).unref();
     });
 
     this.proc = null;

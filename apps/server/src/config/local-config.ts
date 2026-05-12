@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { repoRoot } from '../runtime-paths.js';
 
 export const CONFIG_FILE_NAME = 'config.local.json';
 
@@ -11,7 +12,7 @@ export const DEFAULT_CONFIG = Object.freeze({
 });
 
 function resolveConfigPath(): string {
-  return process.env.LOCAL_CONFIG_PATH || path.join(process.cwd(), CONFIG_FILE_NAME);
+  return path.join(repoRoot, CONFIG_FILE_NAME);
 }
 
 function generateWsToken(): string {

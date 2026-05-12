@@ -5,6 +5,7 @@ import type { UploadImageResponse } from '@codex-remote/protocol';
 import { uploadFileParamsSchema } from '@codex-remote/protocol';
 import { createUploadRecord } from '@codex-remote/domain';
 import type { FastifyInstance } from 'fastify';
+import { resolveRepoPath } from '../../runtime-paths.js';
 
 const IMAGE_CONTENT_TYPES = new Map([
   ['image/png', '.png'],
@@ -15,7 +16,7 @@ const IMAGE_CONTENT_TYPES = new Map([
   ['image/bmp', '.bmp'],
 ]);
 
-const UPLOAD_ROOT = path.join(process.cwd(), '.codex-remote-uploads');
+const UPLOAD_ROOT = resolveRepoPath('.codex-remote-uploads');
 
 function normalizeImageContentType(value: string | undefined): string {
   const contentType = String(value || '').trim().toLowerCase();

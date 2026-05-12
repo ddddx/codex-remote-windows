@@ -1,7 +1,7 @@
 import { createWindowBindingRecord } from '@codex-remote/domain';
 import type { FastifyInstance } from 'fastify';
 import type { RuntimeTab } from './session-tabs.js';
-import type { CodexWindowManager } from '../../platform/window-manager.js';
+import type { CodexWindowManager, WindowDiscoverySnapshot } from '../../platform/window-manager.js';
 import { broadcastMessage } from '../../ws/bridge.js';
 
 function nowUnix(): number {
@@ -26,6 +26,8 @@ function applyWindowState(
   }
   app.repositories.sessions.upsertSession({
     ...tab,
+    approvalPolicy: tab.approvalPolicy || '',
+    sandboxMode: tab.sandboxMode || '',
     updatedAt: tab.updatedAt || nowUnix(),
   });
   app.repositories.windowBindings.upsertWindowBinding(createWindowBindingRecord({
@@ -56,14 +58,21 @@ export function createWindowAttachmentService(app: FastifyInstance, windows: Cod
 
   async function refreshTabWindowStatus(
     threadId: string,
-    options: { allowDiscovery?: boolean; allowLaunch?: boolean; broadcastUpdate?: boolean; touchUpdatedAt?: boolean } = {},
+    options: {
+      allowDiscovery?: boolean;
+      allowLaunch?: boolean;
+      broadcastUpdate?: boolean;
+      touchUpdatedAt?: boolean;
+      snapshot?: WindowDiscoverySnapshot | null;
+    } = {},
   ) {
     const allowDiscovery = options.allowDiscovery !== false;
     const allowLaunch = options.allowLaunch === true;
+    const snapshot = options.snapshot || null;
 
     if (allowDiscovery) {
       try {
-        const discovered = await windows.findResumeWindow(threadId);
+        const discovered = await windows.findResumeWindow(threadId, snapshot);
         if (discovered?.pid) {
           windows.rememberPid(threadId, discovered.pid);
           return applyWindowState(app, threadId, {
@@ -78,7 +87,7 @@ export function createWindowAttachmentService(app: FastifyInstance, windows: Cod
     }
 
     const trackedPid = windows.getPid(threadId);
-    if (trackedPid && await windows.isPidAlive(trackedPid)) {
+    if (trackedPid && await windows.isPidAliveInSnapshot(trackedPid, snapshot)) {
       return applyWindowState(app, threadId, {
         windowStatus: 'attached',
         windowPid: trackedPid,
@@ -110,11 +119,13 @@ export function createWindowAttachmentService(app: FastifyInstance, windows: Cod
 
   async function refreshAllTabsWindowStatus(): Promise<void> {
     const threadIds = Array.from(app.runtimeState.tabsById.keys());
+    const snapshot = threadIds.length ? await windows.createDiscoverySnapshot().catch(() => null) : null;
     await Promise.allSettled(threadIds.map((threadId) => refreshTabWindowStatus(threadId, {
       allowDiscovery: true,
       allowLaunch: false,
       broadcastUpdate: true,
       touchUpdatedAt: false,
+      snapshot,
     })));
   }
 

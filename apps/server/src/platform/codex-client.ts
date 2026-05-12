@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import WebSocket from 'ws';
+import { terminateProcessTree } from './process-termination.js';
 
 type StartThreadOptions = {
   name?: string | null;
@@ -93,7 +94,7 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     if (this.proc) {
-      this.proc.kill();
+      await terminateProcessTree(this.proc.pid);
       this.proc = null;
     }
 
@@ -240,13 +241,14 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     this.proc = spawn(
-      'cmd.exe',
-      ['/d', '/s', '/c', `"${this.codexCmd}" app-server --listen stdio://`],
+      this.codexCmd,
+      ['app-server', '--listen', 'stdio://'],
       {
         cwd: this.defaultCwd,
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
+        shell: true,
       },
     );
 

@@ -14,10 +14,10 @@
     "test:e2e": "playwright test",
     "build": "npm run build --workspaces --if-present",
     "migrate:legacy-state": "node --import tsx scripts/migrate-legacy-state.ts",
-    "start": "npm run build --workspace @codex-remote/web && npm run start --workspace @codex-remote/server",
+    "start": "npm run build --workspace @codex-remote/web && node --import tsx apps/server/src/index.ts",
     "dev:web": "npm run dev --workspace @codex-remote/web",
-    "dev:server": "npm run dev --workspace @codex-remote/server",
-    "dev": "npm run dev --workspace @codex-remote/server"
+    "dev:server": "node --watch --import tsx apps/server/src/index.ts",
+    "dev": "node --watch --import tsx apps/server/src/index.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

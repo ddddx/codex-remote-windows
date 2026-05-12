@@ -1,6 +1,7 @@
 import type { CodexOptionsResponse } from '@codex-remote/protocol';
 import { codexOptionsQuerySchema } from '@codex-remote/protocol';
 import type { FastifyInstance } from 'fastify';
+import { repoRoot } from '../../runtime-paths.js';
 import { ensureCodexReady } from '../../ws/bridge.js';
 
 function normalizeOptionalString(value: unknown): string {
@@ -17,7 +18,7 @@ export function createCodexOptionsService(app: FastifyInstance) {
       const query = codexOptionsQuerySchema.parse(input);
       const [models, configResponse] = await Promise.all([
         app.codexClient.listModels({ includeHidden: false }),
-        app.codexClient.readConfig({ cwd: query.cwd || process.cwd() }),
+        app.codexClient.readConfig({ cwd: query.cwd || repoRoot }),
       ]);
 
       const config = configResponse?.config || {};

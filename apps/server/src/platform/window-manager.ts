@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { resolveRepoPath } from '../runtime-paths.js';
 
 type ProcessRecord = {
   pid: number;
@@ -18,9 +19,15 @@ type ResumeWindowRecord = {
   commandLine: string;
 };
 
+export type WindowDiscoverySnapshot = {
+  alivePids: Set<number>;
+  resumeWindowsByThread: Map<string, ResumeWindowRecord>;
+};
+
 const THREAD_ID_REGEX = /^[0-9a-f]{8,12}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const THREAD_ID_MATCHER = /\bresume\b\s+"?([0-9a-f]{8,12}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"?/ig;
-const SHELL_PROCESS_NAMES = new Set(['cmd.exe', 'powershell.exe', 'pwsh.exe']);
+const CONTROL_SHELL_PROCESS_NAMES = new Set(['cmd.exe']);
+const UNSAFE_WINDOW_PROCESS_NAMES = new Set(['powershell.exe', 'pwsh.exe']);
 
 function runPowerShell(script: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -79,8 +86,12 @@ function normalizeProcessName(name: string): string {
   return String(name || '').trim().toLowerCase();
 }
 
-function isShellProcess(name: string): boolean {
-  return SHELL_PROCESS_NAMES.has(normalizeProcessName(name));
+function isControlShellProcess(name: string): boolean {
+  return CONTROL_SHELL_PROCESS_NAMES.has(normalizeProcessName(name));
+}
+
+function isUnsafeWindowProcess(name: string): boolean {
+  return UNSAFE_WINDOW_PROCESS_NAMES.has(normalizeProcessName(name));
 }
 
 function getProcessPriority(name: string): number {
@@ -106,7 +117,7 @@ function resolveControlProcess(process: ProcessRecord, processMap: Map<number, P
   let depth = 0;
   while (depth < 4) {
     const parent = current.parentPid ? processMap.get(current.parentPid) : null;
-    if (!parent || !isShellProcess(parent.name)) {
+    if (!parent || !isControlShellProcess(parent.name)) {
       break;
     }
     chosen = parent;
@@ -123,6 +134,45 @@ function buildWindowCandidate(process: ProcessRecord, controlProcess: ProcessRec
     pid,
     processName,
     score: getProcessPriority(processName) + (pid === process.pid ? 20 : 0),
+  };
+}
+
+function selectResumeWindows(processes: ProcessRecord[]): ResumeWindowRecord[] {
+  const processMap = new Map(processes.map((process) => [process.pid, process]));
+  const windowsByThread = new Map<string, ResumeWindowRecord & { score: number }>();
+  for (const process of processes) {
+    const threadIds = extractThreadIdsFromCommandLine(process.commandLine);
+    if (!threadIds.length) {
+      continue;
+    }
+    const controlProcess = resolveControlProcess(process, processMap);
+    const candidate = buildWindowCandidate(process, controlProcess);
+    if (isUnsafeWindowProcess(candidate.processName)) {
+      continue;
+    }
+    for (const threadId of threadIds) {
+      const existing = windowsByThread.get(threadId);
+      if (!existing || candidate.score > existing.score) {
+        windowsByThread.set(threadId, {
+          threadId,
+          pid: candidate.pid,
+          processName: candidate.processName,
+          matchedPid: process.pid,
+          matchedProcessName: process.name,
+          commandLine: process.commandLine,
+          score: candidate.score,
+        });
+      }
+    }
+  }
+  return Array.from(windowsByThread.values()).map(({ score, ...windowRecord }) => windowRecord);
+}
+
+function buildWindowDiscoverySnapshot(processes: ProcessRecord[]): WindowDiscoverySnapshot {
+  const resumeWindows = selectResumeWindows(processes);
+  return {
+    alivePids: new Set(processes.map((process) => process.pid)),
+    resumeWindowsByThread: new Map(resumeWindows.map((windowRecord) => [windowRecord.threadId, windowRecord])),
   };
 }
 
@@ -163,7 +213,7 @@ export class CodexWindowManager {
   constructor(options: { codexCmd?: string; appServerWs?: string; mapFile?: string } = {}) {
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
     this.appServerWs = options.appServerWs || process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:4792';
-    this.mapFile = options.mapFile || process.env.WINDOW_MAP_FILE || path.join(process.cwd(), '.window-map.json');
+    this.mapFile = options.mapFile || process.env.WINDOW_MAP_FILE || resolveRepoPath('.window-map.json');
     this.map = new Map();
     this.load();
   }
@@ -195,9 +245,23 @@ export class CodexWindowManager {
     if (!pid) {
       return;
     }
+    let verifiedPid: number | null = null;
+    try {
+      verifiedPid = (await this.findResumeWindow(threadId))?.pid || null;
+    } catch {
+      verifiedPid = null;
+    }
+    if (!verifiedPid) {
+      if (await this.isPidAlive(pid)) {
+        console.log(`[window] refuse to terminate unverified pid ${pid} for thread ${threadId}`);
+      }
+      this.map.delete(threadId);
+      this.save();
+      return;
+    }
     const script = [
       "$ErrorActionPreference = 'SilentlyContinue'",
-      `taskkill /PID ${pid} /T /F | Out-Null`,
+      `taskkill /PID ${verifiedPid} /T /F | Out-Null`,
     ].join('; ');
     await runPowerShell(script);
     this.map.delete(threadId);
@@ -218,6 +282,17 @@ export class CodexWindowManager {
     return output.trim() === '1';
   }
 
+  async isPidAliveInSnapshot(pid: number | string, snapshot: WindowDiscoverySnapshot | null | undefined): Promise<boolean> {
+    const numericPid = Number.parseInt(String(pid), 10);
+    if (!Number.isFinite(numericPid) || numericPid <= 0) {
+      return false;
+    }
+    if (snapshot) {
+      return snapshot.alivePids.has(numericPid);
+    }
+    return this.isPidAlive(numericPid);
+  }
+
   async listProcesses(): Promise<ProcessRecord[]> {
     const script = [
       "$ErrorActionPreference = 'Stop'",
@@ -233,37 +308,24 @@ export class CodexWindowManager {
     return rows.map(normalizeProcessRecord).filter((value): value is ProcessRecord => Boolean(value));
   }
 
-  async listResumeWindows(): Promise<ResumeWindowRecord[]> {
+  async createDiscoverySnapshot(): Promise<WindowDiscoverySnapshot> {
     const processes = await this.listProcesses();
-    const processMap = new Map(processes.map((process) => [process.pid, process]));
-    const windowsByThread = new Map<string, ResumeWindowRecord & { score: number }>();
-    for (const process of processes) {
-      const threadIds = extractThreadIdsFromCommandLine(process.commandLine);
-      if (!threadIds.length) {
-        continue;
-      }
-      const controlProcess = resolveControlProcess(process, processMap);
-      const candidate = buildWindowCandidate(process, controlProcess);
-      for (const threadId of threadIds) {
-        const existing = windowsByThread.get(threadId);
-        if (!existing || candidate.score > existing.score) {
-          windowsByThread.set(threadId, {
-            threadId,
-            pid: candidate.pid,
-            processName: candidate.processName,
-            matchedPid: process.pid,
-            matchedProcessName: process.name,
-            commandLine: process.commandLine,
-            score: candidate.score,
-          });
-        }
-      }
-    }
-    return Array.from(windowsByThread.values()).map(({ score, ...windowRecord }) => windowRecord);
+    return buildWindowDiscoverySnapshot(processes);
   }
 
-  async findResumeWindow(threadId: string): Promise<ResumeWindowRecord | null> {
+  async listResumeWindows(snapshot?: WindowDiscoverySnapshot | null): Promise<ResumeWindowRecord[]> {
+    if (snapshot) {
+      return Array.from(snapshot.resumeWindowsByThread.values());
+    }
+    const processes = await this.listProcesses();
+    return selectResumeWindows(processes);
+  }
+
+  async findResumeWindow(threadId: string, snapshot?: WindowDiscoverySnapshot | null): Promise<ResumeWindowRecord | null> {
     assertThreadId(threadId);
+    if (snapshot) {
+      return snapshot.resumeWindowsByThread.get(threadId) || null;
+    }
     const windows = await this.listResumeWindows();
     return windows.find((entry) => entry.threadId === threadId) || null;
   }
@@ -325,3 +387,8 @@ export class CodexWindowManager {
     writeJsonFileAtomic(this.mapFile, payload);
   }
 }
+
+export const __windowManagerTestUtils = {
+  buildWindowDiscoverySnapshot,
+  selectResumeWindows,
+};
