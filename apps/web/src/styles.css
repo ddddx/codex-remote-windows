@@ -499,28 +499,24 @@ textarea {
   color: var(--muted);
 }
 
-.topbar-pill {
+.topbar-action {
+  min-height: 34px;
+  padding: 8px 12px;
+}
+
+.context-usage {
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: color-mix(in srgb, var(--card-strong) 92%, transparent);
-}
-
-.topbar-pill select {
-  border: none;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.topbar-action {
-  min-height: 34px;
-  padding: 0 12px;
+  color: var(--muted);
 }
 
 .context-usage strong {
   color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .theme-select-group select,
@@ -533,6 +529,23 @@ textarea {
   padding: 9px 12px;
   background: var(--input-bg);
   color: var(--ink);
+}
+
+.theme-select-group select {
+  min-height: 34px;
+  width: auto;
+  padding: 0 32px 0 12px;
+  border-radius: 999px;
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 16px) 50% / 6px 6px no-repeat,
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 11px) 50% / 6px 6px no-repeat,
+    color-mix(in srgb, var(--card-strong) 92%, transparent);
+}
+
+.context-usage.is-empty strong {
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .status-badge,
@@ -843,7 +856,6 @@ textarea {
   width: 100%;
   padding: 6px 10px 6px 0;
   border: none;
-  border-radius: 12px;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -851,47 +863,6 @@ textarea {
 
 .timeline-process-summary.is-expandable {
   cursor: pointer;
-  transition: background 0.16s ease;
-}
-
-.timeline-process-summary.is-expandable:hover,
-.timeline-process-row.is-open .timeline-process-summary {
-  background: color-mix(in srgb, var(--surface-soft) 64%, transparent);
-}
-
-.timeline-process-row.timeline-card-command .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-command.is-open .timeline-process-summary,
-.timeline-process-row.timeline-card-mcp_tool .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-mcp_tool.is-open .timeline-process-summary,
-.timeline-process-row.timeline-card-dynamic_tool .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-dynamic_tool.is-open .timeline-process-summary,
-.timeline-process-row.timeline-card-web_search .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-web_search.is-open .timeline-process-summary {
-  background: transparent;
-}
-
-.timeline-process-row.timeline-card-fileChange .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-fileChange.is-open .timeline-process-summary,
-.timeline-process-row.timeline-card-file_change .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-file_change.is-open .timeline-process-summary,
-.timeline-process-row.timeline-card-turn_diff .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-turn_diff.is-open .timeline-process-summary {
-  background: rgba(242, 249, 244, 0.94);
-}
-
-.timeline-process-row.timeline-card-serverRequest .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-serverRequest.is-open .timeline-process-summary {
-  background: rgba(255, 249, 238, 0.94);
-}
-
-.timeline-process-row.timeline-card-_warning .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-_warning.is-open .timeline-process-summary {
-  background: rgba(255, 248, 224, 0.92);
-}
-
-.timeline-process-row.timeline-card-_error .timeline-process-summary.is-expandable:hover,
-.timeline-process-row.timeline-card-_error.is-open .timeline-process-summary {
-  background: rgba(255, 240, 240, 0.92);
 }
 
 .timeline-inline-title {
@@ -940,6 +911,13 @@ textarea {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0 0;
+}
+
+.timeline-process-static {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 0;
 }
 
 .timeline-inline-pre {
@@ -1297,12 +1275,20 @@ textarea {
   background: rgba(255, 248, 236, 0.96);
 }
 
+.thinking-indicator.tone-success {
+  border-color: rgba(95, 150, 112, 0.24);
+  background: rgba(241, 250, 244, 0.96);
+}
+
 .thinking-indicator-dot {
   width: 9px;
   height: 9px;
   border-radius: 999px;
   background: #8f78c9;
   flex: 0 0 auto;
+}
+
+.thinking-indicator-dot.is-running {
   animation: blink-cursor 0.8s step-end infinite;
 }
 
@@ -1316,6 +1302,10 @@ textarea {
 
 .thinking-indicator.tone-warning .thinking-indicator-dot {
   background: #c8903a;
+}
+
+.thinking-indicator.tone-success .thinking-indicator-dot {
+  background: #5f9670;
 }
 
 .thinking-indicator-text {

@@ -24,6 +24,12 @@ type TaskStep = {
   text: string;
 };
 
+type FooterStatus = {
+  tone: string;
+  label: string;
+  active: boolean;
+};
+
 type ExpandableTimelineRowProps = {
   title: React.ReactNode;
   summary?: React.ReactNode;
@@ -431,9 +437,9 @@ function renderFileChangeStats(change: { addedLines?: number; deletedLines?: num
 
 function buildTurnActivityStatus(
   entries: TimelineEntry[],
-  turnId: string | undefined,
+  turnState: { active?: boolean; turnId?: string } | undefined,
   approvals: ServerRequestItem[],
-): { tone: string; label: string } | null {
+): FooterStatus | null {
   function withDetail(prefix: string, detail: string): string {
     const compact = detail.replace(/\s+/g, ' ').trim();
     if (!compact) {
@@ -442,13 +448,14 @@ function buildTurnActivityStatus(
     return `${prefix} · ${compact.slice(0, 42)}`;
   }
 
+  const turnId = turnState?.turnId;
   if (!turnId) {
     return null;
   }
 
   const pendingApproval = approvals.find((item) => item.turnId === turnId && item.status !== 'submitting');
   if (pendingApproval) {
-    return { tone: 'warning', label: '等待批准' };
+    return { tone: 'warning', label: '等待批准', active: false };
   }
 
   const runningEntries = [...entries]
@@ -457,48 +464,52 @@ function buildTurnActivityStatus(
 
   const reasoningEntry = runningEntries.find((entry) => entry.type === 'reasoning');
   if (reasoningEntry) {
-    return { tone: 'thinking', label: withDetail('思考中', summarizeTimelineEntry(reasoningEntry)) };
+    return { tone: 'thinking', label: withDetail('思考中', summarizeTimelineEntry(reasoningEntry)), active: true };
   }
 
   const commandEntry = runningEntries.find((entry) => entry.type === 'command');
   if (commandEntry) {
-    return { tone: 'command', label: withDetail('执行命令中', buildProcessPreview(commandEntry)) };
+    return { tone: 'command', label: withDetail('执行命令中', buildProcessPreview(commandEntry)), active: true };
   }
 
   const fileChangeEntry = runningEntries.find((entry) => entry.type === 'file_change');
   if (fileChangeEntry) {
-    return { tone: 'file', label: withDetail('修改文件中', buildProcessPreview(fileChangeEntry)) };
+    return { tone: 'file', label: withDetail('修改文件中', buildProcessPreview(fileChangeEntry)), active: true };
   }
 
   const toolEntry = runningEntries.find((entry) => (
     entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'web_search'
   ));
   if (toolEntry) {
-    return { tone: 'command', label: withDetail('工具处理中', buildProcessPreview(toolEntry)) };
+    return { tone: 'command', label: withDetail('工具处理中', buildProcessPreview(toolEntry)), active: true };
   }
 
   const planEntry = runningEntries.find((entry) => entry.type === 'plan' || entry.type === 'turn_plan');
   if (planEntry) {
-    return { tone: 'thinking', label: withDetail('规划中', summarizeTimelineEntry(planEntry)) };
+    return { tone: 'thinking', label: withDetail('规划中', summarizeTimelineEntry(planEntry)), active: true };
   }
 
-  return { tone: 'thinking', label: '等待响应中' };
+  if (turnState?.active) {
+    return { tone: 'thinking', label: '等待响应中', active: true };
+  }
+
+  return null;
 }
 
 function buildLatestGroupStatus(
   groups: Array<{ status: string; label: string }>,
-): { tone: string; label: string } | null {
+): FooterStatus | null {
   const latest = groups[groups.length - 1];
   if (!latest) {
     return null;
   }
   if (latest.status === 'pending') {
-    return { tone: 'warning', label: `等待处理 · ${latest.label}` };
+    return { tone: 'warning', label: `等待处理 · ${latest.label}`, active: false };
   }
   if (latest.status === 'running') {
-    return { tone: 'command', label: `处理中 · ${latest.label}` };
+    return { tone: 'command', label: `处理中 · ${latest.label}`, active: true };
   }
-  return { tone: 'file', label: `已完成 · ${latest.label}` };
+  return { tone: 'success', label: `已完成 · ${latest.label}`, active: false };
 }
 
 function buildTimelineMarkerSymbol(entry: TimelineEntry): string {
@@ -535,6 +546,7 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
       : entry.type === 'reasoning'
         ? 'msg-bubble msg-bubble-commentary'
         : 'msg-bubble msg-bubble-assistant';
+    const renderableChanges = buildRenderableChanges(entry);
     return (
       <div className={`transcript-row transcript-row-${role}`}>
         <div className="transcript-row-body">
@@ -553,14 +565,14 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
                 </div>
               ) : null}
               {entry.patch ? <pre className="cmd-output">{entry.patch}</pre> : null}
-                {entry.changes?.length ? (
-                  <div className="tool-calls-banner">
-                  {buildRenderableChanges(entry).map((change, index) => (
+              {renderableChanges.length ? (
+                <div className="tool-calls-banner">
+                  {renderableChanges.map((change, index) => (
                     <span key={`${entry.id}-change-${index}`} className="tool-chip">
                       {[change.kind, change.path].filter(Boolean).join(': ')}
                     </span>
                   ))}
-                  </div>
+                </div>
               ) : null}
             </div>
           </article>
@@ -591,6 +603,35 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
                 </>
               }
             />
+          </div>
+        </div>
+      );
+    }
+    if (entry.type === 'file_change' || entry.type === 'turn_diff') {
+      return (
+        <div className={`timeline-event kind-${kind} ${buildTimelineStateClass(entry)}`}>
+          <div className="timeline-marker"><span className="timeline-marker-state" aria-hidden="true">{buildTimelineMarkerSymbol(entry)}</span></div>
+          <div className="timeline-content">
+            <div className={`timeline-process-row timeline-process-static timeline-card-${kind}`}>
+              <div className="timeline-inline-title">{buildProcessHeadline(entry)}</div>
+              <div className="timeline-inline-meta">{describeTimelineType(entry)}{entry.status ? ` · ${formatExecutionStatus(entry.status)}` : ''}</div>
+              {renderableChanges.length ? (
+                <div className="file-change-list">
+                  {renderableChanges.map((change, index) => (
+                    <div key={`${entry.id}-change-${index}`} className={`file-change-entry kind-${(change.kind || 'update').toLowerCase()}`}>
+                      <span>{`${formatFileChangePrefix(change.kind)} ${change.path || '未命名文件'}`}</span>
+                      {renderFileChangeStats(change)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {entry.meta?.length ? (
+                <div className="timeline-inline-meta timeline-inline-meta-code">
+                  {entry.meta.join('\n')}
+                </div>
+              ) : null}
+              {entry.patch ? renderDiffBlock(entry.patch) : null}
+            </div>
           </div>
         </div>
       );
@@ -853,8 +894,8 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
     [activeSessionId, approvalItems],
   );
   const activeTurnStatus = useMemo(
-    () => buildTurnActivityStatus(entries, turnState?.turnId, approvals),
-    [entries, turnState?.turnId, approvals],
+    () => buildTurnActivityStatus(entries, turnState, approvals),
+    [entries, turnState, approvals],
   );
   const taskPanel = useMemo(
     () => buildTaskPanelModel(entries),
@@ -1033,7 +1074,7 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
         <div className="timeline-status-dock">
           {footerStatus ? (
             <div className={`thinking-indicator tone-${footerStatus.tone}`} aria-live="polite">
-              <span className="thinking-indicator-dot"></span>
+              <span className={`thinking-indicator-dot${footerStatus.active ? ' is-running' : ''}`}></span>
               <span className="thinking-indicator-text">{footerStatus.label}</span>
             </div>
           ) : null}

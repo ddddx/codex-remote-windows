@@ -11,12 +11,24 @@ export function buildSessionNameFromPrompt(text: string): string {
   return firstLine.slice(0, 40);
 }
 
+function readNumericTokenValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function formatTokenUsageValue(value: unknown): string {
-  if (typeof value === 'number') {
-    return String(value);
+  const directNumber = readNumericTokenValue(value);
+  if (directNumber !== null) {
+    return `总 ${directNumber}`;
   }
   if (!value || typeof value !== 'object') {
-    return '-';
+    return '未统计';
   }
 
   const usage = value as Record<string, unknown>;
@@ -28,23 +40,23 @@ export function formatTokenUsageValue(value: unknown): string {
   const nestedInput = nested?.inputTokens ?? nested?.input_tokens ?? nested?.promptTokens ?? nested?.prompt_tokens;
   const nestedOutput = nested?.outputTokens ?? nested?.output_tokens ?? nested?.completionTokens ?? nested?.completion_tokens;
 
-  if (typeof total === 'number') {
-    return String(total);
+  const resolvedTotal = readNumericTokenValue(total) ?? readNumericTokenValue(nestedTotal);
+  if (resolvedTotal !== null) {
+    return `总 ${resolvedTotal}`;
   }
-  if (typeof nestedTotal === 'number') {
-    return String(nestedTotal);
-  }
+  const resolvedInput = readNumericTokenValue(input) ?? readNumericTokenValue(nestedInput);
+  const resolvedOutput = readNumericTokenValue(output) ?? readNumericTokenValue(nestedOutput);
 
   const parts = [
-    typeof (typeof input === 'number' ? input : nestedInput) === 'number'
-      ? `输入 ${String(typeof input === 'number' ? input : nestedInput)}`
+    resolvedInput !== null
+      ? `输入 ${resolvedInput}`
       : '',
-    typeof (typeof output === 'number' ? output : nestedOutput) === 'number'
-      ? `输出 ${String(typeof output === 'number' ? output : nestedOutput)}`
+    resolvedOutput !== null
+      ? `输出 ${resolvedOutput}`
       : '',
   ].filter(Boolean);
 
-  return parts.length ? parts.join(' / ') : '-';
+  return parts.length ? parts.join(' / ') : '未统计';
 }
 
 export function formatHealthStatus(status: string | undefined): string {

@@ -668,7 +668,11 @@ export function App() {
             </button>
             <h1 id="activeTitle">{activeTitle}</h1>
             <div className="topbar-tools">
-              <label className="theme-select-group topbar-pill" htmlFor="themeSelect">
+              <div id="contextUsage" className={`context-usage${activeUsage ? '' : ' is-empty'}`}>
+                <span className="context-usage-label">用量</span>
+                <strong>{formatTokenUsageValue(activeUsage)}</strong>
+              </div>
+              <label className="theme-select-group" htmlFor="themeSelect">
                 <span className="sr-only">主题</span>
                 <select id="themeSelect" aria-label="主题" value={theme} onChange={(event) => handleThemeChange(event.target.value)}>
                   {THEME_OPTIONS.map((item) => (
@@ -676,13 +680,9 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <div id="contextUsage" className="context-usage topbar-pill">
-                <span className="context-usage-label">用量</span>
-                <strong>{formatTokenUsageValue(activeUsage)}</strong>
-              </div>
               <button
                 id="tokenBtn"
-                className="btn btn-secondary btn-inline topbar-pill topbar-action"
+                className="btn btn-secondary btn-inline topbar-action"
                 type="button"
                 onClick={() => {
                   setTokenDraft(token);
@@ -691,7 +691,7 @@ export function App() {
               >
                 Token
               </button>
-              <span id="activeStatus" className={`status-badge topbar-pill${connectionStatus === 'connected' ? '' : ' waiting'}`}>
+              <span id="activeStatus" className={`status-badge${connectionStatus === 'connected' ? '' : ' waiting'}`}>
                 {connectionLabel}
               </span>
             </div>
