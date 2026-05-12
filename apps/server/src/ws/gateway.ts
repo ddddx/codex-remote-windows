@@ -42,6 +42,7 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
       try {
         await ensureCodexReady(app);
         await bootstrapTabs(app);
+        await app.windowAttachments.refreshAllTabsWindowStatus().catch(() => {});
         sendMessage(socket, buildInitialState(app));
       } catch (error) {
         sendMessage(socket, {

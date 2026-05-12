@@ -682,7 +682,7 @@ export function App() {
               </label>
               <button
                 id="tokenBtn"
-                className="btn btn-secondary btn-inline topbar-action"
+                className="topbar-action topbar-action-secondary"
                 type="button"
                 onClick={() => {
                   setTokenDraft(token);

@@ -29,6 +29,9 @@ function createAppStub() {
   const routes = new Map<string, (socket: any, request: any) => void>();
   const runtimeState = createRuntimeState();
   const listeners = new Map<string, Array<(...args: any[]) => void>>();
+  const calls = {
+    refreshAllTabsWindowStatus: 0,
+  };
 
   const app = {
     config: { wsToken: 'secret-token' },
@@ -72,6 +75,11 @@ function createAppStub() {
       async ensureStarted() {},
       async stop() {},
     },
+    windowAttachments: {
+      async refreshAllTabsWindowStatus() {
+        calls.refreshAllTabsWindowStatus += 1;
+      },
+    },
     get(path: string, options: any, handler: (socket: any, request: any) => void) {
       assert.equal(path, '/ws');
       assert.equal(options.websocket, true);
@@ -82,6 +90,7 @@ function createAppStub() {
   return {
     app: app as any,
     routes,
+    calls,
   };
 }
 
@@ -101,7 +110,7 @@ test('ws gateway rejects unauthorized connection', async () => {
 });
 
 test('ws gateway bootstraps and emits initial state for authorized connection', async () => {
-  const { app, routes } = createAppStub();
+  const { app, routes, calls } = createAppStub();
   await registerWsGateway(app);
 
   const socket = createSocket();
@@ -113,6 +122,7 @@ test('ws gateway bootstraps and emits initial state for authorized connection', 
 
   assert.equal(app.runtimeState.websocketClientCount, 1);
   assert.equal(app.runtimeState.clients.has(socket as any), true);
+  assert.equal(calls.refreshAllTabsWindowStatus, 1);
   assert.equal(socket.sent.length, 1);
   assert.equal((socket.sent[0] as any).type, 'state');
   assert.equal((socket.sent[0] as any).tabs.length, 1);

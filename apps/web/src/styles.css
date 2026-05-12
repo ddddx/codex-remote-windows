@@ -502,6 +502,20 @@ textarea {
 .topbar-action {
   min-height: 34px;
   padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-strong) 92%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.topbar-action:hover {
+  background: color-mix(in srgb, var(--surface-soft) 82%, var(--card-strong));
+}
+
+.topbar-action-secondary {
+  font-size: 12px;
+  line-height: 1;
 }
 
 .context-usage {
