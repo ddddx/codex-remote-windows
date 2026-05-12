@@ -332,6 +332,78 @@ test('state and thread sync preserve usable token usage for active session heade
   assert.equal(usage?.totalTokens, 77);
 });
 
+test('state selects first available session when no active session exists', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'state',
+    tabs: [{
+      threadId: 'thread-first',
+      name: 'First',
+      cwd: 'C:\\workspace',
+      status: 'idle',
+    }],
+    serverRequests: [],
+    globalSupplementalItems: [],
+  } as any);
+
+  assert.equal(useAppStore.getState().sessions.activeSessionId, 'thread-first');
+});
+
+test('thread sync merges cached realtime timeline events after refresh', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-refresh',
+    turns: [{
+      id: 'turn-1',
+      createdAt: 1,
+      input: [{ type: 'text', text: '旧消息' }],
+    }],
+    tokenUsage: { totalTokens: 22 },
+    timelineEvents: [
+      {
+        type: 'turn_started',
+        threadId: 'thread-refresh',
+        turnId: 'turn-2',
+        startedAt: 2,
+      },
+      {
+        type: 'agent_delta',
+        threadId: 'thread-refresh',
+        turnId: 'turn-2',
+        itemId: 'assistant-live-2',
+        delta: '新回复片段',
+        startedAt: 3,
+      },
+      {
+        type: 'item_delta',
+        threadId: 'thread-refresh',
+        turnId: 'turn-2',
+        itemId: 'file-2',
+        method: 'item/fileChange/patchUpdated',
+        patch: '*** Begin Patch\n*** Update File: a.txt\n+line\n*** End Patch',
+        changes: [{ path: 'a.txt', kind: 'update', addedLines: 1, deletedLines: 0 }],
+        startedAt: 4,
+      },
+      {
+        type: 'warning',
+        threadId: 'thread-refresh',
+        message: '审批还在等待',
+        noticeId: 'warn-refresh',
+        createdAt: 5,
+      },
+    ],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-refresh'] || [];
+  assert.ok(entries.some((entry) => entry.role === 'user' && entry.text === '旧消息'));
+  assert.ok(entries.some((entry) => entry.id === 'assistant-live-2' && entry.text === '新回复片段'));
+  assert.ok(entries.some((entry) => entry.id === 'file-2' && entry.patch?.includes('*** Update File: a.txt')));
+  assert.ok(entries.some((entry) => entry.id === 'notice:warn-refresh' && entry.text === '审批还在等待'));
+});
+
 test('tab updates can refresh token usage independently of thread sync payload', () => {
   resetStore();
 

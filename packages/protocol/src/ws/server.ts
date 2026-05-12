@@ -8,7 +8,7 @@ export type ServerMessage =
   | { type: 'tab_created'; threadId: string; tab?: unknown }
   | { type: 'tab_removed'; threadId: string }
   | { type: 'unread'; threadId: string }
-  | { type: 'thread_sync'; threadId: string; turns?: unknown[]; supplementalItems?: unknown[]; globalSupplementalItems?: unknown[]; tokenUsage?: unknown; turnPlans?: unknown[]; turnDiffs?: unknown[] }
+  | { type: 'thread_sync'; threadId: string; turns?: unknown[]; supplementalItems?: unknown[]; globalSupplementalItems?: unknown[]; tokenUsage?: unknown; turnPlans?: unknown[]; turnDiffs?: unknown[]; timelineEvents?: unknown[] }
   | { type: 'turn_started'; threadId: string; turnId?: string; startedAt?: number }
   | { type: 'turn_completed'; threadId: string; turnId?: string }
   | { type: 'turn_plan_updated'; threadId: string; turnId?: string; explanation?: string; plan?: unknown[] }

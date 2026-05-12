@@ -2,6 +2,7 @@ import type {
   GlobalNoticeSnapshot,
   RuntimeState,
   SupplementalItemSnapshot,
+  TimelineEventSnapshot,
   TurnDiffSnapshot,
   TurnPlanSnapshot,
 } from '../../state/runtime-state.js';
@@ -168,6 +169,29 @@ export function listSupplementalItems(
     const rightTime = Number(right.completedAt || right.startedAt || right.createdAt || right.updatedAt || 0);
     return leftTime - rightTime;
   });
+}
+
+export function appendTimelineEvent(
+  runtimeState: RuntimeState,
+  threadId: string | undefined,
+  event: TimelineEventSnapshot,
+): void {
+  if (!threadId) {
+    return;
+  }
+  const existing = runtimeState.timelineEventsByThread.get(threadId) || [];
+  const next = [...existing, event];
+  if (next.length > 400) {
+    next.splice(0, next.length - 400);
+  }
+  runtimeState.timelineEventsByThread.set(threadId, next);
+}
+
+export function listTimelineEvents(
+  runtimeState: RuntimeState,
+  threadId: string,
+): TimelineEventSnapshot[] {
+  return [...(runtimeState.timelineEventsByThread.get(threadId) || [])];
 }
 
 export function pushGlobalNotice(runtimeState: RuntimeState, notice: GlobalNoticeSnapshot): void {

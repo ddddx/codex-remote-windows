@@ -87,6 +87,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     tokenUsage: z.unknown().optional(),
     turnPlans: z.array(z.unknown()).optional(),
     turnDiffs: z.array(z.unknown()).optional(),
+    timelineEvents: z.array(z.unknown()).optional(),
   }),
   z.object({
     type: z.literal('turn_started'),

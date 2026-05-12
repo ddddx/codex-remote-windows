@@ -31,6 +31,7 @@ const THEME_OPTIONS = [
 
 const APPROVAL_POLICY_OPTIONS = ['untrusted', 'on-request', 'never', 'on-failure'];
 const SANDBOX_MODE_OPTIONS = ['read-only', 'workspace-write', 'danger-full-access'];
+const ACTIVE_SESSION_STORAGE_KEY = 'codex-remote-active-session';
 
 function readThemePreference(): string {
   try {
@@ -49,6 +50,26 @@ function writeThemePreference(theme: string): string {
     // Ignore storage failures.
   }
   return next;
+}
+
+function readStoredActiveSessionId(): string {
+  try {
+    return window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeStoredActiveSessionId(threadId: string | null): void {
+  try {
+    if (threadId) {
+      window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, threadId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function normalizeModel(value: string): string {
@@ -230,6 +251,7 @@ export function App() {
   const setCodexOptionsReady = useAppStore((state) => state.setCodexOptionsReady);
   const setCodexOptionsError = useAppStore((state) => state.setCodexOptionsError);
   const setComposerPrefs = useAppStore((state) => state.setComposerPrefs);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const health = useAppStore((state) => state.health.data);
   const healthError = useAppStore((state) => state.health.error);
   const token = useAppStore((state) => state.auth.token);
@@ -266,6 +288,7 @@ export function App() {
   const [composerResetSignal, setComposerResetSignal] = useState(0);
   const sessionNameInputRef = useRef<HTMLInputElement | null>(null);
   const tokenInputRef = useRef<HTMLInputElement | null>(null);
+  const preferredActiveSessionRef = useRef(readStoredActiveSessionId());
 
   const resolvedActiveSessionId = activeSessionId;
   const activeSession = sessions.find((item) => item.threadId === resolvedActiveSessionId) || null;
@@ -379,11 +402,29 @@ export function App() {
     if (!activeSessionId) {
       return;
     }
+    writeStoredActiveSessionId(activeSessionId);
     socketClient.send({
       type: 'thread_sync',
       threadId: activeSessionId,
     });
   }, [activeSessionId, socketClient]);
+
+  useEffect(() => {
+    if (!sessions.length) {
+      if (!activeSessionId) {
+        writeStoredActiveSessionId(null);
+      }
+      return;
+    }
+    const preferred = preferredActiveSessionRef.current;
+    if (preferred && preferred !== activeSessionId && sessions.some((item) => item.threadId === preferred)) {
+      setActiveSession(preferred);
+      return;
+    }
+    if (!activeSessionId && sessions[0]?.threadId) {
+      setActiveSession(sessions[0].threadId);
+    }
+  }, [activeSessionId, sessions, setActiveSession]);
 
   useEffect(() => {
     if (!queuedPrompt.trim() || !activeSessionId) {

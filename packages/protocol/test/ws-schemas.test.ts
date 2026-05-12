@@ -33,6 +33,7 @@ test('server message schema accepts thread_sync payload', () => {
     tokenUsage: null,
     turnPlans: [],
     turnDiffs: [],
+    timelineEvents: [],
   });
 
   assert.equal(result.success, true);

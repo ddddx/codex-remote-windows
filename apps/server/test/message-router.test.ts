@@ -234,6 +234,7 @@ test('thread_sync returns tab update and thread snapshot', async () => {
   assert.equal((socket.sent[1] as any).turnDiffs.length, 1);
   assert.equal((socket.sent[1] as any).supplementalItems.length, 1);
   assert.equal((socket.sent[1] as any).globalSupplementalItems.length, 1);
+  assert.ok(Array.isArray((socket.sent[1] as any).timelineEvents));
 });
 
 test('thread_sync preserves nested usage payloads for header display', async () => {
@@ -458,6 +459,8 @@ test('bridge forwards plan, progress, hook and guardian notifications', async ()
   assert.equal(messages[1]?.type, 'mcp_tool_progress');
   assert.equal(messages[2]?.type, 'hook_started');
   assert.equal(messages[3]?.type, 'guardian_review_completed');
+  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-1') || [];
+  assert.equal(cachedEvents.length, 4);
 });
 
 test('file change patch updates refresh pending request snapshot', async () => {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { persistServerRequest } from './server-requests.js';
 import { upsertRuntimeTab } from './session-tabs.js';
 import {
+  appendTimelineEvent,
   pushGlobalNotice,
   setCachedTurnDiff,
   setCachedTurnPlan,
@@ -11,6 +12,14 @@ import { broadcastMessage } from '../../ws/bridge.js';
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function broadcastThreadTimelineMessage(app: FastifyInstance, message: Record<string, unknown>): void {
+  const threadId = typeof message.threadId === 'string' ? message.threadId : undefined;
+  if (threadId) {
+    appendTimelineEvent(app.runtimeState, threadId, message);
+  }
+  broadcastMessage(app, message as any);
 }
 
 export function handleCodexNotification(
@@ -64,7 +73,7 @@ export function handleCodexNotification(
       });
       broadcastMessage(app, { type: 'tab_updated', tab });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'token_usage',
       threadId: params.threadId,
       usage: params.tokenUsage ?? null,
@@ -83,7 +92,7 @@ export function handleCodexNotification(
       broadcastMessage(app, { type: 'tab_updated', tab });
     }
     const turn = params.turn as Record<string, unknown> | undefined;
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'turn_started',
       threadId: params.threadId,
       turnId: typeof turn?.id === 'string' ? turn.id : undefined,
@@ -105,7 +114,7 @@ export function handleCodexNotification(
       });
       broadcastMessage(app, { type: 'tab_updated', tab });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'turn_completed',
       threadId: params.threadId,
       turnId: typeof turn?.id === 'string' ? turn.id : undefined,
@@ -114,7 +123,7 @@ export function handleCodexNotification(
   }
 
   if (method === 'item/agentMessage/delta' && typeof params.threadId === 'string') {
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'agent_delta',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -130,7 +139,7 @@ export function handleCodexNotification(
       explanation: '',
       plan: [],
     });
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'plan_delta',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -142,7 +151,7 @@ export function handleCodexNotification(
   }
 
   if (method === 'item/mcpToolCall/progress' && typeof params.threadId === 'string') {
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'mcp_tool_progress',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -168,7 +177,7 @@ export function handleCodexNotification(
         completedAt: typeof run.completedAt === 'number' ? run.completedAt : null,
       });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'hook_started',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -192,7 +201,7 @@ export function handleCodexNotification(
         completedAt: typeof run.completedAt === 'number' ? run.completedAt : Date.now(),
       });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'hook_completed',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -216,7 +225,7 @@ export function handleCodexNotification(
         startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now(),
       });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'guardian_review_started',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -241,7 +250,7 @@ export function handleCodexNotification(
         completedAt: typeof params.completedAtMs === 'number' ? params.completedAtMs : Date.now(),
       });
     }
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'guardian_review_completed',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -250,7 +259,7 @@ export function handleCodexNotification(
   }
 
   if (method === 'item/started' && typeof params.threadId === 'string') {
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'item_started',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -261,7 +270,7 @@ export function handleCodexNotification(
   }
 
   if (method === 'item/completed' && typeof params.threadId === 'string') {
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'item_completed',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -290,7 +299,7 @@ export function handleCodexNotification(
   }
 
   if (method.startsWith('item/') && typeof params.threadId === 'string') {
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'item_delta',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
@@ -336,7 +345,7 @@ export function handleCodexNotification(
       createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
       threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
     });
-    broadcastMessage(app, {
+    broadcastThreadTimelineMessage(app, {
       type: 'warning',
       message: typeof params.message === 'string' ? params.message : 'Warning',
       threadId: typeof params.threadId === 'string' ? params.threadId : undefined,

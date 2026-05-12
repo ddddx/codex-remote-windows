@@ -72,6 +72,8 @@ export type GlobalNoticeSnapshot = {
   [key: string]: unknown;
 };
 
+export type TimelineEventSnapshot = Record<string, unknown>;
+
 type RuntimeRepositories = {
   sessions: {
     listSessions: () => RuntimeTab[];
@@ -164,6 +166,7 @@ export type RuntimeState = {
   turnPlansByThread: Map<string, Map<string, TurnPlanSnapshot>>;
   turnDiffsByThread: Map<string, Map<string, TurnDiffSnapshot>>;
   supplementalItemsByThread: Map<string, Map<string, SupplementalItemSnapshot>>;
+  timelineEventsByThread: Map<string, TimelineEventSnapshot[]>;
   globalNotices: GlobalNoticeSnapshot[];
   repositories: RuntimeRepositories | null;
 };
@@ -181,6 +184,7 @@ export function createRuntimeState(): RuntimeState {
     turnPlansByThread: new Map(),
     turnDiffsByThread: new Map(),
     supplementalItemsByThread: new Map(),
+    timelineEventsByThread: new Map(),
     globalNotices: [],
     repositories: null,
   };
