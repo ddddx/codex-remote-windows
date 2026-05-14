@@ -238,6 +238,29 @@ function extractTokenUsageValue(value: unknown): unknown {
   if (looksLikeUsageObject) {
     return source;
   }
+  const nestedTotal = source.total && typeof source.total === 'object'
+    ? source.total as Record<string, unknown>
+    : null;
+  const nestedLast = source.last && typeof source.last === 'object'
+    ? source.last as Record<string, unknown>
+    : null;
+  const looksLikeCodexUsageEnvelope = [
+    nestedTotal?.totalTokens,
+    nestedTotal?.total_tokens,
+    nestedTotal?.inputTokens,
+    nestedTotal?.input_tokens,
+    nestedTotal?.outputTokens,
+    nestedTotal?.output_tokens,
+    nestedLast?.totalTokens,
+    nestedLast?.total_tokens,
+    nestedLast?.inputTokens,
+    nestedLast?.input_tokens,
+    nestedLast?.outputTokens,
+    nestedLast?.output_tokens,
+  ].some((entry) => typeof entry === 'number');
+  if (looksLikeCodexUsageEnvelope) {
+    return source;
+  }
   const direct = source.tokenUsage
     ?? source.token_usage
     ?? source.usage
@@ -265,6 +288,8 @@ function normalizeTokenUsage(value: unknown): unknown {
   }
   const usage = extracted as Record<string, unknown>;
   const nested = usage.usage && typeof usage.usage === 'object' ? usage.usage as Record<string, unknown> : null;
+  const total = usage.total && typeof usage.total === 'object' ? usage.total as Record<string, unknown> : null;
+  const last = usage.last && typeof usage.last === 'object' ? usage.last as Record<string, unknown> : null;
   return {
     ...usage,
     totalTokens: typeof usage.totalTokens === 'number'
@@ -277,6 +302,14 @@ function normalizeTokenUsage(value: unknown): unknown {
             ? nested.totalTokens
             : typeof nested?.total_tokens === 'number'
               ? nested.total_tokens
+              : typeof total?.totalTokens === 'number'
+                ? total.totalTokens
+                : typeof total?.total_tokens === 'number'
+                  ? total.total_tokens
+                  : typeof last?.totalTokens === 'number'
+                    ? last.totalTokens
+                    : typeof last?.total_tokens === 'number'
+                      ? last.total_tokens
               : undefined,
     inputTokens: typeof usage.inputTokens === 'number'
       ? usage.inputTokens
@@ -288,12 +321,28 @@ function normalizeTokenUsage(value: unknown): unknown {
             ? usage.prompt_tokens
             : typeof nested?.inputTokens === 'number'
               ? nested.inputTokens
-              : typeof nested?.input_tokens === 'number'
+            : typeof nested?.input_tokens === 'number'
                 ? nested.input_tokens
                 : typeof nested?.promptTokens === 'number'
                   ? nested.promptTokens
                   : typeof nested?.prompt_tokens === 'number'
                     ? nested.prompt_tokens
+                    : typeof total?.inputTokens === 'number'
+                      ? total.inputTokens
+                      : typeof total?.input_tokens === 'number'
+                        ? total.input_tokens
+                        : typeof total?.promptTokens === 'number'
+                          ? total.promptTokens
+                          : typeof total?.prompt_tokens === 'number'
+                            ? total.prompt_tokens
+                            : typeof last?.inputTokens === 'number'
+                              ? last.inputTokens
+                              : typeof last?.input_tokens === 'number'
+                                ? last.input_tokens
+                                : typeof last?.promptTokens === 'number'
+                                  ? last.promptTokens
+                                  : typeof last?.prompt_tokens === 'number'
+                                    ? last.prompt_tokens
                     : undefined,
     outputTokens: typeof usage.outputTokens === 'number'
       ? usage.outputTokens
@@ -311,6 +360,22 @@ function normalizeTokenUsage(value: unknown): unknown {
                   ? nested.completionTokens
                   : typeof nested?.completion_tokens === 'number'
                     ? nested.completion_tokens
+                    : typeof total?.outputTokens === 'number'
+                      ? total.outputTokens
+                      : typeof total?.output_tokens === 'number'
+                        ? total.output_tokens
+                        : typeof total?.completionTokens === 'number'
+                          ? total.completionTokens
+                          : typeof total?.completion_tokens === 'number'
+                            ? total.completion_tokens
+                            : typeof last?.outputTokens === 'number'
+                              ? last.outputTokens
+                              : typeof last?.output_tokens === 'number'
+                                ? last.output_tokens
+                                : typeof last?.completionTokens === 'number'
+                                  ? last.completionTokens
+                                  : typeof last?.completion_tokens === 'number'
+                                    ? last.completion_tokens
                     : undefined,
   };
 }
@@ -331,6 +396,54 @@ function mergeTokenUsageFromSessions(
   return next;
 }
 
+function extractStructuredText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => extractStructuredText(entry))
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (!value || typeof value !== 'object') {
+    return '';
+  }
+
+  const source = value as Record<string, unknown>;
+  const directCandidates = [
+    source.text,
+    source.outputText,
+    source.output_text,
+    source.inputText,
+    source.input_text,
+    source.value,
+  ];
+  for (const candidate of directCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const nestedCandidates = [
+    source.content,
+    source.parts,
+    source.output,
+    source.input,
+    source.message,
+  ];
+  for (const candidate of nestedCandidates) {
+    const text = extractStructuredText(candidate);
+    if (text) {
+      return text;
+    }
+  }
+
+  return '';
+}
+
 function extractTurnUserText(turn: any): string {
   if (typeof turn?.text === 'string' && turn.text.trim()) {
     return turn.text;
@@ -340,8 +453,7 @@ function extractTurnUserText(turn: any): string {
   const itemTextParts = items.flatMap((item: any) => {
     if (item?.type === 'userMessage' && Array.isArray(item?.content)) {
       return item.content
-        .filter((part: any) => part?.type === 'text' && typeof part?.text === 'string')
-        .map((part: any) => part.text.trim())
+        .map((part: any) => extractStructuredText(part))
         .filter(Boolean);
     }
     return [];
@@ -352,8 +464,7 @@ function extractTurnUserText(turn: any): string {
 
   const inputItems = Array.isArray(turn?.input) ? turn.input : [];
   const textParts = inputItems
-    .filter((part: any) => part?.type === 'text' && typeof part?.text === 'string')
-    .map((part: any) => part.text.trim())
+    .map((part: any) => extractStructuredText(part))
     .filter(Boolean);
   if (textParts.length) {
     return textParts.join('\n');
@@ -361,6 +472,32 @@ function extractTurnUserText(turn: any): string {
 
   if (typeof turn?.summary === 'string' && turn.summary.trim()) {
     return turn.summary;
+  }
+
+  return '';
+}
+
+function extractTurnAssistantText(turn: any): string {
+  if (typeof turn?.output === 'string' && turn.output.trim()) {
+    return turn.output.trim();
+  }
+
+  const outputText = extractStructuredText(turn?.output);
+  if (outputText) {
+    return outputText;
+  }
+
+  const items = Array.isArray(turn?.items) ? turn.items : [];
+  for (const item of items) {
+    if (item?.type !== 'agentMessage') {
+      continue;
+    }
+    const text = extractStructuredText(item?.text)
+      || extractStructuredText(item?.content)
+      || extractStructuredText(item?.output);
+    if (text) {
+      return text;
+    }
   }
 
   return '';
@@ -558,6 +695,7 @@ function createTimelineEntryFromItemEvent(
   threadId: string,
   item: Record<string, unknown> | undefined,
   turnId?: string,
+  fallbackStartedAt?: number,
 ): TimelineEntry | null {
   if (!item) {
     return null;
@@ -572,7 +710,7 @@ function createTimelineEntryFromItemEvent(
       ? item.startedAt
       : typeof item.createdAt === 'number'
         ? item.createdAt
-        : Date.now(),
+        : fallbackStartedAt,
   );
 
   if (itemType === 'reasoning') {
@@ -976,11 +1114,9 @@ function applyThreadSyncTimelineEvent(
       const itemId = typeof item.id === 'string'
         ? item.id
         : `${message.threadId}-assistant-final`;
-      const text = typeof item.text === 'string'
-        ? item.text
-        : typeof item.output === 'string'
-          ? item.output
-          : '';
+      const text = extractStructuredText(item.text)
+        || extractStructuredText(item.output)
+        || extractStructuredText(item.content);
       if (!text.trim()) {
         return entries;
       }
@@ -989,7 +1125,7 @@ function applyThreadSyncTimelineEvent(
         role: 'assistant',
         turnId: message.turnId,
         itemId,
-        text: text.trim(),
+        text,
         status: 'completed',
         partial: false,
         createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
@@ -1111,20 +1247,51 @@ function mergeThreadSyncEntries(
   return entries;
 }
 
+function extractTokenUsageFromThreadSync(
+  message: Extract<ServerMessage, { type: 'thread_sync' }>,
+): unknown {
+  const direct = normalizeTokenUsage(message.tokenUsage ?? message);
+  if (direct !== null && direct !== undefined) {
+    return direct;
+  }
+
+  const events = Array.isArray(message.timelineEvents) ? message.timelineEvents : [];
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index] as Record<string, unknown> | undefined;
+    if (!event || event.type !== 'token_usage') {
+      continue;
+    }
+    const usage = normalizeTokenUsage((event as any).usage);
+    if (usage !== null && usage !== undefined) {
+      return usage;
+    }
+  }
+
+  return null;
+}
+
 function createEntriesFromThreadTurn(threadId: string, turn: any, index: number): TimelineEntry[] {
   const turnId = String(turn?.id || `${threadId}-${index}`);
-  const createdAt = normalizeTimestamp(typeof turn?.createdAt === 'number' ? turn.createdAt : Date.now() + index);
+  const syntheticTurnTime = 1_700_000_000_000 + ((index + 1) * 1000);
+  const createdAt = normalizeTimestamp(
+    typeof turn?.createdAt === 'number'
+      ? turn.createdAt
+      : typeof turn?.updatedAt === 'number'
+        ? turn.updatedAt
+        : syntheticTurnTime,
+  );
   const entries: TimelineEntry[] = [];
   let hasUserMessage = false;
   let hasAssistantMessage = false;
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
   if (items.length) {
-    for (const item of items) {
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const item = items[itemIndex];
+      const fallbackItemTime = createdAt + itemIndex;
       if (item?.type === 'userMessage' && Array.isArray(item?.content)) {
         const text = item.content
-          .filter((part: any) => part?.type === 'text' && typeof part?.text === 'string')
-          .map((part: any) => part.text.trim())
+          .map((part: any) => extractStructuredText(part))
           .filter(Boolean)
           .join('\n');
         if (text) {
@@ -1135,22 +1302,28 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
             turnId,
             itemId: typeof item?.id === 'string' ? item.id : undefined,
             text,
-            createdAt: normalizeTimestamp(item?.createdAt, createdAt),
+            createdAt: normalizeTimestamp(item?.createdAt, fallbackItemTime),
           });
           hasUserMessage = true;
         }
         continue;
       }
 
-      if (item?.type === 'agentMessage' && typeof item?.text === 'string' && item.text.trim()) {
+      if (item?.type === 'agentMessage') {
+        const text = extractStructuredText(item?.text)
+          || extractStructuredText(item?.content)
+          || extractStructuredText(item?.output);
+        if (!text) {
+          continue;
+        }
         entries.push({
           id: `${turnId}:${item.id || 'assistant'}`,
           type: 'message',
           role: 'assistant',
           turnId,
           itemId: typeof item?.id === 'string' ? item.id : undefined,
-          text: item.text.trim(),
-          createdAt: normalizeTimestamp(typeof item?.createdAt === 'number' ? item.createdAt : turn?.updatedAt, createdAt + 1),
+          text,
+          createdAt: normalizeTimestamp(item?.createdAt, fallbackItemTime),
         });
         hasAssistantMessage = true;
         continue;
@@ -1170,16 +1343,16 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
             typeof item?.cwd === 'string' ? item.cwd : '',
             typeof item?.exitCode === 'number' ? `退出码 ${item.exitCode}` : '',
           ].filter(Boolean),
-          createdAt: normalizeTimestamp(typeof item?.createdAt === 'number' ? item.createdAt : createdAt, createdAt),
+          createdAt: normalizeTimestamp(typeof item?.createdAt === 'number' ? item.createdAt : fallbackItemTime, fallbackItemTime),
         });
         continue;
       }
 
-      const fallbackEntry = createTimelineEntryFromItemEvent('item_completed', threadId, item, turnId);
+      const fallbackEntry = createTimelineEntryFromItemEvent('item_completed', threadId, item, turnId, fallbackItemTime);
       if (fallbackEntry) {
         entries.push({
           ...fallbackEntry,
-          createdAt: normalizeTimestamp(fallbackEntry.createdAt, createdAt),
+          createdAt: normalizeTimestamp(fallbackEntry.createdAt, fallbackItemTime),
         });
       }
     }
@@ -1197,14 +1370,15 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
     });
   }
 
-  if (typeof turn?.output === 'string' && turn.output.trim() && !hasAssistantMessage) {
+  const assistantText = extractTurnAssistantText(turn);
+  if (assistantText && !hasAssistantMessage) {
     entries.push({
       id: `${turnId}-assistant`,
       type: 'message',
       role: 'assistant',
       turnId,
-      text: turn.output.trim(),
-      createdAt: normalizeTimestamp(turn?.updatedAt, createdAt + 1),
+      text: assistantText,
+      createdAt: normalizeTimestamp(turn?.updatedAt, createdAt + items.length),
     });
   }
 
@@ -1686,20 +1860,57 @@ export const useAppStore = create<AppStore>((set) => ({
       },
     };
   }),
-  setThreadSync: (threadId, message) => set((state) => ({
-    timeline: {
-      entriesBySessionId: {
-        ...state.timeline.entriesBySessionId,
-        [threadId]: mergeThreadSyncEntries(state.timeline.entriesBySessionId[threadId] || [], message),
+  setThreadSync: (threadId, message) => set((state) => {
+    const mergedEntries = mergeThreadSyncEntries(state.timeline.entriesBySessionId[threadId] || [], message);
+    const currentTurnState = state.turns.activeBySessionId[threadId];
+    let nextTurns = state.turns.activeBySessionId;
+
+    if (currentTurnState?.active && currentTurnState.turnId) {
+      const hasPendingApproval = state.approvals.items.some((item) => (
+        item.threadId === threadId
+        && item.turnId === currentTurnState.turnId
+        && item.status !== 'submitting'
+      ));
+      const hasRunningEntry = mergedEntries.some((entry) => (
+        entry.turnId === currentTurnState.turnId
+        && (entry.partial || entry.status === 'running')
+      ));
+      const hasSettledResponse = mergedEntries.some((entry) => (
+        entry.turnId === currentTurnState.turnId
+        && entry.role !== 'user'
+        && !entry.partial
+        && entry.status !== 'running'
+      ));
+
+      if (!hasPendingApproval && !hasRunningEntry && hasSettledResponse) {
+        nextTurns = {
+          ...state.turns.activeBySessionId,
+          [threadId]: {
+            active: false,
+            turnId: currentTurnState.turnId,
+          },
+        };
+      }
+    }
+
+    return {
+      timeline: {
+        entriesBySessionId: {
+          ...state.timeline.entriesBySessionId,
+          [threadId]: mergedEntries,
+        },
       },
-    },
-    tokenUsage: {
-      bySessionId: {
-        ...state.tokenUsage.bySessionId,
-        [threadId]: normalizeTokenUsage(message.tokenUsage ?? message) ?? state.tokenUsage.bySessionId[threadId] ?? null,
+      tokenUsage: {
+        bySessionId: {
+          ...state.tokenUsage.bySessionId,
+          [threadId]: extractTokenUsageFromThreadSync(message) ?? state.tokenUsage.bySessionId[threadId] ?? null,
+        },
       },
-    },
-  })),
+      turns: {
+        activeBySessionId: nextTurns,
+      },
+    };
+  }),
 }));
 
 export function mapServerMessageToStore(message: ServerMessage) {

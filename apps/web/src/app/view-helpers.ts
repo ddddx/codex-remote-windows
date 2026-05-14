@@ -22,6 +22,16 @@ function readNumericTokenValue(value: unknown): number | null {
   return null;
 }
 
+function clampPercentage(value: number): number {
+  if (value < 0) {
+    return 0;
+  }
+  if (value > 100) {
+    return 100;
+  }
+  return value;
+}
+
 export function formatTokenUsageValue(value: unknown): string {
   const directNumber = readNumericTokenValue(value);
   if (directNumber !== null) {
@@ -35,10 +45,24 @@ export function formatTokenUsageValue(value: unknown): string {
   const total = usage.totalTokens ?? usage.total_tokens;
   const input = usage.inputTokens ?? usage.input_tokens ?? usage.promptTokens ?? usage.prompt_tokens;
   const output = usage.outputTokens ?? usage.output_tokens ?? usage.completionTokens ?? usage.completion_tokens;
+  const modelContextWindow = usage.modelContextWindow ?? usage.model_context_window;
+  const last = usage.last && typeof usage.last === 'object' ? usage.last as Record<string, unknown> : null;
   const nested = usage.usage && typeof usage.usage === 'object' ? usage.usage as Record<string, unknown> : null;
   const nestedTotal = nested?.totalTokens ?? nested?.total_tokens;
   const nestedInput = nested?.inputTokens ?? nested?.input_tokens ?? nested?.promptTokens ?? nested?.prompt_tokens;
   const nestedOutput = nested?.outputTokens ?? nested?.output_tokens ?? nested?.completionTokens ?? nested?.completion_tokens;
+  const nestedLast = nested?.last && typeof nested.last === 'object' ? nested.last as Record<string, unknown> : null;
+  const nestedModelContextWindow = nested?.modelContextWindow ?? nested?.model_context_window;
+
+  const lastTotal = last?.totalTokens ?? last?.total_tokens;
+  const nestedLastTotal = nestedLast?.totalTokens ?? nestedLast?.total_tokens;
+  const resolvedWindow = readNumericTokenValue(modelContextWindow) ?? readNumericTokenValue(nestedModelContextWindow);
+  const resolvedLastTotal = readNumericTokenValue(lastTotal) ?? readNumericTokenValue(nestedLastTotal);
+
+  if (resolvedWindow !== null && resolvedWindow > 0 && resolvedLastTotal !== null) {
+    const percent = clampPercentage(Math.round((resolvedLastTotal / resolvedWindow) * 100));
+    return `${percent}%`;
+  }
 
   const resolvedTotal = readNumericTokenValue(total) ?? readNumericTokenValue(nestedTotal);
   if (resolvedTotal !== null) {
@@ -152,6 +176,9 @@ export function describeTimelineType(entry: TimelineEntry): string {
   }
   if (entry.type === 'web_search') {
     return '网页搜索';
+  }
+  if (entry.type === 'context_compaction') {
+    return '上下文压缩';
   }
   if (entry.type === 'hook') {
     return '钩子';

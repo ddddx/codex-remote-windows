@@ -200,7 +200,11 @@ export async function startMockBackend(): Promise<MockBackend> {
             text: 'Recovered warning',
             createdAt: 2,
           }],
-          tokenUsage: { totalTokens: 22 },
+          tokenUsage: {
+            total: { totalTokens: 22 },
+            last: { totalTokens: 22 },
+            modelContextWindow: 100,
+          },
           turnPlans: [{
             turnId: 'turn-1',
             explanation: 'Inspect and patch',

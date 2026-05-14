@@ -30,6 +30,10 @@ type FooterStatus = {
   active: boolean;
 };
 
+type TimelineRenderable =
+  | { kind: 'entry'; createdAt: number; id: string; entry: TimelineEntry }
+  | { kind: 'approval'; createdAt: number; id: string; request: ServerRequestItem };
+
 type ExpandableTimelineRowProps = {
   title: React.ReactNode;
   summary?: React.ReactNode;
@@ -541,6 +545,31 @@ function buildLatestGroupStatus(
   return { tone: 'success', label: `已完成 · ${latest.label}`, active: false };
 }
 
+function buildRenderableTimeline(
+  entries: TimelineEntry[],
+  approvals: ServerRequestItem[],
+): TimelineRenderable[] {
+  return [
+    ...entries.map((entry) => ({
+      kind: 'entry' as const,
+      createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
+      id: `entry:${entry.id}`,
+      entry,
+    })),
+    ...approvals.map((request) => ({
+      kind: 'approval' as const,
+      createdAt: typeof request.createdAt === 'number' ? request.createdAt : 0,
+      id: `approval:${request.requestId}`,
+      request,
+    })),
+  ].sort((left, right) => {
+    if (left.createdAt !== right.createdAt) {
+      return left.createdAt - right.createdAt;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
 function buildTimelineMarkerSymbol(entry: TimelineEntry): string {
   const stateClass = buildTimelineStateClass(entry);
   if (stateClass === 'state-success') {
@@ -779,13 +808,14 @@ function ApprovalCard({
                   </div>
                 );
               })}
-              <div className="approval-actions">
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => onRespond(request, buildUserInputResponse(request, questionAnswers))}
-                >
-                  提交回答
+                <div className="approval-actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={request.status === 'submitting'}
+                    onClick={() => onRespond(request, buildUserInputResponse(request, questionAnswers))}
+                  >
+                    提交回答
                 </button>
               </div>
             </div>
@@ -803,13 +833,14 @@ function ApprovalCard({
                 <input type="checkbox" checked={dynamicToolSuccess} onChange={(event) => setDynamicToolSuccess(event.target.checked)} />
                 <span>标记为成功</span>
               </label>
-              <div className="approval-actions">
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => {
-                    let contentItems: unknown[] = [];
-                    if (dynamicToolValue.trim()) {
+                <div className="approval-actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={request.status === 'submitting'}
+                    onClick={() => {
+                      let contentItems: unknown[] = [];
+                      if (dynamicToolValue.trim()) {
                       try {
                         const parsed = JSON.parse(dynamicToolValue);
                         if (!Array.isArray(parsed)) {
@@ -849,31 +880,32 @@ function ApprovalCard({
                   ))}
                 </div>
               ) : null}
-              <div className="approval-actions">
-                {request.mode === 'url' ? (
-                  <>
-                    <button className="btn" type="button" onClick={() => onRespond(request, { action: 'accept', content: null, _meta: request.meta })}>允许</button>
-                    <button className="btn btn-secondary" type="button" onClick={() => onRespond(request, { action: 'decline', content: null })}>拒绝</button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => {
-                        const properties = (((request.responseSchema as any)?.properties || {}) as Record<string, Record<string, unknown>>);
-                        const content = Object.fromEntries(
+                <div className="approval-actions">
+                  {request.mode === 'url' ? (
+                    <>
+                      <button className="btn" type="button" disabled={request.status === 'submitting'} onClick={() => onRespond(request, { action: 'accept', content: null, _meta: request.meta })}>允许</button>
+                      <button className="btn btn-secondary" type="button" disabled={request.status === 'submitting'} onClick={() => onRespond(request, { action: 'decline', content: null })}>拒绝</button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={request.status === 'submitting'}
+                        onClick={() => {
+                          const properties = (((request.responseSchema as any)?.properties || {}) as Record<string, Record<string, unknown>>);
+                          const content = Object.fromEntries(
                           Object.entries(properties).map(([fieldKey, fieldSpec]) => [fieldKey, normalizeSchemaFieldValue(mcpValues[fieldKey] || '', fieldSpec)]),
                         );
                         onRespond(request, { action: 'accept', content, _meta: request.meta });
                       }}
-                    >
-                      提交
-                    </button>
-                    <button className="btn btn-secondary" type="button" onClick={() => onRespond(request, { action: 'decline', content: null })}>拒绝</button>
-                  </>
-                )}
-              </div>
+                        >
+                        提交
+                      </button>
+                      <button className="btn btn-secondary" type="button" disabled={request.status === 'submitting'} onClick={() => onRespond(request, { action: 'decline', content: null })}>拒绝</button>
+                    </>
+                  )}
+                </div>
             </div>
           ) : null}
 
@@ -883,13 +915,14 @@ function ApprovalCard({
                 const key = typeof decision === 'string' ? decision : JSON.stringify(decision);
                 const response = buildApprovalDecisionResponse(decision);
                 return (
-                  <button
-                    key={key}
-                    className={index === 0 ? 'btn' : 'btn btn-secondary'}
-                    type="button"
-                    onClick={() => onRespond(request, response)}
-                  >
-                    {getDecisionLabel(decision)}
+                    <button
+                      key={key}
+                      className={index === 0 ? 'btn' : 'btn btn-secondary'}
+                      type="button"
+                      disabled={request.status === 'submitting'}
+                      onClick={() => onRespond(request, response)}
+                    >
+                      {getDecisionLabel(decision)}
                   </button>
                 );
               })}
@@ -941,24 +974,30 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
     () => buildTimelineGroups(visibleEntries.filter((entry) => entry.type !== 'plan' && entry.type !== 'turn_plan'), approvals, turnState),
     [approvals, visibleEntries, turnState],
   );
+  const renderables = useMemo(
+    () => buildRenderableTimeline(visibleEntries.filter((entry) => entry.type !== 'plan' && entry.type !== 'turn_plan'), approvals),
+    [approvals, visibleEntries],
+  );
 
   const contentSignature = useMemo(
-    () => JSON.stringify(groups.map((group) => ({
-      id: group.id,
-      status: group.status,
-      entries: group.entries.map((entry) => ({
-        id: entry.id,
-        text: entry.text,
-        status: entry.status,
-        partial: entry.partial,
-        createdAt: entry.createdAt,
-      })),
-      approvals: group.approvals.map((request) => ({
-        id: request.requestId,
-        status: request.status,
-      })),
-    }))),
-    [groups],
+    () => JSON.stringify(renderables.map((item) => (
+      item.kind === 'entry'
+        ? {
+          kind: item.kind,
+          id: item.entry.id,
+          text: item.entry.text,
+          status: item.entry.status,
+          partial: item.entry.partial,
+          createdAt: item.entry.createdAt,
+        }
+        : {
+          kind: item.kind,
+          id: item.request.requestId,
+          status: item.request.status,
+          createdAt: item.request.createdAt,
+        }
+    ))),
+    [renderables],
   );
 
   const footerStatus = useMemo(
@@ -1041,24 +1080,13 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
         {error ? <div className="status error">{error}</div> : null}
         {!error && !health ? <div className="status">正在加载服务状态…</div> : null}
 
-        {activeSessionId && groups.length ? groups.map((group) => (
-          <section key={group.id} className={`timeline-group status-${group.status}`}>
-            <div className="timeline-group-head">
-              <div>
-                <strong>{group.label}</strong>
-              </div>
-              <div className={`badge${group.status === 'running' || group.status === 'pending' ? ' warning' : ''}`}>
-                {group.status === 'running' ? '运行中' : group.status === 'pending' ? '待处理' : '已完成'}
-              </div>
-            </div>
-            <div className="timeline-group-body">
-              {group.entries.map((entry) => <TimelineEntryCard key={entry.id} entry={entry} />)}
-              {group.approvals.map((request) => <ApprovalCard key={request.requestId} request={request} onRespond={onRespondApproval} />)}
-            </div>
-          </section>
+        {activeSessionId && renderables.length ? renderables.map((item) => (
+          item.kind === 'entry'
+            ? <TimelineEntryCard key={item.id} entry={item.entry} />
+            : <ApprovalCard key={item.id} request={item.request} onRespond={onRespondApproval} />
         )) : null}
 
-        {activeSessionId && !groups.length ? (
+        {activeSessionId && !renderables.length ? (
           <div className="empty-state">
             <strong>还没有时间线记录</strong>
             <span>发送第一条消息后，这个会话的过程会显示在这里。</span>

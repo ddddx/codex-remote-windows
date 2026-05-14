@@ -212,7 +212,7 @@ export class CodexWindowManager {
 
   constructor(options: { codexCmd?: string; appServerWs?: string; mapFile?: string } = {}) {
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
-    this.appServerWs = options.appServerWs || process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:4792';
+    this.appServerWs = options.appServerWs || process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:34792';
     this.mapFile = options.mapFile || process.env.WINDOW_MAP_FILE || resolveRepoPath('.window-map.json');
     this.map = new Map();
     this.load();

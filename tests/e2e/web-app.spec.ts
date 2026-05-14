@@ -65,9 +65,9 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#tabList')).toContainText('Mock Session');
     await page.locator('#menuBtn').click();
     await expect(page.locator('.sidebar')).not.toHaveClass(/hidden/);
-    await page.getByRole('button', { name: /Mock Session/ }).click();
+    await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
-    await expect(page.locator('#contextUsage')).toContainText('22');
+    await expect(page.locator('#contextUsage')).toContainText('22%');
     await expect.poll(async () => page.locator('#messages').evaluate((element) => {
       const node = element as HTMLDivElement;
       return node.scrollTop + node.clientHeight >= node.scrollHeight - 4;
@@ -87,10 +87,13 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     const taskToggle = page.locator('.task-panel-toggle');
     await expect(taskToggle).toBeVisible();
     await expect(taskToggle).toContainText('任务列表');
-    await taskToggle.click();
-    await expect(page.locator('.task-panel-body')).toContainText('Inspect and patch');
-    await expect(page.locator('.task-panel-body')).toContainText('Inspect');
-    await expect(page.locator('.task-panel-body')).toContainText('Patch');
+    const taskBody = page.locator('.task-panel-body');
+    if (!await taskBody.isVisible()) {
+      await taskToggle.click();
+    }
+    await expect(taskBody).toContainText('Inspect and patch');
+    await expect(taskBody).toContainText('Inspect');
+    await expect(taskBody).toContainText('Patch');
 
     const commandCard = page.locator('.timeline-event').filter({ hasText: 'npm test' }).first();
     await expect(commandCard).toBeVisible();
@@ -100,8 +103,12 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 
     const fileCard = page.locator('.timeline-event').filter({ hasText: 'app.tsx' }).first();
     await expect(fileCard).toBeVisible();
-    await fileCard.locator('.timeline-process-summary').click();
-    await expect(fileCard).toContainText('*** Update File: app.tsx');
+    let fileDetails = fileCard.locator('.timeline-inline-detail-body');
+    if (!await fileDetails.isVisible()) {
+      await fileCard.locator('.timeline-process-summary').click();
+      fileDetails = fileCard.locator('.timeline-inline-detail-body');
+    }
+    await expect(fileDetails).toContainText('*** Update File: app.tsx');
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();

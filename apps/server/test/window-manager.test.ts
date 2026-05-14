@@ -9,13 +9,13 @@ test('resume window selection does not promote powershell parent as control pid'
       pid: 600,
       parentPid: 500,
       name: 'codex.exe',
-      commandLine: `codex.exe --remote ws://127.0.0.1:4792 resume ${threadId}`,
+      commandLine: `codex.exe --remote ws://127.0.0.1:34792 resume ${threadId}`,
     },
     {
       pid: 500,
       parentPid: 400,
       name: 'powershell.exe',
-      commandLine: `pwsh -Command codex.cmd --remote ws://127.0.0.1:4792 resume ${threadId}`,
+      commandLine: `pwsh -Command codex.cmd --remote ws://127.0.0.1:34792 resume ${threadId}`,
     },
   ]);
 
@@ -31,13 +31,13 @@ test('resume window selection can still promote cmd wrapper as control pid', () 
       pid: 710,
       parentPid: 700,
       name: 'codex.exe',
-      commandLine: `codex.exe --remote ws://127.0.0.1:4792 resume ${threadId}`,
+      commandLine: `codex.exe --remote ws://127.0.0.1:34792 resume ${threadId}`,
     },
     {
       pid: 700,
       parentPid: 650,
       name: 'cmd.exe',
-      commandLine: `cmd.exe /d /s /c "codex.cmd --remote ws://127.0.0.1:4792 resume ${threadId}"`,
+      commandLine: `cmd.exe /d /s /c "codex.cmd --remote ws://127.0.0.1:34792 resume ${threadId}"`,
     },
   ]);
 

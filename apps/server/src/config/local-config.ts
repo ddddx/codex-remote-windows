@@ -8,7 +8,7 @@ export const CONFIG_FILE_NAME = 'config.local.json';
 export const DEFAULT_CONFIG = Object.freeze({
   PORT: 18637,
   CODEX_CMD: 'codex.cmd',
-  CODEX_APP_SERVER_WS: 'ws://127.0.0.1:4792',
+  CODEX_APP_SERVER_WS: 'ws://127.0.0.1:34792',
 });
 
 function resolveConfigPath(): string {

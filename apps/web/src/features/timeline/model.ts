@@ -18,33 +18,10 @@ function getApprovalTime(request: ServerRequestItem): number {
   return typeof request.createdAt === 'number' ? request.createdAt : 0;
 }
 
-function getEntryRank(entry: TimelineEntry): number {
-  if (entry.role === 'user') {
-    return 0;
-  }
-  if (entry.type === 'reasoning' || entry.type === 'plan' || entry.type === 'turn_plan') {
-    return 1;
-  }
-  if (entry.role === 'assistant' && entry.type === 'message') {
-    return 2;
-  }
-  if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'web_search') {
-    return 3;
-  }
-  if (entry.type === 'file_change' || entry.type === 'turn_diff') {
-    return 4;
-  }
-  return 5;
-}
-
 function compareEntries(left: TimelineEntry, right: TimelineEntry): number {
   const timeDiff = getEntryTime(left) - getEntryTime(right);
   if (timeDiff !== 0) {
     return timeDiff;
-  }
-  const rankDiff = getEntryRank(left) - getEntryRank(right);
-  if (rankDiff !== 0) {
-    return rankDiff;
   }
   return left.id.localeCompare(right.id);
 }

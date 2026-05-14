@@ -252,6 +252,7 @@ export function App() {
   const setCodexOptionsError = useAppStore((state) => state.setCodexOptionsError);
   const setComposerPrefs = useAppStore((state) => state.setComposerPrefs);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const upsertServerRequest = useAppStore((state) => state.upsertServerRequest);
   const health = useAppStore((state) => state.health.data);
   const healthError = useAppStore((state) => state.health.error);
   const token = useAppStore((state) => state.auth.token);
@@ -402,6 +403,7 @@ export function App() {
     if (!activeSessionId) {
       return;
     }
+    preferredActiveSessionRef.current = activeSessionId;
     writeStoredActiveSessionId(activeSessionId);
     socketClient.send({
       type: 'thread_sync',
@@ -586,6 +588,15 @@ export function App() {
   }
 
   function respondApproval(request: ServerRequestItem, response: unknown) {
+    if (request.status === 'submitting') {
+      return;
+    }
+
+    upsertServerRequest({
+      ...request,
+      status: 'submitting',
+    });
+
     const sent = socketClient.send({
       type: 'server_request_respond',
       requestId: request.requestId,
@@ -593,6 +604,10 @@ export function App() {
     });
 
     if (!sent) {
+      upsertServerRequest({
+        ...request,
+        status: 'pending',
+      });
       setComposerError('提交审批响应失败。');
     }
   }

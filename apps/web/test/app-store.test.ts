@@ -336,6 +336,103 @@ test('thread sync does not synthesize user text from assistant items and restore
   assert.ok(entries.some((entry) => entry.id === 'compact-1' && entry.type === 'context_compaction'));
 });
 
+test('thread sync restores assistant message text from structured agentMessage content', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-structured-assistant',
+    turns: [{
+      id: 'turn-structured-assistant',
+      createdAt: 1,
+      items: [
+        {
+          id: 'assistant-structured',
+          type: 'agentMessage',
+          content: [
+            { type: 'output_text', text: '结构化助手回复' },
+          ],
+        },
+      ],
+    }],
+    tokenUsage: null,
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-structured-assistant'] || [];
+  assert.ok(entries.some((entry) => entry.id === 'turn-structured-assistant:assistant-structured' && entry.text === '结构化助手回复'));
+});
+
+test('thread sync restores assistant fallback text from structured turn output', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-structured-output',
+    turns: [{
+      id: 'turn-structured-output',
+      createdAt: 1,
+      updatedAt: 2,
+      input: [{ type: 'input_text', text: '用户问题' }],
+      output: [
+        { type: 'output_text', text: '结构化输出回复' },
+      ],
+    }],
+    tokenUsage: null,
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-structured-output'] || [];
+  assert.ok(entries.some((entry) => entry.role === 'assistant' && entry.text === '结构化输出回复'));
+  assert.ok(entries.some((entry) => entry.role === 'user' && entry.text === '用户问题'));
+});
+
+test('thread sync preserves within-turn item order when items have no timestamps', () => {
+  resetStore();
+  const baseTime = 1_700_000_000_000;
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-order',
+    turns: [{
+      id: 'turn-order',
+      createdAt: baseTime,
+      updatedAt: baseTime + 999,
+      items: [
+        {
+          id: 'user-1',
+          type: 'userMessage',
+          content: [{ type: 'input_text', text: '第一条用户消息' }],
+        },
+        {
+          id: 'assistant-1',
+          type: 'agentMessage',
+          text: '第一条助手消息',
+        },
+        {
+          id: 'change-1',
+          type: 'fileChange',
+          changes: [{ path: 'apps/web/src/app/App.tsx', kind: 'update', addedLines: 3, deletedLines: 1 }],
+        },
+        {
+          id: 'assistant-2',
+          type: 'agentMessage',
+          text: '第二条助手消息',
+        },
+      ],
+    }],
+  } as any);
+
+  const entries = (useAppStore.getState().timeline.entriesBySessionId['thread-order'] || [])
+    .filter((entry) => entry.turnId === 'turn-order');
+  assert.deepEqual(
+    entries.map((entry) => entry.id),
+    ['turn-order:user-1', 'turn-order:assistant-1', 'change-1', 'turn-order:assistant-2'],
+  );
+  assert.deepEqual(
+    entries.map((entry) => entry.createdAt),
+    [baseTime, baseTime + 1, baseTime + 2, baseTime + 3],
+  );
+});
+
 test('state and thread sync preserve usable token usage for active session header', () => {
   resetStore();
 
@@ -360,6 +457,36 @@ test('state and thread sync preserve usable token usage for active session heade
 
   const usage = useAppStore.getState().tokenUsage.bySessionId['thread-usage'] as any;
   assert.equal(usage?.totalTokens, 77);
+});
+
+test('thread sync clears stale active turn state when the turn has already settled', () => {
+  resetStore();
+
+  useAppStore.getState().setTurnStarted('thread-stale', 'turn-stale', 1_700_000_000_000);
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-stale',
+    turns: [{
+      id: 'turn-stale',
+      createdAt: 1_700_000_000_000,
+      items: [
+        {
+          id: 'user-stale',
+          type: 'userMessage',
+          content: [{ type: 'input_text', text: '用户问题' }],
+        },
+        {
+          id: 'assistant-stale',
+          type: 'agentMessage',
+          text: '已经完成的回复',
+        },
+      ],
+    }],
+  } as any);
+
+  const turnState = useAppStore.getState().turns.activeBySessionId['thread-stale'];
+  assert.equal(turnState?.active, false);
+  assert.equal(turnState?.turnId, 'turn-stale');
 });
 
 test('state selects first available session when no active session exists', () => {
@@ -432,6 +559,40 @@ test('thread sync merges cached realtime timeline events after refresh', () => {
   assert.ok(entries.some((entry) => entry.id === 'assistant-live-2' && entry.text === '新回复片段'));
   assert.ok(entries.some((entry) => entry.id === 'file-2' && entry.patch?.includes('*** Update File: a.txt')));
   assert.ok(entries.some((entry) => entry.id === 'notice:warn-refresh' && entry.text === '审批还在等待'));
+});
+
+test('thread sync can restore token usage from timeline events when top-level usage is null', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-usage-from-events',
+    turns: [],
+    tokenUsage: null,
+    timelineEvents: [
+      {
+        type: 'token_usage',
+        threadId: 'thread-usage-from-events',
+        usage: {
+          total: {
+            totalTokens: 101,
+            inputTokens: 77,
+            outputTokens: 24,
+          },
+          last: {
+            totalTokens: 9,
+            inputTokens: 4,
+            outputTokens: 5,
+          },
+        },
+      },
+    ],
+  } as any);
+
+  const usage = useAppStore.getState().tokenUsage.bySessionId['thread-usage-from-events'] as any;
+  assert.equal(usage?.totalTokens, 101);
+  assert.equal(usage?.inputTokens, 77);
+  assert.equal(usage?.outputTokens, 24);
 });
 
 test('tab updates can refresh token usage independently of thread sync payload', () => {
