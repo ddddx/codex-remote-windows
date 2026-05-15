@@ -36,7 +36,7 @@ function resolveTabName(source: Record<string, unknown>): string {
 }
 
 export function normalizeTab(source: Record<string, unknown>): RuntimeTab {
-  return {
+  const normalized: RuntimeTab = {
     threadId: String(source.threadId || source.id || ''),
     name: resolveTabName(source),
     cwd: typeof source.cwd === 'string' ? source.cwd : '',
@@ -44,10 +44,18 @@ export function normalizeTab(source: Record<string, unknown>): RuntimeTab {
     updatedAt: typeof source.updatedAt === 'number' ? source.updatedAt : nowUnix(),
     createdAt: typeof source.createdAt === 'number' ? source.createdAt : nowUnix(),
     windowStatus: typeof source.windowStatus === 'string' && source.windowStatus.trim() ? source.windowStatus : 'detached',
-    approvalPolicy: typeof source.approvalPolicy === 'string' ? source.approvalPolicy : '',
-    sandboxMode: typeof source.sandboxMode === 'string' ? source.sandboxMode : '',
     tokenUsage: source.tokenUsage ?? source.token_usage ?? source.usage ?? source.tokenStats ?? source.token_stats ?? null,
   };
+
+  if (typeof source.approvalPolicy === 'string') {
+    normalized.approvalPolicy = source.approvalPolicy;
+  }
+
+  if (typeof source.sandboxMode === 'string') {
+    normalized.sandboxMode = source.sandboxMode;
+  }
+
+  return normalized;
 }
 
 export function upsertRuntimeTab(app: FastifyInstance, source: Record<string, unknown>): RuntimeTab {

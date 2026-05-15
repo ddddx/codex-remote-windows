@@ -196,3 +196,32 @@ test('ws gateway falls back to persisted tabs when codex thread listing fails', 
   assert.equal((socket.sent[1] as any).type, 'state');
   assert.equal((socket.sent[1] as any).tabs[0].threadId, 'persisted-thread');
 });
+
+test('ws gateway bootstrap preserves persisted permission preset when codex thread list omits it', async () => {
+  const { app, routes } = createAppStub();
+  app.repositories.sessions.listSessions = () => [{
+    threadId: 'thread-1',
+    name: 'Persisted Thread',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    windowStatus: 'detached',
+    approvalPolicy: 'never',
+    sandboxMode: 'danger-full-access',
+    createdAt: 1,
+    updatedAt: 2,
+  }];
+
+  await registerWsGateway(app);
+
+  const socket = createSocket();
+  const handler = routes.get('/ws');
+  assert.ok(handler);
+
+  handler?.(socket, { query: { token: 'secret-token' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(socket.sent.length, 2);
+  assert.equal((socket.sent[1] as any).type, 'state');
+  assert.equal((socket.sent[1] as any).tabs[0].approvalPolicy, 'never');
+  assert.equal((socket.sent[1] as any).tabs[0].sandboxMode, 'danger-full-access');
+});

@@ -267,6 +267,42 @@ test('thread_sync preserves nested usage payloads for header display', async () 
   });
 });
 
+test('thread_sync preserves existing permission preset when codex resume omits it', async () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.tabsById.set('00000000-0000-0000-0000-000000000555', {
+    threadId: '00000000-0000-0000-0000-000000000555',
+    name: 'Existing',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+    approvalPolicy: 'never',
+    sandboxMode: 'danger-full-access',
+  });
+
+  app.codexClient.resumeThread = async (threadId: string) => ({
+    id: threadId,
+    name: 'Resumed thread',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 2,
+    turns: [],
+  });
+
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_sync',
+    threadId: '00000000-0000-0000-0000-000000000555',
+  });
+
+  assert.equal((socket.sent[0] as any).tab.approvalPolicy, 'never');
+  assert.equal((socket.sent[0] as any).tab.sandboxMode, 'danger-full-access');
+  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')?.approvalPolicy, 'never');
+  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')?.sandboxMode, 'danger-full-access');
+});
+
 test('tab_create creates thread and replies with tab_created', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
