@@ -521,7 +521,7 @@ export function App() {
     }
     const payload = buildSessionCreatePayload({
       name: sessionDraft.name,
-      cwd: sessionDraft.cwd || workspacePath || workspaceSelectedPath || '',
+      cwd: sessionBrowserPath || sessionDraft.cwd || workspacePath || workspaceSelectedPath || '',
     }, composerPrefsDraft);
     if (!payload.cwd) {
       setComposerError('请先选择工作区目录。');
@@ -822,40 +822,19 @@ export function App() {
                 onChange={(event) => setSessionDraft((state) => ({ ...state, name: event.target.value }))}
               />
 
-              <label className="modal-label session-workspace-label" htmlFor="sessionWorkspaceInput">工作区目录</label>
-              <div className="session-path-row">
-                <input
-                  id="sessionWorkspaceInput"
-                  className="modal-input session-path-input"
-                  type="text"
-                  placeholder="请输入或选择主机上的工作区目录"
-                  value={sessionDraft.cwd}
-                  onChange={(event) => setSessionDraft((state) => ({ ...state, cwd: event.target.value }))}
-                />
-                <button className="btn btn-secondary" type="button">进入路径</button>
-              </div>
-
-              <div className="session-workspace-actions">
-                <button className="btn btn-secondary" type="button">上级目录</button>
-                <button className="btn btn-secondary" type="button">刷新</button>
-                <button className="btn btn-secondary" type="button">新建文件夹</button>
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => setSessionDraft((state) => ({ ...state, cwd: sessionBrowserPath || workspaceSelectedPath || workspacePath || state.cwd }))}
-                >
-                  使用当前目录
-                </button>
-              </div>
+              <label className="modal-label session-workspace-label">工作区目录</label>
 
               <WorkspaceBrowser
                 token={token}
                 selectedPath={sessionBrowserPath || sessionDraft.cwd || workspaceSelectedPath || workspacePath}
-                onSelectPath={setSessionBrowserPath}
+                onSelectPath={(path) => {
+                  setSessionBrowserPath(path);
+                  setSessionDraft((state) => ({ ...state, cwd: path }));
+                }}
                 embedded
               />
 
-              <div className="modal-label session-modal-hint">支持直接输入主机路径，也可以在下面选择目录。</div>
+              <div className="modal-label session-modal-hint">在下面选择要作为会话工作区的目录。</div>
             </div>
 
             <div className="modal-actions session-modal-actions">

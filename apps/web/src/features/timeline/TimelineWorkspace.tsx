@@ -906,7 +906,6 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
   const error = useAppStore((state) => state.health.error || state.connection.error || '');
   const turnState = useAppStore((state) => activeSessionId ? state.turns.activeBySessionId[activeSessionId] : undefined);
   const approvalItems = useAppStore((state) => state.approvals.items);
-  const workspaceSelectedPath = useAppStore((state) => state.workspace.selectedPath);
 
   const entries = useMemo(
     () => activeSessionId ? (entriesBySessionId[activeSessionId] || []) : [],
@@ -1088,19 +1087,12 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
         {hasUnreadBelow ? '新消息 ︾' : '回到底部'}
       </button>
 
-      {(footerStatus || (!activeSessionId && workspaceSelectedPath)) ? (
+      {footerStatus ? (
         <div className="timeline-status-dock">
-          {footerStatus ? (
-            <div className={`thinking-indicator tone-${footerStatus.tone}`} aria-live="polite">
-              <span className={`thinking-indicator-dot${footerStatus.active ? ' is-running' : ''}`}></span>
-              <span className="thinking-indicator-text">{footerStatus.label}</span>
-            </div>
-          ) : null}
-          {!activeSessionId && workspaceSelectedPath ? (
-            <div className="thinking-indicator tone-command" aria-live="polite">
-              <span className="thinking-indicator-text">{`工作区：${workspaceSelectedPath}`}</span>
-            </div>
-          ) : null}
+          <div className={`thinking-indicator tone-${footerStatus.tone}`} aria-live="polite">
+            <span className={`thinking-indicator-dot${footerStatus.active ? ' is-running' : ''}`}></span>
+            <span className="thinking-indicator-text">{footerStatus.label}</span>
+          </div>
         </div>
       ) : null}
     </div>
