@@ -107,7 +107,7 @@ function formatPresetLabel(value: string): string {
     return 'Read Only';
   }
   if (value === 'auto') {
-    return 'Auto';
+    return 'Default';
   }
   if (value === 'full-access') {
     return 'Full Access';

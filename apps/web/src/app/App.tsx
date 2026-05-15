@@ -138,10 +138,10 @@ function getPermissionPresetDefinition(value: string): { approvalPolicy: string;
     return { approvalPolicy: 'on-request', sandboxMode: 'read-only', label: 'Read Only' };
   }
   if (value === 'auto') {
-    return { approvalPolicy: 'on-request', sandboxMode: 'workspace-write', label: 'Auto' };
+    return { approvalPolicy: 'on-request', sandboxMode: 'workspace-write', label: 'Default' };
   }
   if (value === 'full-access') {
-    return { approvalPolicy: 'on-request', sandboxMode: 'danger-full-access', label: 'Full Access' };
+    return { approvalPolicy: 'never', sandboxMode: 'danger-full-access', label: 'Full Access' };
   }
   return null;
 }
@@ -169,7 +169,7 @@ function formatPermissionPresetLabel(value: string): string {
     return 'Read Only';
   }
   if (value === 'auto') {
-    return 'Auto';
+    return 'Default';
   }
   if (value === 'full-access') {
     return 'Full Access';

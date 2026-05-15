@@ -308,7 +308,7 @@ test('turn_send starts a turn and updates runtime tab status', async () => {
   assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.status, 'running');
 });
 
-test('turn_send maps full access preset to codex sandbox policy shape', async () => {
+test('turn_send maps permission overrides to codex approval and sandbox settings', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
   app.runtimeState.tabsById.set('00000000-0000-0000-0000-000000000123', {
@@ -327,9 +327,11 @@ test('turn_send maps full access preset to codex sandbox policy shape', async ()
     text: 'hello',
     attachments: [],
     sandboxMode: 'danger-full-access',
+    approvalPolicy: 'never',
   });
 
   assert.deepEqual((calls.startTurn[0] as any)?.options?.sandboxPolicy, { type: 'dangerFullAccess' });
+  assert.equal((calls.startTurn[0] as any)?.options?.approvalPolicy, 'never');
 });
 
 test('tab_close closes host window but keeps session', async () => {
