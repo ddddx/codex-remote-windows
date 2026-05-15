@@ -3,6 +3,9 @@ import type { ServerRequestItem, TimelineEntry } from '../store/appStore.js';
 export type TokenUsageDisplay = {
   percentUsed: number | null;
   percentRemaining: number | null;
+  usedTokens: number | null;
+  remainingTokens: number | null;
+  contextWindow: number | null;
   label: string;
   detail: string;
 };
@@ -68,6 +71,9 @@ export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
     return {
       percentUsed: null,
       percentRemaining: null,
+      usedTokens: null,
+      remainingTokens: null,
+      contextWindow: null,
       label: '总量',
       detail: `总 ${directNumber}`,
     };
@@ -76,6 +82,9 @@ export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
     return {
       percentUsed: null,
       percentRemaining: null,
+      usedTokens: null,
+      remainingTokens: null,
+      contextWindow: null,
       label: '上下文',
       detail: '未统计',
     };
@@ -102,11 +111,15 @@ export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
   if (resolvedWindow !== null && resolvedWindow > 0 && resolvedLastTotal !== null) {
     const percentUsed = clampPercentage(Math.round((resolvedLastTotal / resolvedWindow) * 100));
     const percentRemaining = clampPercentage(100 - percentUsed);
+    const remainingTokens = Math.max(resolvedWindow - resolvedLastTotal, 0);
     return {
       percentUsed,
       percentRemaining,
-      label: '余量',
-      detail: `已用 ${percentUsed}%`,
+      usedTokens: resolvedLastTotal,
+      remainingTokens,
+      contextWindow: resolvedWindow,
+      label: '上下文余量',
+      detail: `剩余 ${remainingTokens} / ${resolvedWindow} tokens`,
     };
   }
 
@@ -115,6 +128,9 @@ export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
     return {
       percentUsed: null,
       percentRemaining: null,
+      usedTokens: null,
+      remainingTokens: null,
+      contextWindow: null,
       label: '总量',
       detail: `总 ${resolvedTotal}`,
     };
@@ -134,6 +150,9 @@ export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
   return {
     percentUsed: null,
     percentRemaining: null,
+    usedTokens: null,
+    remainingTokens: null,
+    contextWindow: null,
     label: '总量',
     detail: parts.length ? parts.join(' / ') : '未统计',
   };

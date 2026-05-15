@@ -53,8 +53,11 @@ test('buildTokenUsageDisplay exposes remaining context for ring rendering', () =
   }), {
     percentUsed: 25,
     percentRemaining: 75,
-    label: '余量',
-    detail: '已用 25%',
+    usedTokens: 30,
+    remainingTokens: 90,
+    contextWindow: 120,
+    label: '上下文余量',
+    detail: '剩余 90 / 120 tokens',
   });
 });
 

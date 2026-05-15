@@ -308,24 +308,37 @@ export function ComposerDock(props: ComposerDockProps) {
             id="contextUsage"
             className={`context-usage-ring${tokenUsage.percentRemaining === null ? ' is-text-only' : ''}${tokenUsage.detail === '未统计' ? ' is-empty' : ''}`}
             type="button"
-            aria-label={`上下文用量：${tokenUsage.detail}`}
+            aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
             aria-expanded={usagePopoverOpen ? 'true' : 'false'}
             onClick={() => setUsagePopoverOpen((value) => !value)}
           >
             {tokenUsage.percentRemaining !== null ? (
-              <div
-                className="context-usage-ring-visual"
-                style={{ ['--usage-ring-value' as string]: `${tokenUsage.percentRemaining}` }}
-                aria-hidden="true"
-              />
+              <svg className="context-usage-ring-visual" viewBox="0 0 28 28" aria-hidden="true">
+                <circle className="context-usage-ring-track" cx="14" cy="14" r="10" />
+                <circle
+                  className="context-usage-ring-progress"
+                  cx="14"
+                  cy="14"
+                  r="10"
+                  pathLength="100"
+                  style={{ ['--usage-ring-value' as string]: `${tokenUsage.percentRemaining}` }}
+                />
+              </svg>
             ) : (
               <div className="context-usage-ring-visual context-usage-ring-visual-fallback" aria-hidden="true" />
             )}
           </button>
           <div className={`context-usage-popover${usagePopoverOpen ? ' is-open' : ''}`} role="status">
             <strong>{tokenUsage.label}</strong>
-            <span>{tokenUsage.percentRemaining !== null ? `剩余 ${tokenUsage.percentRemaining}%` : tokenUsage.detail}</span>
-            {tokenUsage.percentRemaining !== null ? <span>{tokenUsage.detail}</span> : null}
+            {tokenUsage.percentRemaining !== null ? (
+              <>
+                <span>{`剩余 ${tokenUsage.percentRemaining}%`}</span>
+                <span>{`剩余 ${tokenUsage.remainingTokens} / ${tokenUsage.contextWindow} tokens`}</span>
+                <span>{`已用 ${tokenUsage.usedTokens} / ${tokenUsage.contextWindow} tokens`}</span>
+              </>
+            ) : (
+              <span>{tokenUsage.detail}</span>
+            )}
           </div>
         </div>
       </div>
