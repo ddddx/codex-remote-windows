@@ -9,7 +9,7 @@ test('buildApprovalDecisionResponse preserves structured approval decisions', ()
     },
   };
 
-  assert.deepEqual(buildApprovalDecisionResponse(decision as any), decision);
+  assert.deepEqual(buildApprovalDecisionResponse(decision as any), { decision });
 });
 
 test('buildApprovalDecisionResponse wraps string decisions for codex requests', () => {

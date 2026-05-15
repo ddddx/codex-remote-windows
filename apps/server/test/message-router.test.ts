@@ -412,6 +412,44 @@ test('server_request_respond replies through codex client', async () => {
   assert.equal(app.runtimeState.serverRequestsById.get('req-1')?.status, 'submitting');
 });
 
+test('server_request_respond preserves structured approval decisions under decision envelope', async () => {
+  const { app, calls } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.serverRequestsById.set('req-2', {
+    requestId: 'req-2',
+    rawRequestId: 'raw-2',
+    method: 'item/commandExecution/requestApproval',
+    kind: 'command_approval',
+    status: 'pending',
+    createdAt: Date.now(),
+    threadId: '00000000-0000-0000-0000-000000000123',
+  });
+
+  await routeClientMessage(app, socket as any, {
+    type: 'server_request_respond',
+    requestId: 'req-2',
+    response: {
+      decision: {
+        acceptWithExecpolicyAmendment: {
+          add: ['RemoteSigned'],
+        },
+      },
+    },
+  });
+
+  assert.equal(calls.respond.length, 1);
+  assert.deepEqual(calls.respond[0], {
+    id: 'raw-2',
+    result: {
+      decision: {
+        acceptWithExecpolicyAmendment: {
+          add: ['RemoteSigned'],
+        },
+      },
+    },
+  });
+});
+
 test('bridge forwards plan, progress, hook and guardian notifications', async () => {
   const { app, listeners } = createAppStub();
   const socket = createSocket();

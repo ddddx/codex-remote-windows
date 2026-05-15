@@ -299,7 +299,7 @@ export function buildApprovalDecisionResponse(decision: string | Record<string, 
   if (!decision || typeof decision !== 'object') {
     return { decision };
   }
-  return decision;
+  return { decision };
 }
 
 export function summarizeTimelineEntry(entry: TimelineEntry): string {
