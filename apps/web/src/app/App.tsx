@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CodexOptionsResponse } from '@codex-remote/protocol';
+import type { CodexOptionsResponse, HealthResponse } from '@codex-remote/protocol';
 import { ComposerDock } from '../features/composer/ComposerDock.js';
 import { SessionRail } from '../features/sessions/SessionRail.js';
 import { TimelineWorkspace } from '../features/timeline/TimelineWorkspace.js';
@@ -211,6 +211,36 @@ function buildClientMessageId(): string {
   return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function useRefreshHealth(
+  token: string,
+  connectionStatus: string,
+  setHealthLoading: () => void,
+  setHealthReady: (data: HealthResponse) => void,
+  setHealthError: (message: string) => void,
+) {
+  useEffect(() => {
+    if (!token || connectionStatus !== 'connected') {
+      return;
+    }
+    let cancelled = false;
+    setHealthLoading();
+    getHealth()
+      .then((result) => {
+        if (!cancelled) {
+          setHealthReady(result);
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
+          setHealthError(error.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionStatus, setHealthError, setHealthLoading, setHealthReady, token]);
+}
+
 export function App() {
   const setHealthLoading = useAppStore((state) => state.setHealthLoading);
   const setHealthReady = useAppStore((state) => state.setHealthReady);
@@ -326,6 +356,8 @@ export function App() {
       cancelled = true;
     };
   }, [setHealthError, setHealthLoading, setHealthReady]);
+
+  useRefreshHealth(token, connectionStatus, setHealthLoading, setHealthReady, setHealthError);
 
   useEffect(() => {
     if (!token) {

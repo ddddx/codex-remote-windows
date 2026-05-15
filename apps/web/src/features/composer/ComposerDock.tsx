@@ -185,6 +185,15 @@ export function ComposerDock(props: ComposerDockProps) {
     textarea.scrollTop = 0;
   }, [resetSignal]);
 
+  if (!activeSessionId) {
+    return (
+      <div className="composer composer-empty">
+        <div className="composer-empty-hint">选择一个会话，或从左侧新建会话。</div>
+        {composerError ? <div className="status error">{composerError}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <form
       id="composer"
@@ -327,7 +336,7 @@ export function ComposerDock(props: ComposerDockProps) {
           <textarea
             ref={textareaRef}
             id="promptInput"
-            placeholder={activeSessionId ? '给当前会话发送指令...' : '输入内容，会先创建新会话再发送...'}
+            placeholder="给当前会话发送指令..."
             rows={1}
             value={draft}
             onChange={(event) => {
@@ -348,18 +357,6 @@ export function ComposerDock(props: ComposerDockProps) {
           {busy ? '发送中…' : '发送'}
         </button>
       </div>
-
-      {!activeSessionId ? (
-        <label className="composer-select-group composer-new-session-path">
-          <span>工作区</span>
-          <input
-            className="modal-input"
-            placeholder="例如 C:\\Users\\Administrator\\Desktop\\cc-workspace"
-            value={workspacePath}
-            onChange={(event) => setWorkspacePath(event.target.value)}
-          />
-        </label>
-      ) : null}
 
       {composerError ? <div className="status error">{composerError}</div> : null}
     </form>

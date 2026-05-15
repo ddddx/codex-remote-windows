@@ -1337,6 +1337,17 @@ textarea {
   background: var(--card);
 }
 
+.composer-empty {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.composer-empty-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .composer-controls {
   display: flex;
   align-items: center;
@@ -1387,12 +1398,6 @@ textarea {
 .composer-select-group select,
 .composer-select-group input {
   min-width: 0;
-}
-
-.composer-new-session-path {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  align-items: center;
 }
 
 .composer-input-row {
