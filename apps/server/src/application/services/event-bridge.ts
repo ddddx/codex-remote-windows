@@ -279,6 +279,21 @@ export function handleCodexNotification(
     return;
   }
 
+  if (method === 'turn/diff/updated' && typeof params.threadId === 'string') {
+    const turnId = typeof params.turnId === 'string' ? params.turnId : undefined;
+    const diff = typeof params.diff === 'string' ? params.diff : '';
+    if (turnId) {
+      setCachedTurnDiff(app.runtimeState, params.threadId, turnId, diff);
+    }
+    broadcastThreadTimelineMessage(app, {
+      type: 'turn_diff_updated',
+      threadId: params.threadId,
+      turnId,
+      diff,
+    });
+    return;
+  }
+
   if (method === 'item/fileChange/patchUpdated') {
     if (typeof params.threadId === 'string' && typeof params.turnId === 'string' && typeof params.patch === 'string') {
       setCachedTurnDiff(app.runtimeState, params.threadId, params.turnId, params.patch);

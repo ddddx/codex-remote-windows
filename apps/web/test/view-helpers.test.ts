@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildApprovalDecisionResponse, formatTokenUsageValue } from '../src/app/view-helpers.js';
+import { buildApprovalDecisionResponse, formatTokenUsageValue, formatWorkspaceLabel } from '../src/app/view-helpers.js';
 
 test('buildApprovalDecisionResponse preserves structured approval decisions', () => {
   const decision = {
@@ -37,4 +37,11 @@ test('formatTokenUsageValue normalizes nested and string token values', () => {
     },
   }), '75%');
   assert.equal(formatTokenUsageValue({ usage: { prompt_tokens: '21', completion_tokens: '12' } }), '输入 21 / 输出 12');
+});
+
+test('formatWorkspaceLabel keeps only the folder name for sidebar display', () => {
+  assert.equal(formatWorkspaceLabel('C:\\Users\\Administrator\\Desktop\\cc-workspace'), 'cc-workspace');
+  assert.equal(formatWorkspaceLabel('/srv/projects/avatar/'), 'avatar');
+  assert.equal(formatWorkspaceLabel('C:'), 'C:');
+  assert.equal(formatWorkspaceLabel(''), '未设置工作区');
 });

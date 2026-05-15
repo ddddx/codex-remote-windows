@@ -1064,9 +1064,14 @@ textarea {
   line-height: 1.45;
   word-break: break-word;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.file-change-entry-path {
+  min-width: 0;
+  flex: 1;
 }
 
 .file-change-entry.kind-add {
@@ -1113,16 +1118,26 @@ textarea {
 
 .file-change-line-stats {
   color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .file-change-line-stats-add {
   color: var(--diff-add-ink);
   font-weight: 700;
+  background: var(--diff-add-bg);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .file-change-line-stats-delete {
   color: var(--diff-delete-ink);
   font-weight: 700;
+  background: var(--diff-delete-bg);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .cmd-output {

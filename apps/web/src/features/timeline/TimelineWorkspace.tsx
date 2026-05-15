@@ -34,6 +34,13 @@ type TimelineRenderable =
   | { kind: 'entry'; createdAt: number; id: string; entry: TimelineEntry }
   | { kind: 'approval'; createdAt: number; id: string; request: ServerRequestItem };
 
+type RenderableFileChange = {
+  path?: string;
+  kind?: string;
+  addedLines?: number;
+  deletedLines?: number;
+};
+
 type ExpandableTimelineRowProps = {
   title: React.ReactNode;
   summary?: React.ReactNode;
@@ -72,7 +79,7 @@ function ExpandableFileChangeRow({
   details,
   className = '',
 }: ExpandableTimelineRowProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const expandable = Boolean(details);
 
   return (
@@ -372,14 +379,25 @@ function parsePatchChangeSummary(patch: string | undefined): Array<{
   return changes;
 }
 
-function buildRenderableChanges(entry: TimelineEntry): Array<{
-  path?: string;
-  kind?: string;
-  addedLines?: number;
-  deletedLines?: number;
-}> {
-  const explicit = Array.isArray(entry.changes) ? entry.changes : [];
-  const derived = parsePatchChangeSummary(entry.patch);
+function basenameLike(path: string | undefined): string {
+  const value = typeof path === 'string' ? path.trim() : '';
+  if (!value) {
+    return '未命名文件';
+  }
+  const normalized = value.replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return value;
+  }
+  const segments = normalized.split(/[/\\]+/).filter(Boolean);
+  return segments[segments.length - 1] || normalized;
+}
+
+function buildRenderableChangesFromSource(source: {
+  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number }>;
+  patch?: string;
+}): RenderableFileChange[] {
+  const explicit = Array.isArray(source.changes) ? source.changes : [];
+  const derived = parsePatchChangeSummary(source.patch);
   if (!explicit.length) {
     return derived;
   }
@@ -407,6 +425,10 @@ function buildRenderableChanges(entry: TimelineEntry): Array<{
   return merged;
 }
 
+function buildRenderableChanges(entry: TimelineEntry): RenderableFileChange[] {
+  return buildRenderableChangesFromSource(entry);
+}
+
 function formatFileChangePrefix(kind: string | undefined): string {
   const normalized = (kind || '').trim().toLowerCase();
   if (normalized === 'add') {
@@ -420,8 +442,11 @@ function formatFileChangePrefix(kind: string | undefined): string {
 
 function buildProcessHeadline(entry: TimelineEntry): string {
   const label = formatTimelineLabel(entry);
-  if (entry.partial || entry.status) {
-    return `${label} · ${formatExecutionStatus(entry.partial ? 'running' : entry.status)}`;
+  if (entry.partial) {
+    return `${label} · ${formatExecutionStatus('running')}`;
+  }
+  if (entry.status && !['completed', 'success', 'succeeded'].includes(entry.status)) {
+    return `${label} · ${formatExecutionStatus(entry.status)}`;
   }
   return label;
 }
@@ -441,7 +466,7 @@ function buildProcessPreview(entry: TimelineEntry): string {
           const statsText = typeof change.addedLines === 'number' || typeof change.deletedLines === 'number'
             ? ` (+${Math.max(0, Number(change.addedLines) || 0)} / -${Math.max(0, Number(change.deletedLines) || 0)})`
             : '';
-          return `${formatFileChangePrefix(change.kind)} ${change.path || '未命名文件'}${statsText}`.trim();
+          return `${formatFileChangePrefix(change.kind)} ${basenameLike(change.path)}${statsText}`.trim();
         })
         .join(' · ');
       return changes.length > 2 ? `${preview} 等 ${changes.length} 项` : preview;
@@ -459,12 +484,26 @@ function renderFileChangeStats(change: { addedLines?: number; deletedLines?: num
   }
   return (
     <span className="file-change-line-stats">
-      {' ('}
       <span className="file-change-line-stats-add">+{addedLines}</span>
-      {' / '}
       <span className="file-change-line-stats-delete">-{deletedLines}</span>
-      {')'}
     </span>
+  );
+}
+
+function renderFileChangeList(changes: RenderableFileChange[], keyPrefix: string) {
+  if (!changes.length) {
+    return null;
+  }
+
+  return (
+    <div className="file-change-list">
+      {changes.map((change, index) => (
+        <div key={`${keyPrefix}-change-${index}`} className={`file-change-entry kind-${(change.kind || 'update').toLowerCase()}`}>
+          <span className="file-change-entry-path" title={change.path || '未命名文件'}>{`${formatFileChangePrefix(change.kind)} ${change.path || '未命名文件'}`}</span>
+          {renderFileChangeStats(change)}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -654,7 +693,12 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
               summary={buildProcessPreview(entry)}
               details={
                 <>
-                  <div className="timeline-inline-meta">{describeTimelineType(entry)} · {formatExecutionStatus(entry.status)}</div>
+                  <div className="timeline-inline-meta">
+                    {describeTimelineType(entry)}
+                    {entry.status && !['completed', 'success', 'succeeded'].includes(entry.status)
+                      ? ` · ${formatExecutionStatus(entry.status)}`
+                      : ''}
+                  </div>
                   <pre className="timeline-inline-pre timeline-inline-pre-shell">{details.command || entry.text || '执行命令'}</pre>
                   {details.cwd ? <div className="timeline-inline-meta timeline-inline-meta-code">cwd: {details.cwd}</div> : null}
                   {details.output ? <pre className="timeline-inline-pre timeline-inline-pre-output">{details.output}</pre> : null}
@@ -676,17 +720,13 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
               summary={buildProcessPreview(entry) || describeTimelineType(entry)}
               details={(
                 <>
-                  <div className="timeline-inline-meta">{describeTimelineType(entry)}{entry.status ? ` · ${formatExecutionStatus(entry.status)}` : ''}</div>
-                  {renderableChanges.length ? (
-                    <div className="file-change-list">
-                      {renderableChanges.map((change, index) => (
-                        <div key={`${entry.id}-change-${index}`} className={`file-change-entry kind-${(change.kind || 'update').toLowerCase()}`}>
-                          <span>{`${formatFileChangePrefix(change.kind)} ${change.path || '未命名文件'}`}</span>
-                          {renderFileChangeStats(change)}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
+                  <div className="timeline-inline-meta">
+                    {describeTimelineType(entry)}
+                    {entry.status && !['completed', 'success', 'succeeded'].includes(entry.status)
+                      ? ` · ${formatExecutionStatus(entry.status)}`
+                      : ''}
+                  </div>
+                  {renderFileChangeList(renderableChanges, entry.id)}
                   {entry.meta?.length ? (
                     <div className="timeline-inline-meta timeline-inline-meta-code">
                       {entry.meta.join('\n')}
@@ -710,22 +750,18 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
             summary={buildProcessPreview(entry) || describeTimelineType(entry)}
             details={(entry.meta?.length || entry.patch || entry.changes?.length) ? (
               <>
-                <div className="timeline-inline-meta">{describeTimelineType(entry)}{entry.status ? ` · ${formatExecutionStatus(entry.status)}` : ''}</div>
+                <div className="timeline-inline-meta">
+                  {describeTimelineType(entry)}
+                  {entry.status && !['completed', 'success', 'succeeded'].includes(entry.status)
+                    ? ` · ${formatExecutionStatus(entry.status)}`
+                    : ''}
+                </div>
                 {entry.meta?.length ? (
                   <div className="timeline-inline-meta timeline-inline-meta-code">
                     {entry.meta.join('\n')}
                   </div>
                 ) : null}
-                {renderableChanges.length ? (
-                  <div className="file-change-list">
-                    {renderableChanges.map((change, index) => (
-                      <div key={`${entry.id}-change-${index}`} className={`file-change-entry kind-${(change.kind || 'update').toLowerCase()}`}>
-                        <span>{`${formatFileChangePrefix(change.kind)} ${change.path || ''}`}</span>
-                        {renderFileChangeStats(change)}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                {renderFileChangeList(renderableChanges, entry.id)}
                 {entry.patch ? renderDiffBlock(entry.patch) : null}
               </>
             ) : null}
@@ -748,6 +784,10 @@ function ApprovalCard({
   const [dynamicToolValue, setDynamicToolValue] = useState('');
   const [dynamicToolSuccess, setDynamicToolSuccess] = useState(true);
   const [mcpValues, setMcpValues] = useState<Record<string, string>>({});
+  const renderableChanges = buildRenderableChangesFromSource({
+    changes: request.changes,
+    patch: request.patch,
+  });
 
   return (
     <div className="timeline-event kind-serverRequest">
@@ -759,7 +799,8 @@ function ApprovalCard({
           <div className="approval-meta">
             {[request.threadId || '全局', request.requestId, request.command || '', request.cwd || ''].filter(Boolean).join(' · ')}
           </div>
-          {request.patch ? <pre className="timeline-inline-pre timeline-inline-pre-output">{request.patch}</pre> : null}
+          {renderFileChangeList(renderableChanges, request.requestId)}
+          {request.patch ? renderDiffBlock(request.patch) : null}
 
           {request.kind === 'user_input' && request.questions?.length ? (
             <div className="approval-form">

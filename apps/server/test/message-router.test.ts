@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAppServices } from '../src/application/services/index.js';
+import { handleCodexNotification } from '../src/application/services/event-bridge.js';
 import { createRuntimeState } from '../src/state/runtime-state.js';
 import { routeClientMessage } from '../src/ws/message-router.js';
 import { ensureCodexReady } from '../src/ws/bridge.js';
@@ -501,4 +502,25 @@ test('file change patch updates refresh pending request snapshot', async () => {
   const messages = socket.sent as Array<any>;
   assert.equal(messages[0]?.type, 'server_request_updated');
   assert.equal(messages[1]?.type, 'item_delta');
+});
+
+test('turn diff updates are cached and broadcast for timeline diff rendering', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  handleCodexNotification(app, {
+    method: 'turn/diff/updated',
+    params: {
+      threadId: 'thread-diff-1',
+      turnId: 'turn-diff-1',
+      diff: '*** Begin Patch\n*** Update File: src/a.ts\n+line\n*** End Patch',
+    },
+  });
+
+  const cached = app.runtimeState.turnDiffsByThread.get('thread-diff-1')?.get('turn-diff-1');
+  assert.equal(cached?.diff, '*** Begin Patch\n*** Update File: src/a.ts\n+line\n*** End Patch');
+  const messages = socket.sent as Array<any>;
+  assert.equal(messages[0]?.type, 'turn_diff_updated');
+  assert.equal(messages[0]?.turnId, 'turn-diff-1');
 });

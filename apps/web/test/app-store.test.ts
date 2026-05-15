@@ -53,6 +53,28 @@ test('request_user_input requests are normalized and retained in approvals store
   assert.equal(state.approvals.items[0]?.questions?.[0]?.id, 'color');
 });
 
+test('file change approval requests retain structured changes for diff rendering', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'server_request_required',
+    request: {
+      requestId: 'req-file-1',
+      threadId: 'thread-1',
+      kind: 'file_change_approval',
+      patch: '*** Begin Patch\n*** Update File: apps/web/src/app/App.tsx\n+line\n*** End Patch',
+      changes: [{ path: 'apps/web/src/app/App.tsx', kind: 'update', addedLines: 1, deletedLines: 0 }],
+      status: 'pending',
+      createdAt: 1,
+    },
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.approvals.items.length, 1);
+  assert.equal(state.approvals.items[0]?.changes?.[0]?.path, 'apps/web/src/app/App.tsx');
+  assert.equal(state.approvals.items[0]?.changes?.[0]?.addedLines, 1);
+});
+
 test('plan delta builds streaming plan timeline entry', () => {
   resetStore();
 
@@ -109,6 +131,37 @@ test('mcp progress and file change delta update rich timeline entries', () => {
   assert.equal(fileEntry?.changes?.[0]?.path, 'apps/web/src/app/App.tsx');
   assert.equal(fileEntry?.changes?.[0]?.addedLines, 5);
   assert.equal(fileEntry?.changes?.[0]?.deletedLines, 2);
+});
+
+test('file change output deltas are accumulated into patch text for diff rendering', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'item_delta',
+    threadId: 'thread-file-output',
+    turnId: 'turn-file-output',
+    itemId: 'file-output-1',
+    method: 'item/fileChange/outputDelta',
+    delta: '*** Begin Patch\n*** Update File: src/a.ts\n+line 1\n',
+    startedAt: 1,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'item_delta',
+    threadId: 'thread-file-output',
+    turnId: 'turn-file-output',
+    itemId: 'file-output-1',
+    method: 'item/fileChange/outputDelta',
+    delta: '-line 2\n*** End Patch',
+    startedAt: 2,
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-file-output'] || [];
+  const fileEntry = entries.find((entry) => entry.id === 'file-output-1');
+  assert.equal(
+    fileEntry?.patch,
+    '*** Begin Patch\n*** Update File: src/a.ts\n+line 1\n-line 2\n*** End Patch',
+  );
 });
 
 test('item started and completed map command entries without duplicating ids', () => {
@@ -489,7 +542,7 @@ test('thread sync clears stale active turn state when the turn has already settl
   assert.equal(turnState?.turnId, 'turn-stale');
 });
 
-test('state selects first available session when no active session exists', () => {
+test('state leaves active session empty when no session has been chosen', () => {
   resetStore();
 
   mapServerMessageToStore({
@@ -504,7 +557,24 @@ test('state selects first available session when no active session exists', () =
     globalSupplementalItems: [],
   } as any);
 
-  assert.equal(useAppStore.getState().sessions.activeSessionId, 'thread-first');
+  assert.equal(useAppStore.getState().sessions.activeSessionId, null);
+});
+
+test('tab updates do not auto-select a session during bootstrap', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'tab_updated',
+    tab: {
+      threadId: 'thread-bootstrap',
+      name: 'Bootstrap Thread',
+      cwd: 'C:\\workspace',
+      status: 'idle',
+      windowStatus: 'attached',
+    },
+  } as any);
+
+  assert.equal(useAppStore.getState().sessions.activeSessionId, null);
 });
 
 test('thread sync merges cached realtime timeline events after refresh', () => {

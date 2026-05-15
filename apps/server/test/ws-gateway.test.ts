@@ -123,7 +123,76 @@ test('ws gateway bootstraps and emits initial state for authorized connection', 
   assert.equal(app.runtimeState.websocketClientCount, 1);
   assert.equal(app.runtimeState.clients.has(socket as any), true);
   assert.equal(calls.refreshAllTabsWindowStatus, 1);
+  assert.equal(socket.sent.length, 2);
+  assert.equal((socket.sent[0] as any).type, 'state');
+  assert.equal((socket.sent[1] as any).type, 'state');
+  assert.equal((socket.sent[0] as any).tabs.length, 0);
+  assert.equal((socket.sent[1] as any).tabs.length, 1);
+});
+
+test('ws gateway sends persisted tabs immediately before codex bootstrap completes', async () => {
+  const { app, routes } = createAppStub();
+  app.repositories.sessions.listSessions = () => [{
+    threadId: 'persisted-thread',
+    name: 'Persisted Thread',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    windowStatus: 'detached',
+    approvalPolicy: '',
+    sandboxMode: '',
+    createdAt: 1,
+    updatedAt: 2,
+  }];
+
+  await registerWsGateway(app);
+
+  const socket = createSocket();
+  const handler = routes.get('/ws');
+  assert.ok(handler);
+
+  handler?.(socket, { query: { token: 'secret-token' } });
+
   assert.equal(socket.sent.length, 1);
   assert.equal((socket.sent[0] as any).type, 'state');
   assert.equal((socket.sent[0] as any).tabs.length, 1);
+  assert.equal((socket.sent[0] as any).tabs[0].threadId, 'persisted-thread');
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(socket.sent.length, 2);
+  assert.equal((socket.sent[1] as any).type, 'state');
+  assert.equal((socket.sent[0] as any).tabs.length, 1);
+});
+
+test('ws gateway falls back to persisted tabs when codex thread listing fails', async () => {
+  const { app, routes } = createAppStub();
+  app.repositories.sessions.listSessions = () => [{
+    threadId: 'persisted-thread',
+    name: 'Persisted Thread',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    windowStatus: 'detached',
+    approvalPolicy: '',
+    sandboxMode: '',
+    createdAt: 1,
+    updatedAt: 2,
+  }];
+  app.codexClient.listThreads = async () => {
+    throw new Error('listThreads failed');
+  };
+
+  await registerWsGateway(app);
+
+  const socket = createSocket();
+  const handler = routes.get('/ws');
+  assert.ok(handler);
+
+  handler?.(socket, { query: { token: 'secret-token' } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(socket.sent.length, 2);
+  assert.equal((socket.sent[0] as any).type, 'state');
+  assert.equal((socket.sent[0] as any).tabs[0].threadId, 'persisted-thread');
+  assert.equal((socket.sent[1] as any).type, 'state');
+  assert.equal((socket.sent[1] as any).tabs[0].threadId, 'persisted-thread');
 });

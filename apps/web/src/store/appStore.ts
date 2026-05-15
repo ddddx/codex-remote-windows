@@ -57,6 +57,7 @@ export type ServerRequestItem = {
   namespace?: string;
   serverName?: string;
   patch?: string;
+  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number }>;
   questions?: Array<{
     id?: string;
     question?: string;
@@ -524,6 +525,14 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
     namespace: typeof request?.namespace === 'string' ? request.namespace : undefined,
     serverName: typeof request?.serverName === 'string' ? request.serverName : undefined,
     patch: typeof request?.patch === 'string' ? request.patch : undefined,
+    changes: Array.isArray(request?.changes)
+      ? request.changes.map((change: any) => ({
+        path: typeof change?.path === 'string' ? change.path : undefined,
+        kind: typeof change?.kind === 'string' ? change.kind : undefined,
+        addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
+        deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
+      }))
+      : undefined,
     questions: Array.isArray(request?.questions) ? request.questions : undefined,
     permissions: request?.permissions ?? undefined,
     availableDecisions: Array.isArray(request?.availableDecisions) ? request.availableDecisions : undefined,
@@ -564,7 +573,13 @@ function summarizeFileChangeText(
   if (validChanges.length) {
     const preview = validChanges
       .slice(0, 3)
-      .map((change) => [change.kind, change.path].filter(Boolean).join(' '))
+      .map((change) => {
+        const resolvedPath = typeof change.path === 'string' ? change.path : '';
+        const normalizedPath = resolvedPath.replace(/[\\/]+$/, '');
+        const parts = normalizedPath.split(/[/\\]+/).filter(Boolean);
+        const name = parts[parts.length - 1] || resolvedPath;
+        return [change.kind, name].filter(Boolean).join(' ');
+      })
       .filter(Boolean)
       .join(' · ');
     const suffix = validChanges.length > 3 ? ` 等 ${validChanges.length} 项` : '';
@@ -573,10 +588,6 @@ function summarizeFileChangeText(
 
   if (typeof patch === 'string' && patch.trim()) {
     return '已生成变更补丁';
-  }
-
-  if (status === 'completed' || status === 'success' || status === 'succeeded') {
-    return '文件变更已完成';
   }
 
   return '等待文件变更内容';
@@ -790,8 +801,16 @@ function createTimelineEntryFromItemEvent(
         deletedLines: typeof (change as any)?.deletedLines === 'number' ? (change as any).deletedLines : undefined,
       }))
       : undefined;
-    const patch = typeof item.patch === 'string' ? item.patch : undefined;
-    const output = typeof item.output === 'string' ? item.output : '';
+    const output = typeof item.output === 'string'
+      ? item.output
+      : typeof item.aggregatedOutput === 'string'
+        ? item.aggregatedOutput
+        : '';
+    const patch = typeof item.patch === 'string'
+      ? item.patch
+      : output.trim()
+        ? output
+        : undefined;
     return {
       id: itemId,
       type: 'file_change',
@@ -1185,6 +1204,23 @@ function applyThreadSyncTimelineEvent(
       })]);
     }
     if (message.method === 'item/fileChange/outputDelta' || message.method === 'item/fileChange/patchUpdated') {
+      const currentDetails = current?.details && typeof current.details === 'object'
+        ? current.details as Record<string, unknown>
+        : {};
+      const currentOutput = typeof currentDetails.output === 'string'
+        ? currentDetails.output
+        : typeof currentDetails.aggregatedOutput === 'string'
+          ? currentDetails.aggregatedOutput
+          : '';
+      const nextOutput = message.method === 'item/fileChange/outputDelta'
+        ? `${currentOutput}${message.delta || ''}`
+        : currentOutput;
+      const nextPatch = typeof message.patch === 'string'
+        ? message.patch
+        : nextOutput.trim()
+          ? nextOutput
+          : current?.patch;
+
       return mergeTimelineEntryLists(entries, [buildSystemTimelineEntry(message.threadId, 'file_change', {
         id: entryId,
         turnId: message.turnId,
@@ -1192,7 +1228,7 @@ function applyThreadSyncTimelineEvent(
         title: current?.title || '文件变更',
         text: current?.text || '文件变更处理中',
         status: 'running',
-        patch: typeof message.patch === 'string' ? message.patch : current?.patch,
+        patch: nextPatch,
         changes: Array.isArray(message.changes)
           ? message.changes.map((change: any) => ({
             path: typeof change?.path === 'string' ? change.path : '',
@@ -1204,6 +1240,11 @@ function applyThreadSyncTimelineEvent(
         meta: message.delta ? [...(current?.meta || []), message.delta].slice(-8) : current?.meta,
         createdAt: message.startedAt,
         partial: true,
+        details: {
+          ...currentDetails,
+          output: nextOutput,
+          aggregatedOutput: nextOutput,
+        },
       })]);
     }
   }
@@ -1499,7 +1540,7 @@ export const useAppStore = create<AppStore>((set) => ({
       items,
       activeSessionId: state.sessions.activeSessionId && items.some((item) => item.threadId === state.sessions.activeSessionId)
         ? state.sessions.activeSessionId
-        : (items[0]?.threadId || null),
+        : null,
     },
     tokenUsage: {
       bySessionId: mergeTokenUsageFromSessions(state.tokenUsage.bySessionId, items),
@@ -1519,7 +1560,7 @@ export const useAppStore = create<AppStore>((set) => ({
     return {
       sessions: {
         items: nextItems,
-        activeSessionId: state.sessions.activeSessionId || item.threadId,
+        activeSessionId: state.sessions.activeSessionId,
       },
       tokenUsage: {
         bySessionId: item.tokenUsage !== undefined && item.tokenUsage !== null
@@ -1543,7 +1584,7 @@ export const useAppStore = create<AppStore>((set) => ({
     return {
       sessions: {
         items: nextItems,
-        activeSessionId: state.sessions.activeSessionId === threadId ? (nextItems[0]?.threadId || null) : state.sessions.activeSessionId,
+        activeSessionId: state.sessions.activeSessionId === threadId ? null : state.sessions.activeSessionId,
       },
       timeline: {
         entriesBySessionId: nextEntries,
@@ -2155,6 +2196,23 @@ export function mapServerMessageToStore(message: ServerMessage) {
     }
 
     if (message.method === 'item/fileChange/outputDelta' || message.method === 'item/fileChange/patchUpdated') {
+      const currentDetails = current?.details && typeof current.details === 'object'
+        ? current.details as Record<string, unknown>
+        : {};
+      const currentOutput = typeof currentDetails.output === 'string'
+        ? currentDetails.output
+        : typeof currentDetails.aggregatedOutput === 'string'
+          ? currentDetails.aggregatedOutput
+          : '';
+      const nextOutput = message.method === 'item/fileChange/outputDelta'
+        ? `${currentOutput}${message.delta || ''}`
+        : currentOutput;
+      const nextPatch = typeof message.patch === 'string'
+        ? message.patch
+        : nextOutput.trim()
+          ? nextOutput
+          : current?.patch;
+
       store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'file_change', {
         id: entryId,
         turnId: message.turnId,
@@ -2162,7 +2220,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
         title: current?.title || '文件变更',
         text: current?.text || '文件变更处理中',
         status: 'running',
-        patch: typeof message.patch === 'string' ? message.patch : current?.patch,
+        patch: nextPatch,
         changes: Array.isArray(message.changes)
           ? message.changes.map((change: any) => ({
             path: typeof change?.path === 'string' ? change.path : '',
@@ -2174,6 +2232,11 @@ export function mapServerMessageToStore(message: ServerMessage) {
         meta: message.delta ? [...(current?.meta || []), message.delta].slice(-8) : current?.meta,
         createdAt: message.startedAt,
         partial: true,
+        details: {
+          ...currentDetails,
+          output: nextOutput,
+          aggregatedOutput: nextOutput,
+        },
       }));
       return;
     }

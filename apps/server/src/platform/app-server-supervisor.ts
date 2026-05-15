@@ -115,6 +115,7 @@ export class CodexAppServerSupervisor {
   readonly connectTimeoutMs: number;
   proc: ChildProcess | null;
   managed: boolean;
+  startPromise: Promise<void> | null;
 
   constructor(options: AppServerSupervisorOptions = {}) {
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
@@ -124,6 +125,7 @@ export class CodexAppServerSupervisor {
     this.connectTimeoutMs = parsePositiveInteger(options.connectTimeoutMs || process.env.CODEX_CONNECT_TIMEOUT, 10000);
     this.proc = null;
     this.managed = false;
+    this.startPromise = null;
   }
 
   get enabled(): boolean {
@@ -131,6 +133,24 @@ export class CodexAppServerSupervisor {
   }
 
   async ensureStarted(): Promise<void> {
+    if (!this.wsUrl) {
+      return;
+    }
+
+    if (this.startPromise) {
+      await this.startPromise;
+      return;
+    }
+
+    this.startPromise = this.ensureStartedInternal();
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  private async ensureStartedInternal(): Promise<void> {
     if (!this.wsUrl) {
       return;
     }
@@ -232,5 +252,6 @@ export class CodexAppServerSupervisor {
 
     this.proc = null;
     this.managed = false;
+    this.startPromise = null;
   }
 }

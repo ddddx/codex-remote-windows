@@ -47,6 +47,8 @@ export class CodexAppServerClient extends EventEmitter {
   }>;
   buffer: string;
   started: boolean;
+  lastTransportEvent: string;
+  startPromise: Promise<void> | null;
 
   constructor(options: CodexClientOptions = {}) {
     super();
@@ -66,6 +68,8 @@ export class CodexAppServerClient extends EventEmitter {
     this.pending = new Map();
     this.buffer = '';
     this.started = false;
+    this.lastTransportEvent = 'created';
+    this.startPromise = null;
   }
 
   async start() {
@@ -73,18 +77,31 @@ export class CodexAppServerClient extends EventEmitter {
       return;
     }
 
-    if (this.codexHome && !fs.existsSync(this.codexHome)) {
-      fs.mkdirSync(this.codexHome, { recursive: true });
+    if (this.startPromise) {
+      await this.startPromise;
+      return;
     }
 
-    if (this.wsUrl) {
-      await this.startWebSocket();
-    } else {
-      await this.startStdio();
-    }
+    this.startPromise = (async () => {
+      if (this.codexHome && !fs.existsSync(this.codexHome)) {
+        fs.mkdirSync(this.codexHome, { recursive: true });
+      }
 
-    await this.initialize();
-    this.started = true;
+      if (this.wsUrl) {
+        await this.startWebSocket();
+      } else {
+        await this.startStdio();
+      }
+
+      await this.initialize();
+      this.started = true;
+    })();
+
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
   }
 
   async stop() {
@@ -99,6 +116,7 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     this.started = false;
+    this.startPromise = null;
   }
 
   async request(method: string, params: Record<string, unknown> = {}) {
@@ -112,7 +130,7 @@ export class CodexAppServerClient extends EventEmitter {
     const promise = new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`request timeout for ${method}`));
+        reject(new Error(this.buildRequestTimeoutMessage(method)));
       }, this.requestTimeoutMs);
 
       this.pending.set(id, { resolve, reject, timeout, method });
@@ -253,15 +271,21 @@ export class CodexAppServerClient extends EventEmitter {
     );
 
     this.proc.stdout?.setEncoding('utf8');
-    this.proc.stdout?.on('data', (chunk: string) => this.onTextData(chunk));
+    this.proc.stdout?.on('data', (chunk: string) => {
+      this.lastTransportEvent = `stdio stdout ${chunk.length} chars`;
+      this.onTextData(chunk);
+    });
 
     this.proc.stderr?.setEncoding('utf8');
     this.proc.stderr?.on('data', (line: string) => {
+      this.lastTransportEvent = `stdio stderr ${line.trim().slice(0, 120)}`;
       this.emit('log', line.trim());
     });
 
     this.proc.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      this.lastTransportEvent = `stdio exit code=${code} signal=${signal}`;
       this.started = false;
+      this.startPromise = null;
       const err = new Error(`codex app-server exited (code=${code}, signal=${signal})`);
       for (const { reject } of this.pending.values()) {
         reject(err);
@@ -275,28 +299,35 @@ export class CodexAppServerClient extends EventEmitter {
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(this.wsUrl!);
       this.ws = ws;
+      this.lastTransportEvent = `ws connecting ${this.wsUrl}`;
 
       const timer = setTimeout(() => {
+        this.lastTransportEvent = `ws connect timeout ${this.wsUrl}`;
         ws.terminate();
         reject(new Error(`connect timeout: ${this.wsUrl}`));
       }, this.connectTimeoutMs);
 
       ws.on('open', () => {
         clearTimeout(timer);
+        this.lastTransportEvent = `ws open ${this.wsUrl}`;
         resolve();
       });
 
       ws.on('message', (data: string | Buffer | ArrayBuffer | Buffer[]) => {
+        this.lastTransportEvent = `ws message ${data.toString('utf8').slice(0, 120)}`;
         this.onTextData(data.toString('utf8'));
       });
 
       ws.on('error', (err: Error) => {
         clearTimeout(timer);
+        this.lastTransportEvent = `ws error ${err.message}`;
         reject(err);
       });
 
       ws.on('close', () => {
+        this.lastTransportEvent = `ws close state=${formatWebSocketState(ws.readyState)}`;
         this.started = false;
+        this.startPromise = null;
         for (const { reject } of this.pending.values()) {
           reject(new Error('codex app-server websocket closed'));
         }
@@ -322,8 +353,15 @@ export class CodexAppServerClient extends EventEmitter {
     this.notify('initialized', {});
   }
 
+  private buildRequestTimeoutMessage(method: string) {
+    const wsState = this.ws ? formatWebSocketState(this.ws.readyState) : 'not-connected';
+    const transport = this.ws ? `wsUrl=${this.wsUrl} wsState=${wsState}` : `stdio pid=${this.proc?.pid ?? 'none'}`;
+    return `request timeout for ${method}; ${transport}; lastTransportEvent=${this.lastTransportEvent}`;
+  }
+
   private send(payload: Record<string, unknown>) {
     const line = JSON.stringify(payload);
+    this.lastTransportEvent = `send ${line.slice(0, 160)}`;
 
     if (this.ws) {
       this.ws.send(line);
@@ -335,26 +373,20 @@ export class CodexAppServerClient extends EventEmitter {
 
   private onTextData(chunk: string) {
     if (this.ws) {
-      try {
-        const msg = JSON.parse(chunk.trim()) as Record<string, any>;
-        if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
-          this.emit('server_request', msg);
-        } else if (msg.method) {
-          this.emit('notification', msg);
-        } else if (Object.prototype.hasOwnProperty.call(msg, 'id')) {
-          const entry = this.pending.get(String(msg.id));
-          if (entry) {
-            clearTimeout(entry.timeout);
-            this.pending.delete(String(msg.id));
-            if (msg.error) {
-              entry.reject(new Error(`${entry.method} failed: ${JSON.stringify(msg.error)}`));
-            } else {
-              entry.resolve(msg.result);
-            }
-          }
+      const rawMessages = chunk.includes('\n')
+        ? chunk.split('\n').map((part) => part.trim()).filter(Boolean)
+        : [chunk.trim()].filter(Boolean);
+
+      for (const raw of rawMessages) {
+        let msg: Record<string, any>;
+        try {
+          msg = JSON.parse(raw);
+        } catch (error) {
+          this.emit('log', `ws parse error: ${(error as Error).message}; raw=${raw.slice(0, 240)}`);
+          continue;
         }
-      } catch (error) {
-        this.emit('log', `ws parse error: ${(error as Error).message}`);
+
+        this.handleMessage(msg);
       }
       return;
     }
@@ -376,37 +408,56 @@ export class CodexAppServerClient extends EventEmitter {
       let msg: Record<string, any>;
       try {
         msg = JSON.parse(raw);
-      } catch {
-        this.emit('log', `non-json output: ${raw}`);
+      } catch (error) {
+        this.emit('log', `stdio parse error: ${(error as Error).message}; raw=${raw.slice(0, 240)}`);
         continue;
       }
 
-      if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
-        this.emit('server_request', msg);
-        continue;
-      }
-
-      if (Object.prototype.hasOwnProperty.call(msg, 'id')) {
-        const entry = this.pending.get(String(msg.id));
-        if (!entry) {
-          continue;
-        }
-
-        clearTimeout(entry.timeout);
-        this.pending.delete(String(msg.id));
-
-        if (msg.error) {
-          entry.reject(new Error(`${entry.method} failed: ${JSON.stringify(msg.error)}`));
-        } else {
-          entry.resolve(msg.result);
-        }
-        continue;
-      }
-
-      if (msg.method) {
-        this.emit('notification', msg);
-      }
+      this.handleMessage(msg);
     }
+  }
+
+  private handleMessage(msg: Record<string, any>) {
+    if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
+      this.emit('server_request', msg);
+      return;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(msg, 'id')) {
+      const entry = this.pending.get(String(msg.id));
+      if (!entry) {
+        return;
+      }
+
+      clearTimeout(entry.timeout);
+      this.pending.delete(String(msg.id));
+
+      if (msg.error) {
+        entry.reject(new Error(`${entry.method} failed: ${JSON.stringify(msg.error)}`));
+      } else {
+        entry.resolve(msg.result);
+      }
+      return;
+    }
+
+    if (msg.method) {
+      this.emit('notification', msg);
+    }
+  }
+}
+
+function formatWebSocketState(state: number | undefined) {
+  switch (state) {
+    case WebSocket.CONNECTING:
+      return 'CONNECTING';
+    case WebSocket.OPEN:
+      return 'OPEN';
+    case WebSocket.CLOSING:
+      return 'CLOSING';
+    case WebSocket.CLOSED:
+      return 'CLOSED';
+    default:
+      return String(state ?? 'unknown');
   }
 }
 

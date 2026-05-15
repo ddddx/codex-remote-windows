@@ -37,6 +37,10 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
     handleCodexNotification(app, msg);
   });
 
+  app.codexClient.on('log', (message: string) => {
+    app.log.warn({ source: 'codex-client' }, message);
+  });
+
   app.codexClient.on('server_request', (msg: { id: string | number; method: string; params?: Record<string, unknown> }) => {
     const request = createServerRequestRecord(msg);
     app.runtimeState.serverRequestsById.set(request.requestId, request);

@@ -4,7 +4,7 @@ import { listServerRequests } from './server-requests.js';
 import { listSupplementalItems, listTimelineEvents, listTurnDiffs, listTurnPlans } from './runtime-cache.js';
 import { listRuntimeTabs, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
 
-export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]> {
+export function hydratePersistedRuntimeState(app: FastifyInstance): void {
   if (!app.runtimeState.tabsById.size) {
     for (const persisted of app.repositories.sessions.listSessions()) {
       app.runtimeState.tabsById.set(persisted.threadId, persisted as any);
@@ -15,14 +15,24 @@ export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]>
       app.runtimeState.serverRequestsById.set(request.requestId, request as any);
     }
   }
+}
 
-  const threads = await app.codexClient.listThreads(100);
-  const nextTabs = Array.isArray(threads)
-    ? threads
-      .map((thread) => upsertRuntimeTab(app, thread))
-      .filter((tab) => tab.threadId)
-    : [];
-  return nextTabs.length ? nextTabs : listRuntimeTabs(app);
+export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]> {
+  hydratePersistedRuntimeState(app);
+
+  const persistedTabs = listRuntimeTabs(app);
+
+  try {
+    const threads = await app.codexClient.listThreads(100);
+    const nextTabs = Array.isArray(threads)
+      ? threads
+        .map((thread) => upsertRuntimeTab(app, thread))
+        .filter((tab) => tab.threadId)
+      : [];
+    return nextTabs.length ? nextTabs : persistedTabs;
+  } catch {
+    return persistedTabs;
+  }
 }
 
 export function buildInitialState(app: FastifyInstance): Extract<ServerMessage, { type: 'state' }> {

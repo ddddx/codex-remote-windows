@@ -11,6 +11,29 @@ export function buildSessionNameFromPrompt(text: string): string {
   return firstLine.slice(0, 40);
 }
 
+export function formatWorkspaceLabel(path: string | undefined): string {
+  const value = typeof path === 'string' ? path.trim() : '';
+  if (!value) {
+    return '未设置工作区';
+  }
+
+  const normalized = value.replace(/[\\/]+$/, '');
+  if (!normalized) {
+    return value;
+  }
+
+  const segments = normalized.split(/[/\\]+/).filter(Boolean);
+  if (!segments.length) {
+    return normalized;
+  }
+
+  const lastSegment = segments[segments.length - 1];
+  if (/^[a-zA-Z]:$/.test(normalized)) {
+    return normalized;
+  }
+  return lastSegment || normalized;
+}
+
 function readNumericTokenValue(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;

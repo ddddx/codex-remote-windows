@@ -1,4 +1,4 @@
-import { formatWindowStatus } from '../../app/view-helpers.js';
+import { formatWindowStatus, formatWorkspaceLabel } from '../../app/view-helpers.js';
 import { useAppStore } from '../../store/appStore.js';
 
 type SessionRailProps = {
@@ -41,7 +41,7 @@ export function SessionRail({ onNewSession, onCloseSessionWindow }: SessionRailP
                 onClick={() => setActiveSession(session.threadId)}
               >
                 <span className="name">{session.name}</span>
-                <span className="workspace">{session.cwd || '未设置工作区'}</span>
+                <span className="workspace" title={session.cwd || '未设置工作区'}>{formatWorkspaceLabel(session.cwd)}</span>
                 <span className="meta">
                   <span className={`status-dot ${buildStatusDotClass(session.windowStatus)}`}></span>
                   <span>{formatWindowStatus(session.windowStatus) || '窗口未打开'}</span>

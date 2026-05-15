@@ -3,7 +3,7 @@ import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
 import { isAuthorizedWsToken } from './auth.js';
 import { routeClientMessage } from './message-router.js';
 import { ensureCodexReady } from './bridge.js';
-import { bootstrapTabs, buildInitialState } from '../application/services/thread-sync.js';
+import { bootstrapTabs, buildInitialState, hydratePersistedRuntimeState } from '../application/services/thread-sync.js';
 
 type WsLike = {
   send: (payload: string) => void;
@@ -37,6 +37,8 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
 
     app.runtimeState.websocketClientCount += 1;
     app.runtimeState.clients.add(socket);
+    hydratePersistedRuntimeState(app);
+    sendMessage(socket, buildInitialState(app));
 
     void (async () => {
       try {
@@ -45,6 +47,7 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
         await app.windowAttachments.refreshAllTabsWindowStatus().catch(() => {});
         sendMessage(socket, buildInitialState(app));
       } catch (error) {
+        sendMessage(socket, buildInitialState(app));
         sendMessage(socket, {
           type: 'backend_error',
           message: error instanceof Error ? error.message : 'Failed to bootstrap WebSocket state',
