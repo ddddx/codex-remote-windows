@@ -728,17 +728,6 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <button
-                id="tokenBtn"
-                className="topbar-action topbar-action-secondary"
-                type="button"
-                onClick={() => {
-                  setTokenDraft(token);
-                  setTokenPromptOpen(true);
-                }}
-              >
-                Token
-              </button>
               <span
                 id="activeStatus"
                 className={`status-badge status-badge-dot ${connectionTone === 'connected' ? '' : connectionTone === 'error' ? ' error' : ' waiting'}`}
@@ -772,6 +761,28 @@ export function App() {
             ) : null}
             <TimelineWorkspace
               onRespondApproval={respondApproval}
+              homeAside={!resolvedActiveSessionId ? (
+                <article className="home-settings-card">
+                  <div className="home-settings-card-head">
+                    <strong>连接鉴权</strong>
+                    <span>{token ? '已设置 Token' : '未设置 Token'}</span>
+                  </div>
+                  <div className="home-settings-card-body">
+                    <span>Token 只在主页可修改，用于 WebSocket 和工作区接口鉴权。</span>
+                    <button
+                      id="tokenBtn"
+                      className="btn btn-secondary home-settings-card-action"
+                      type="button"
+                      onClick={() => {
+                        setTokenDraft(token);
+                        setTokenPromptOpen(true);
+                      }}
+                    >
+                      {token ? '修改 Token' : '设置 Token'}
+                    </button>
+                  </div>
+                </article>
+              ) : null}
             />
             <ComposerDock
               draft={draft}

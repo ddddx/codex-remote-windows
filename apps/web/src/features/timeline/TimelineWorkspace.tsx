@@ -16,6 +16,7 @@ import { buildTimelineGroups } from './model.js';
 
 type TimelineWorkspaceProps = {
   onRespondApproval: (request: ServerRequestItem, response: unknown) => void;
+  homeAside?: React.ReactNode;
 };
 
 type FooterStatus = {
@@ -971,7 +972,7 @@ function ApprovalCard({
   );
 }
 
-export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps) {
+export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWorkspaceProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const lastSignatureRef = useRef('');
   const lastSessionIdRef = useRef<string | null>(null);
@@ -1126,23 +1127,30 @@ export function TimelineWorkspace({ onRespondApproval }: TimelineWorkspaceProps)
         ) : null}
 
         {!activeSessionId && health ? (
-          <div className="health-grid">
-            <div className="health-card">
-              <span className="label">状态</span>
-              <strong>{formatHealthStatus(health.status)}</strong>
+          <div className="health-home">
+            <div className="health-grid">
+              <div className="health-card">
+                <span className="label">状态</span>
+                <strong>{formatHealthStatus(health.status)}</strong>
+              </div>
+              <div className="health-card">
+                <span className="label">会话数</span>
+                <strong>{health.tabs}</strong>
+              </div>
+              <div className="health-card">
+                <span className="label">连接数</span>
+                <strong>{health.websocketClients}</strong>
+              </div>
+              <div className="health-card">
+                <span className="label">运行时长</span>
+                <strong>{health.uptimeSec} 秒</strong>
+              </div>
             </div>
-            <div className="health-card">
-              <span className="label">会话数</span>
-              <strong>{health.tabs}</strong>
-            </div>
-            <div className="health-card">
-              <span className="label">连接数</span>
-              <strong>{health.websocketClients}</strong>
-            </div>
-            <div className="health-card">
-              <span className="label">运行时长</span>
-              <strong>{health.uptimeSec} 秒</strong>
-            </div>
+            {homeAside ? (
+              <div className="health-home-aside">
+                {homeAside}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
