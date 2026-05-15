@@ -308,7 +308,7 @@ function basenameLike(path: string | undefined): string {
   return segments[segments.length - 1] || normalized;
 }
 
-function buildRenderableChangesFromSource(source: {
+export function buildRenderableChangesFromSource(source: {
   changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number; diff?: string }>;
   patch?: string;
 }): RenderableFileChange[] {
@@ -342,7 +342,33 @@ function buildRenderableChangesFromSource(source: {
     }
   }
 
-  return merged;
+  const deduped = new Map<string, RenderableFileChange>();
+  for (const change of merged) {
+    const pathKey = typeof change.path === 'string' ? change.path.trim() : '';
+    const key = `${(change.kind || '').trim().toLowerCase()}::${pathKey}`;
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, { ...change });
+      continue;
+    }
+    deduped.set(key, {
+      ...existing,
+      ...change,
+      path: existing.path || change.path,
+      kind: existing.kind || change.kind,
+      addedLines: Math.max(
+        Number(existing.addedLines) || 0,
+        Number(change.addedLines) || 0,
+      ) || undefined,
+      deletedLines: Math.max(
+        Number(existing.deletedLines) || 0,
+        Number(change.deletedLines) || 0,
+      ) || undefined,
+      diff: existing.diff || change.diff,
+    });
+  }
+
+  return [...deduped.values()];
 }
 
 function buildRenderableChanges(entry: TimelineEntry): RenderableFileChange[] {

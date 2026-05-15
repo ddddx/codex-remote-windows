@@ -403,6 +403,38 @@ test('thread sync preserves per-change diffs when file change item has no top-le
   assert.equal((fileEntry?.changes?.[0] as any)?.diff, '@@ -1 +1 @@\n-old\n+new');
 });
 
+test('duplicate file change entries with the same path are preserved in store for UI-side dedupe', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'item_delta',
+    threadId: 'thread-file-duplicate-preview',
+    turnId: 'turn-file-duplicate-preview',
+    itemId: 'file-duplicate-preview-1',
+    method: 'item/fileChange/patchUpdated',
+    patch: '*** Begin Patch\n*** Update File: src/dup.ts\n+draft\n*** End Patch',
+    changes: [{ path: 'src/dup.ts', kind: 'update', addedLines: 1, deletedLines: 0 }],
+    startedAt: 1,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'item_completed',
+    threadId: 'thread-file-duplicate-preview',
+    turnId: 'turn-file-duplicate-preview',
+    item: {
+      id: 'file-duplicate-preview-1',
+      type: 'fileChange',
+      status: 'completed',
+      changes: [{ path: 'src/dup.ts', kind: 'update', addedLines: 2, deletedLines: 1 }],
+    },
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-file-duplicate-preview'] || [];
+  const fileEntry = entries.find((entry) => entry.id === 'file-duplicate-preview-1');
+  assert.equal(fileEntry?.changes?.length, 1);
+  assert.equal(fileEntry?.changes?.[0]?.path, 'src/dup.ts');
+});
+
 test('thread sync merges turn diff into restored file change entry for the same turn', () => {
   resetStore();
 
