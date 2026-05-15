@@ -14,6 +14,7 @@ export function createSocketClient(handlers: Handlers) {
   let reconnectAttempt = 0;
   let currentToken = '';
   let queuedMessages: ClientMessage[] = [];
+  let hasConnectedOnce = false;
 
   function flushQueuedMessages() {
     if (!socket || socket.readyState !== WebSocket.OPEN || !queuedMessages.length) {
@@ -38,13 +39,20 @@ export function createSocketClient(handlers: Handlers) {
     handlers.onStatusChange(status, error);
   }
 
+  function buildReconnectMessage(delayMs?: number): string {
+    if (typeof delayMs === 'number' && delayMs > 0) {
+      return `正在重连，${Math.max(1, Math.round(delayMs / 1000))} 秒后重试…`;
+    }
+    return '正在重连…';
+  }
+
   function scheduleReconnect() {
     if (reconnectTimer != null) {
       return;
     }
     const delay = Math.min(30_000, 1_000 * (2 ** reconnectAttempt));
     reconnectAttempt += 1;
-    notifyStatus('disconnected', `连接已断开，${Math.max(1, Math.round(delay / 1000))} 秒后重连…`);
+    notifyStatus('disconnected', buildReconnectMessage(delay));
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = null;
       void connect(currentToken);
@@ -62,11 +70,12 @@ export function createSocketClient(handlers: Handlers) {
       socket.close();
     }
 
-    notifyStatus('connecting');
+    notifyStatus('connecting', hasConnectedOnce || reconnectAttempt > 0 ? buildReconnectMessage() : undefined);
     socket = new WebSocket(buildWsUrl(token));
 
     socket.onopen = () => {
       reconnectAttempt = 0;
+      hasConnectedOnce = true;
       notifyStatus('connected');
       flushQueuedMessages();
     };
@@ -90,7 +99,7 @@ export function createSocketClient(handlers: Handlers) {
     };
 
     socket.onerror = () => {
-      notifyStatus('disconnected', '连接异常');
+      notifyStatus('disconnected', buildReconnectMessage());
     };
   }
 
@@ -113,6 +122,8 @@ export function createSocketClient(handlers: Handlers) {
     currentToken = '';
     queuedMessages = [];
     clearReconnectTimer();
+    reconnectAttempt = 0;
+    hasConnectedOnce = false;
     if (socket) {
       socket.close();
       socket = null;
