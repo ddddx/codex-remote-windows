@@ -401,6 +401,31 @@ function formatFileChangePrefix(kind: string | undefined): string {
   return '~ 修改';
 }
 
+export function formatFileChangeStatsText(change: { addedLines?: number; deletedLines?: number }): string {
+  const addedLines = Math.max(0, Number(change.addedLines) || 0);
+  const deletedLines = Math.max(0, Number(change.deletedLines) || 0);
+  const parts = [
+    addedLines ? `+${addedLines}` : '',
+    deletedLines ? `-${deletedLines}` : '',
+  ].filter(Boolean);
+  return parts.join(' / ');
+}
+
+export function buildFileChangeHeadlineText(
+  headline: string,
+  changes: Array<{ addedLines?: number; deletedLines?: number }>,
+): string {
+  const totals = changes.reduce<{ addedLines: number; deletedLines: number }>(
+    (result, change) => ({
+      addedLines: result.addedLines + Math.max(0, Number(change.addedLines) || 0),
+      deletedLines: result.deletedLines + Math.max(0, Number(change.deletedLines) || 0),
+    }),
+    { addedLines: 0, deletedLines: 0 },
+  );
+  const statsText = formatFileChangeStatsText(totals);
+  return statsText ? `${headline} ${statsText}` : headline;
+}
+
 function buildProcessHeadline(entry: TimelineEntry): string {
   const label = formatTimelineLabel(entry);
   if (entry.partial) {
@@ -423,12 +448,7 @@ function buildProcessPreview(entry: TimelineEntry): string {
     if (changes.length) {
       const preview = changes
         .slice(0, 2)
-        .map((change) => {
-          const statsText = typeof change.addedLines === 'number' || typeof change.deletedLines === 'number'
-            ? ` (+${Math.max(0, Number(change.addedLines) || 0)} / -${Math.max(0, Number(change.deletedLines) || 0)})`
-            : '';
-          return `${formatFileChangePrefix(change.kind)} ${basenameLike(change.path)}${statsText}`.trim();
-        })
+        .map((change) => `${formatFileChangePrefix(change.kind)} ${basenameLike(change.path)}`.trim())
         .join(' · ');
       return changes.length > 2 ? `${preview} 等 ${changes.length} 项` : preview;
     }
@@ -445,10 +465,14 @@ function renderFileChangeStats(change: { addedLines?: number; deletedLines?: num
   }
   return (
     <span className="file-change-line-stats">
-      <span className="file-change-line-stats-add">+{addedLines}</span>
-      <span className="file-change-line-stats-delete">-{deletedLines}</span>
+      {addedLines ? <span className="file-change-line-stats-add">+{addedLines}</span> : null}
+      {deletedLines ? <span className="file-change-line-stats-delete">-{deletedLines}</span> : null}
     </span>
   );
+}
+
+function buildFileChangeHeadline(entry: TimelineEntry): string {
+  return buildFileChangeHeadlineText(buildProcessHeadline(entry), buildRenderableChanges(entry));
 }
 
 function renderFileChangeList(changes: RenderableFileChange[], keyPrefix: string) {
@@ -684,7 +708,7 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
           <div className="timeline-content">
             <ExpandableFileChangeRow
               className={`timeline-card-${kind}`}
-              title={buildProcessHeadline(entry)}
+              title={buildFileChangeHeadline(entry)}
               summary={buildProcessPreview(entry) || describeTimelineType(entry)}
               details={(
                 <>
