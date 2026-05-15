@@ -286,6 +286,64 @@ test('reasoning, turn updates and notices are normalized into timeline semantics
   assert.ok(notifications.some((entry) => entry.message === 'Watch out' && entry.level === 'warning'));
 });
 
+test('turn diff updates merge into the existing file change entry for the same turn', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'item_delta',
+    threadId: 'thread-file-merge',
+    turnId: 'turn-file-merge',
+    itemId: 'file-merge-1',
+    method: 'item/fileChange/patchUpdated',
+    patch: '*** Begin Patch\n*** Update File: src/a.ts\n+draft\n*** End Patch',
+    changes: [{ path: 'src/a.ts', kind: 'update', addedLines: 1, deletedLines: 0 }],
+    startedAt: 1,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'turn_diff_updated',
+    threadId: 'thread-file-merge',
+    turnId: 'turn-file-merge',
+    diff: '*** Begin Patch\n*** Update File: src/a.ts\n+final\n*** End Patch',
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-file-merge'] || [];
+  assert.equal(entries.filter((entry) => entry.turnId === 'turn-file-merge').length, 1);
+  assert.equal(entries[0]?.type, 'file_change');
+  assert.equal(entries[0]?.patch, '*** Begin Patch\n*** Update File: src/a.ts\n+final\n*** End Patch');
+});
+
+test('thread sync merges turn diff into restored file change entry for the same turn', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-sync-file-merge',
+    turns: [{
+      id: 'turn-sync-file-merge',
+      createdAt: 1,
+      items: [
+        {
+          id: 'file-sync-1',
+          type: 'fileChange',
+          changes: [{ path: 'src/b.ts', kind: 'update', addedLines: 1, deletedLines: 1 }],
+        },
+      ],
+    }],
+    turnDiffs: [{
+      turnId: 'turn-sync-file-merge',
+      diff: '*** Begin Patch\n*** Update File: src/b.ts\n+patched\n*** End Patch',
+      updatedAt: 2,
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-sync-file-merge'] || [];
+  const turnEntries = entries.filter((entry) => entry.turnId === 'turn-sync-file-merge');
+  assert.equal(turnEntries.length, 1);
+  assert.equal(turnEntries[0]?.type, 'file_change');
+  assert.equal(turnEntries[0]?.patch, '*** Begin Patch\n*** Update File: src/b.ts\n+patched\n*** End Patch');
+});
+
 test('timeline groups combine turn entries and inline approvals', () => {
   const groups = buildTimelineGroups([
     {

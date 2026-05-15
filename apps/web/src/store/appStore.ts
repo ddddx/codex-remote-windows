@@ -650,6 +650,41 @@ function mergeTimelineEntryLists(existing: TimelineEntry[], incoming: TimelineEn
   return Array.from(merged.values()).sort(compareTimelineEntries);
 }
 
+function mergeTurnDiffIntoFileChangeEntry(
+  entries: TimelineEntry[],
+  threadId: string,
+  turnId: string | undefined,
+  diff: string,
+): TimelineEntry[] {
+  if (!turnId || !diff.trim()) {
+    return entries;
+  }
+
+  const nextEntries = entries.filter((entry) => !(entry.turnId === turnId && entry.type === 'turn_diff'));
+  const fileChangeEntry = nextEntries.find((entry) => entry.turnId === turnId && entry.type === 'file_change');
+  if (!fileChangeEntry) {
+    return mergeTimelineEntryLists(nextEntries, [buildSystemTimelineEntry(threadId, 'turn_diff', {
+      id: `turn-diff:${turnId || 'turn'}`,
+      turnId,
+      title: '轮次 Diff',
+      text: '已更新的差异快照',
+      patch: diff,
+      status: 'completed',
+    })]);
+  }
+
+  return mergeTimelineEntryLists(nextEntries, [{
+    ...fileChangeEntry,
+    patch: diff,
+    details: fileChangeEntry.details && typeof fileChangeEntry.details === 'object'
+      ? {
+        ...(fileChangeEntry.details as Record<string, unknown>),
+        patch: diff,
+      }
+      : fileChangeEntry.details,
+  }]);
+}
+
 function isAssistantActivityEntry(entry: TimelineEntry): boolean {
   return entry.role === 'assistant'
     && (entry.type === 'reasoning' || entry.type === 'plan' || entry.type === 'message');
@@ -960,6 +995,21 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
     if (!turnId || !diff.trim()) {
       continue;
     }
+    const fileChangeEntry = entries.find((entry) => entry.turnId === turnId && entry.type === 'file_change');
+    if (fileChangeEntry) {
+      const merged = mergeTimelineEntryLists(entries, [{
+        ...fileChangeEntry,
+        patch: diff,
+        details: fileChangeEntry.details && typeof fileChangeEntry.details === 'object'
+          ? {
+            ...(fileChangeEntry.details as Record<string, unknown>),
+            patch: diff,
+          }
+          : fileChangeEntry.details,
+      }]);
+      entries.splice(0, entries.length, ...merged);
+      continue;
+    }
     entries.push({
       id: `turn-diff:${turnId}`,
       type: 'turn_diff',
@@ -1094,14 +1144,12 @@ function applyThreadSyncTimelineEvent(
   }
 
   if (message.type === 'turn_diff_updated') {
-    return mergeTimelineEntryLists(entries, [buildSystemTimelineEntry(message.threadId, 'turn_diff', {
-      id: `turn-diff:${message.turnId || 'turn'}`,
-      turnId: message.turnId,
-      title: '轮次 Diff',
-      text: '已更新的差异快照',
-      patch: typeof message.diff === 'string' ? message.diff : currentDiffToText(message.diff),
-      status: 'completed',
-    })]);
+    return mergeTurnDiffIntoFileChangeEntry(
+      entries,
+      message.threadId,
+      message.turnId,
+      typeof message.diff === 'string' ? message.diff : currentDiffToText(message.diff),
+    );
   }
 
   if (message.type === 'mcp_tool_progress') {
@@ -1283,6 +1331,15 @@ function mergeThreadSyncEntries(
       continue;
     }
     entries = applyThreadSyncTimelineEvent(entries, event as ServerMessage);
+  }
+
+  for (const diffEntry of Array.isArray(message.turnDiffs) ? message.turnDiffs : []) {
+    const turnId = typeof (diffEntry as any)?.turnId === 'string' ? (diffEntry as any).turnId : '';
+    const diff = typeof (diffEntry as any)?.diff === 'string' ? (diffEntry as any).diff : '';
+    if (!turnId || !diff.trim()) {
+      continue;
+    }
+    entries = mergeTurnDiffIntoFileChangeEntry(entries, message.threadId, turnId, diff);
   }
 
   return entries;
@@ -2062,13 +2119,22 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'turn_diff_updated') {
-    store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'turn_diff', {
-      id: `turn-diff:${message.turnId || 'turn'}`,
-      turnId: message.turnId,
-      title: '轮次 Diff',
-      text: '已更新的差异快照',
-      patch: typeof message.diff === 'string' ? message.diff : currentDiffToText(message.diff),
-      status: 'completed',
+    const state = useAppStore.getState();
+    const currentEntries = state.timeline.entriesBySessionId[message.threadId] || [];
+    const mergedEntries = mergeTurnDiffIntoFileChangeEntry(
+      currentEntries,
+      message.threadId,
+      message.turnId,
+      typeof message.diff === 'string' ? message.diff : currentDiffToText(message.diff),
+    );
+    useAppStore.setState((prev) => ({
+      ...prev,
+      timeline: {
+        entriesBySessionId: {
+          ...prev.timeline.entriesBySessionId,
+          [message.threadId]: mergedEntries,
+        },
+      },
     }));
     return;
   }
