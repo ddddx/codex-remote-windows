@@ -4,7 +4,7 @@ import { ComposerDock } from '../features/composer/ComposerDock.js';
 import { SessionRail } from '../features/sessions/SessionRail.js';
 import { TimelineWorkspace } from '../features/timeline/TimelineWorkspace.js';
 import { WorkspaceBrowser } from '../features/workspace/WorkspaceBrowser.js';
-import { buildSessionNameFromPrompt, formatTokenUsageValue } from './view-helpers.js';
+import { buildSessionNameFromPrompt, buildTokenUsageDisplay } from './view-helpers.js';
 import { readStoredToken, writeStoredToken } from '../lib/storage.js';
 import { useAppStore, mapServerMessageToStore, type ServerRequestItem } from '../store/appStore.js';
 import { getHealth } from '../transport/http/health.js';
@@ -663,6 +663,7 @@ export function App() {
   const effectiveSandboxMode = activePrefs.sandboxMode || normalizeSandboxMode(codexOptions?.defaults.sandboxMode || DEFAULT_SANDBOX_MODE);
   const permissionPresetValue = inferPermissionPresetValue(activePrefs.approvalPolicy, activePrefs.sandboxMode);
   const effectivePermissionPresetValue = inferPermissionPresetValue(effectiveApprovalPolicy, effectiveSandboxMode);
+  const tokenUsageDisplay = buildTokenUsageDisplay(activeUsage);
   const composerControlsSummary = [
     effectiveModel || '未设置',
     formatReasoningEffortLabel(effectiveReasoningEffort),
@@ -731,10 +732,6 @@ export function App() {
             </button>
             <h1 id="activeTitle">{activeTitle}</h1>
             <div className="topbar-tools">
-              <div id="contextUsage" className={`context-usage${activeUsage ? '' : ' is-empty'}`}>
-                <span className="context-usage-label">用量</span>
-                <strong>{formatTokenUsageValue(activeUsage)}</strong>
-              </div>
               <label className="theme-select-group" htmlFor="themeSelect">
                 <span className="sr-only">主题</span>
                 <select id="themeSelect" aria-label="主题" value={theme} onChange={(event) => handleThemeChange(event.target.value)}>
@@ -819,6 +816,7 @@ export function App() {
               modelOptions={codexOptions?.models || []}
               defaults={buildDefaultComposerPrefs(codexOptions)}
               optionsStatus={codexOptionsStatus}
+              tokenUsage={tokenUsageDisplay}
             />
           </section>
         </div>

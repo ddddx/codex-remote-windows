@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildApprovalDecisionResponse, formatTokenUsageValue, formatWorkspaceLabel } from '../src/app/view-helpers.js';
+import {
+  buildApprovalDecisionResponse,
+  buildTokenUsageDisplay,
+  formatTokenUsageValue,
+  formatWorkspaceLabel,
+} from '../src/app/view-helpers.js';
 
 test('buildApprovalDecisionResponse preserves structured approval decisions', () => {
   const decision = {
@@ -37,6 +42,20 @@ test('formatTokenUsageValue normalizes nested and string token values', () => {
     },
   }), '75%');
   assert.equal(formatTokenUsageValue({ usage: { prompt_tokens: '21', completion_tokens: '12' } }), '输入 21 / 输出 12');
+});
+
+test('buildTokenUsageDisplay exposes remaining context for ring rendering', () => {
+  assert.deepEqual(buildTokenUsageDisplay({
+    usage: {
+      last: { total_tokens: '30' },
+      model_context_window: '120',
+    },
+  }), {
+    percentUsed: 25,
+    percentRemaining: 75,
+    label: '余量',
+    detail: '已用 25%',
+  });
 });
 
 test('formatWorkspaceLabel keeps only the folder name for sidebar display', () => {

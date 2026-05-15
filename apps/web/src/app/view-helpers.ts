@@ -1,5 +1,12 @@
 import type { ServerRequestItem, TimelineEntry } from '../store/appStore.js';
 
+export type TokenUsageDisplay = {
+  percentUsed: number | null;
+  percentRemaining: number | null;
+  label: string;
+  detail: string;
+};
+
 export function buildSessionNameFromPrompt(text: string): string {
   const firstLine = text
     .split('\n')
@@ -55,13 +62,23 @@ function clampPercentage(value: number): number {
   return value;
 }
 
-export function formatTokenUsageValue(value: unknown): string {
+export function buildTokenUsageDisplay(value: unknown): TokenUsageDisplay {
   const directNumber = readNumericTokenValue(value);
   if (directNumber !== null) {
-    return `总 ${directNumber}`;
+    return {
+      percentUsed: null,
+      percentRemaining: null,
+      label: '总量',
+      detail: `总 ${directNumber}`,
+    };
   }
   if (!value || typeof value !== 'object') {
-    return '未统计';
+    return {
+      percentUsed: null,
+      percentRemaining: null,
+      label: '上下文',
+      detail: '未统计',
+    };
   }
 
   const usage = value as Record<string, unknown>;
@@ -83,13 +100,24 @@ export function formatTokenUsageValue(value: unknown): string {
   const resolvedLastTotal = readNumericTokenValue(lastTotal) ?? readNumericTokenValue(nestedLastTotal);
 
   if (resolvedWindow !== null && resolvedWindow > 0 && resolvedLastTotal !== null) {
-    const percent = clampPercentage(Math.round((resolvedLastTotal / resolvedWindow) * 100));
-    return `${percent}%`;
+    const percentUsed = clampPercentage(Math.round((resolvedLastTotal / resolvedWindow) * 100));
+    const percentRemaining = clampPercentage(100 - percentUsed);
+    return {
+      percentUsed,
+      percentRemaining,
+      label: '余量',
+      detail: `已用 ${percentUsed}%`,
+    };
   }
 
   const resolvedTotal = readNumericTokenValue(total) ?? readNumericTokenValue(nestedTotal);
   if (resolvedTotal !== null) {
-    return `总 ${resolvedTotal}`;
+    return {
+      percentUsed: null,
+      percentRemaining: null,
+      label: '总量',
+      detail: `总 ${resolvedTotal}`,
+    };
   }
   const resolvedInput = readNumericTokenValue(input) ?? readNumericTokenValue(nestedInput);
   const resolvedOutput = readNumericTokenValue(output) ?? readNumericTokenValue(nestedOutput);
@@ -103,7 +131,20 @@ export function formatTokenUsageValue(value: unknown): string {
       : '',
   ].filter(Boolean);
 
-  return parts.length ? parts.join(' / ') : '未统计';
+  return {
+    percentUsed: null,
+    percentRemaining: null,
+    label: '总量',
+    detail: parts.length ? parts.join(' / ') : '未统计',
+  };
+}
+
+export function formatTokenUsageValue(value: unknown): string {
+  const display = buildTokenUsageDisplay(value);
+  if (display.percentUsed !== null) {
+    return `${display.percentUsed}%`;
+  }
+  return display.detail;
 }
 
 export function formatHealthStatus(status: string | undefined): string {

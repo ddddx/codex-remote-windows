@@ -1,5 +1,6 @@
 import type { CodexOptionModel } from '@codex-remote/protocol';
 import { useLayoutEffect, useMemo, useRef } from 'react';
+import type { TokenUsageDisplay } from '../../app/view-helpers.js';
 import { useAppStore } from '../../store/appStore.js';
 import { uploadImage } from '../../transport/http/uploads.js';
 
@@ -30,6 +31,7 @@ type ComposerDockProps = {
   modelOptions: CodexOptionModel[];
   defaults: ComposerPrefs;
   optionsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  tokenUsage: TokenUsageDisplay;
 };
 
 const REASONING_OPTIONS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -158,6 +160,7 @@ export function ComposerDock(props: ComposerDockProps) {
     modelOptions,
     defaults,
     optionsStatus,
+    tokenUsage,
   } = props;
 
   const effectiveModel = prefs.model || defaults.model;
@@ -273,6 +276,27 @@ export function ComposerDock(props: ComposerDockProps) {
             ))}
           </select>
         </label>
+
+        <div
+          id="contextUsage"
+          className={`context-usage-ring composer-controls-usage${tokenUsage.percentRemaining === null ? ' is-text-only' : ''}${tokenUsage.detail === '未统计' ? ' is-empty' : ''}`}
+          title={tokenUsage.detail}
+          aria-label={`上下文用量：${tokenUsage.detail}`}
+        >
+          {tokenUsage.percentRemaining !== null ? (
+            <div
+              className="context-usage-ring-visual"
+              style={{ ['--usage-ring-value' as string]: `${tokenUsage.percentRemaining}` }}
+              aria-hidden="true"
+            >
+              <span className="context-usage-ring-value">{tokenUsage.percentRemaining}%</span>
+            </div>
+          ) : null}
+          <div className="context-usage-ring-text">
+            <span className="context-usage-ring-label">{tokenUsage.label}</span>
+            <strong>{tokenUsage.percentRemaining !== null ? `剩余 ${tokenUsage.percentRemaining}%` : tokenUsage.detail}</strong>
+          </div>
+        </div>
       </div>
 
       <div className="composer-input-row">
@@ -343,7 +367,6 @@ export function ComposerDock(props: ComposerDockProps) {
           {busy ? '发送中…' : '发送'}
         </button>
       </div>
-
       {composerError ? <div className="status error">{composerError}</div> : null}
     </form>
   );

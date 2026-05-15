@@ -1355,6 +1355,10 @@ textarea {
   flex-wrap: wrap;
 }
 
+.composer-controls-usage {
+  margin-left: auto;
+}
+
 .composer-mobile-toggle {
   display: none;
   width: 100%;
@@ -1405,6 +1409,69 @@ textarea {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
+}
+
+.context-usage-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-strong) 92%, transparent);
+  color: var(--muted);
+}
+
+.context-usage-ring-visual {
+  --usage-ring-value: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle closest-side, var(--card-strong) 68%, transparent 70% 100%),
+    conic-gradient(var(--accent) calc(var(--usage-ring-value) * 1%), color-mix(in srgb, var(--line) 70%, transparent) 0);
+  flex: 0 0 auto;
+}
+
+.context-usage-ring-value {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.context-usage-ring-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.context-usage-ring-label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.context-usage-ring-text strong {
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.context-usage-ring.is-text-only {
+  padding-left: 10px;
+}
+
+.context-usage-ring.is-empty .context-usage-ring-text strong {
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .composer-attach-btn,
@@ -1879,6 +1946,11 @@ textarea {
   .composer-select-group {
     justify-content: space-between;
     gap: 10px;
+  }
+
+  .composer-controls-usage {
+    margin-left: 0;
+    align-self: stretch;
   }
 
   .composer-select-group span {
