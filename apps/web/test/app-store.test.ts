@@ -373,6 +373,36 @@ test('thread sync restores file change diff from structured output fields', () =
   assert.equal(fileEntry?.patch, '*** Begin Patch\n*** Update File: src/structured.ts\n+restored\n*** End Patch');
 });
 
+test('thread sync preserves per-change diffs when file change item has no top-level patch', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-change-level-diff',
+    turns: [{
+      id: 'turn-change-level-diff',
+      createdAt: 1,
+      items: [
+        {
+          id: 'file-change-level-1',
+          type: 'fileChange',
+          status: 'completed',
+          changes: [{
+            path: 'src/change-level.ts',
+            kind: 'update',
+            diff: '@@ -1 +1 @@\n-old\n+new',
+          }],
+        },
+      ],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-change-level-diff'] || [];
+  const fileEntry = entries.find((entry) => entry.id === 'file-change-level-1');
+  assert.equal(fileEntry?.patch, undefined);
+  assert.equal((fileEntry?.changes?.[0] as any)?.diff, '@@ -1 +1 @@\n-old\n+new');
+});
+
 test('thread sync merges turn diff into restored file change entry for the same turn', () => {
   resetStore();
 

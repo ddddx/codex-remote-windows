@@ -33,6 +33,7 @@ type RenderableFileChange = {
   kind?: string;
   addedLines?: number;
   deletedLines?: number;
+  diff?: string;
 };
 
 type ExpandableTimelineRowProps = {
@@ -308,7 +309,7 @@ function basenameLike(path: string | undefined): string {
 }
 
 function buildRenderableChangesFromSource(source: {
-  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number }>;
+  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number; diff?: string }>;
   patch?: string;
 }): RenderableFileChange[] {
   const explicit = Array.isArray(source.changes) ? source.changes : [];
@@ -328,12 +329,16 @@ function buildRenderableChangesFromSource(source: {
       kind: change.kind || fallback?.kind,
       addedLines: typeof change.addedLines === 'number' ? change.addedLines : fallback?.addedLines,
       deletedLines: typeof change.deletedLines === 'number' ? change.deletedLines : fallback?.deletedLines,
+      diff: typeof change.diff === 'string' ? change.diff : undefined,
     };
   });
 
   for (const change of derived) {
     if (!merged.some((item) => item.path === change.path)) {
-      merged.push(change);
+      merged.push({
+        ...change,
+        diff: undefined,
+      });
     }
   }
 
@@ -342,6 +347,21 @@ function buildRenderableChangesFromSource(source: {
 
 function buildRenderableChanges(entry: TimelineEntry): RenderableFileChange[] {
   return buildRenderableChangesFromSource(entry);
+}
+
+function buildRenderableDiffTextFromSource(source: {
+  patch?: string;
+  changes?: Array<{ diff?: string; path?: string }>;
+}): string {
+  if (typeof source.patch === 'string' && source.patch.trim()) {
+    return source.patch;
+  }
+  const changeDiffs = Array.isArray(source.changes)
+    ? source.changes
+      .map((change) => typeof change?.diff === 'string' ? change.diff.trim() : '')
+      .filter(Boolean)
+    : [];
+  return changeDiffs.join('\n');
 }
 
 function formatFileChangePrefix(kind: string | undefined): string {
@@ -628,6 +648,10 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
       );
     }
     if (entry.type === 'file_change' || entry.type === 'turn_diff') {
+      const diffText = buildRenderableDiffTextFromSource({
+        patch: entry.patch,
+        changes: entry.changes,
+      });
       return (
         <div className={`timeline-event kind-${kind} ${buildTimelineStateClass(entry)}`}>
           <div className="timeline-marker"><span className="timeline-marker-state" aria-hidden="true">{buildTimelineMarkerSymbol(entry)}</span></div>
@@ -650,7 +674,7 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
                       {entry.meta.join('\n')}
                     </div>
                   ) : null}
-                  {entry.patch ? renderDiffBlock(entry.patch) : null}
+                  {diffText ? renderDiffBlock(diffText) : null}
                 </>
               )}
             />
@@ -706,6 +730,10 @@ function ApprovalCard({
     changes: request.changes,
     patch: request.patch,
   });
+  const diffText = buildRenderableDiffTextFromSource({
+    patch: request.patch,
+    changes: request.changes,
+  });
 
   return (
     <div className="timeline-event kind-serverRequest">
@@ -718,7 +746,7 @@ function ApprovalCard({
             {[request.threadId || '全局', request.requestId, request.command || '', request.cwd || ''].filter(Boolean).join(' · ')}
           </div>
           {renderFileChangeList(renderableChanges, request.requestId)}
-          {request.patch ? renderDiffBlock(request.patch) : null}
+          {diffText ? renderDiffBlock(diffText) : null}
 
           {request.kind === 'user_input' && request.questions?.length ? (
             <div className="approval-form">

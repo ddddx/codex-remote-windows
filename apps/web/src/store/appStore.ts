@@ -36,7 +36,7 @@ export type TimelineEntry = {
   status?: string;
   meta?: string[];
   patch?: string;
-  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number }>;
+  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number; diff?: string }>;
   createdAt?: number;
   partial?: boolean;
   details?: unknown;
@@ -57,7 +57,7 @@ export type ServerRequestItem = {
   namespace?: string;
   serverName?: string;
   patch?: string;
-  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number }>;
+  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number; diff?: string }>;
   questions?: Array<{
     id?: string;
     question?: string;
@@ -531,6 +531,7 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
         kind: typeof change?.kind === 'string' ? change.kind : undefined,
         addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
         deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
+        diff: typeof change?.diff === 'string' ? change.diff : undefined,
       }))
       : undefined,
     questions: Array.isArray(request?.questions) ? request.questions : undefined,
@@ -608,6 +609,7 @@ function normalizeTimelineEntry(entry: TimelineEntry): TimelineEntry {
         ...change,
         addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
         deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
+        diff: typeof change?.diff === 'string' ? change.diff : undefined,
       }))
       : entry.changes,
     createdAt: normalizeTimestamp(entry.createdAt),
@@ -875,6 +877,7 @@ function createTimelineEntryFromItemEvent(
         kind: typeof (change as any)?.kind === 'string' ? (change as any).kind : '',
         addedLines: typeof (change as any)?.addedLines === 'number' ? (change as any).addedLines : undefined,
         deletedLines: typeof (change as any)?.deletedLines === 'number' ? (change as any).deletedLines : undefined,
+        diff: typeof (change as any)?.diff === 'string' ? (change as any).diff : undefined,
       }))
       : undefined;
     const patch = extractPatchText(item.patch)
@@ -1323,6 +1326,7 @@ function applyThreadSyncTimelineEvent(
             kind: typeof change?.kind === 'string' ? change.kind : '',
             addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
             deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
+            diff: typeof change?.diff === 'string' ? change.diff : undefined,
           }))
           : current?.changes,
         meta: message.delta ? [...(current?.meta || []), message.delta].slice(-8) : current?.meta,
@@ -2330,6 +2334,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
             kind: typeof change?.kind === 'string' ? change.kind : '',
             addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
             deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
+            diff: typeof change?.diff === 'string' ? change.diff : undefined,
           }))
           : current?.changes,
         meta: message.delta ? [...(current?.meta || []), message.delta].slice(-8) : current?.meta,
