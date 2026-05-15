@@ -8,6 +8,12 @@ function normalizeOptionalString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+const FALLBACK_CODEX_DEFAULTS = Object.freeze({
+  reasoningEffort: 'medium',
+  approvalPolicy: 'on-request',
+  sandboxMode: 'workspace-write',
+});
+
 export type CodexOptionsService = ReturnType<typeof createCodexOptionsService>;
 
 export function createCodexOptionsService(app: FastifyInstance) {
@@ -22,6 +28,9 @@ export function createCodexOptionsService(app: FastifyInstance) {
       ]);
 
       const config = configResponse?.config || {};
+      const defaultModel = normalizeOptionalString(config.model)
+        || normalizeOptionalString(models.find((model) => model?.isDefault === true)?.model)
+        || normalizeOptionalString(models[0]?.model);
 
       return {
         models: models.map((model) => ({
@@ -47,10 +56,10 @@ export function createCodexOptionsService(app: FastifyInstance) {
             : [],
         })),
         defaults: {
-          model: normalizeOptionalString(config.model),
-          reasoningEffort: normalizeOptionalString(config.model_reasoning_effort),
-          approvalPolicy: normalizeOptionalString(config.approval_policy),
-          sandboxMode: normalizeOptionalString(config.sandbox_mode),
+          model: defaultModel,
+          reasoningEffort: normalizeOptionalString(config.model_reasoning_effort) || FALLBACK_CODEX_DEFAULTS.reasoningEffort,
+          approvalPolicy: normalizeOptionalString(config.approval_policy) || FALLBACK_CODEX_DEFAULTS.approvalPolicy,
+          sandboxMode: normalizeOptionalString(config.sandbox_mode) || FALLBACK_CODEX_DEFAULTS.sandboxMode,
         },
       };
     },

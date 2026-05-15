@@ -171,3 +171,42 @@ test('workspace create-directory proxies to workspace manager', async () => {
   assert.equal(payload.path, 'C:\\workspace\\next');
   await app.close();
 });
+
+test('codex options fills effective defaults when config values are empty', async () => {
+  const app = await buildTestApp();
+  app.codexClient = {
+    ...app.codexClient,
+    async listModels() {
+      return [
+        {
+          id: 'gpt-5.5',
+          model: 'gpt-5.5',
+          displayName: 'GPT-5.5',
+          description: '',
+          isDefault: true,
+          defaultReasoningEffort: 'medium',
+          supportedReasoningEfforts: ['low', 'medium', 'high'],
+        },
+      ];
+    },
+    async readConfig() {
+      return { config: {} };
+    },
+  } as any;
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/codex/options',
+    headers: {
+      'x-codex-remote-token': 'secret-token',
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const payload = response.json();
+  assert.equal(payload.defaults.model, 'gpt-5.5');
+  assert.equal(payload.defaults.reasoningEffort, 'medium');
+  assert.equal(payload.defaults.approvalPolicy, 'on-request');
+  assert.equal(payload.defaults.sandboxMode, 'workspace-write');
+  await app.close();
+});

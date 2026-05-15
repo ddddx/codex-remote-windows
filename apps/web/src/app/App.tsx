@@ -31,6 +31,9 @@ const THEME_OPTIONS = [
 
 const APPROVAL_POLICY_OPTIONS = ['untrusted', 'on-request', 'never', 'on-failure'];
 const SANDBOX_MODE_OPTIONS = ['read-only', 'workspace-write', 'danger-full-access'];
+const DEFAULT_REASONING_EFFORT = 'medium';
+const DEFAULT_APPROVAL_POLICY = 'on-request';
+const DEFAULT_SANDBOX_MODE = 'workspace-write';
 
 function readThemePreference(): string {
   try {
@@ -180,9 +183,9 @@ function formatPermissionPresetLabel(value: string): string {
 function buildDefaultComposerPrefs(options: CodexOptionsResponse | null): ComposerPrefs {
   return {
     model: normalizeModel(options?.defaults.model || ''),
-    reasoningEffort: normalizeReasoningEffort(options?.defaults.reasoningEffort || ''),
-    approvalPolicy: normalizeApprovalPolicy(options?.defaults.approvalPolicy || ''),
-    sandboxMode: normalizeSandboxMode(options?.defaults.sandboxMode || ''),
+    reasoningEffort: normalizeReasoningEffort(options?.defaults.reasoningEffort || DEFAULT_REASONING_EFFORT),
+    approvalPolicy: normalizeApprovalPolicy(options?.defaults.approvalPolicy || DEFAULT_APPROVAL_POLICY),
+    sandboxMode: normalizeSandboxMode(options?.defaults.sandboxMode || DEFAULT_SANDBOX_MODE),
   };
 }
 
@@ -648,9 +651,9 @@ export function App() {
   const connectionTone = buildConnectionStatusTone(connectionStatus, health?.status);
   const unreadWarning = pendingApprovals > 0;
   const effectiveModel = activePrefs.model || normalizeModel(codexOptions?.defaults.model || '');
-  const effectiveReasoningEffort = activePrefs.reasoningEffort || normalizeReasoningEffort(codexOptions?.defaults.reasoningEffort || '');
-  const effectiveApprovalPolicy = activePrefs.approvalPolicy || normalizeApprovalPolicy(codexOptions?.defaults.approvalPolicy || '');
-  const effectiveSandboxMode = activePrefs.sandboxMode || normalizeSandboxMode(codexOptions?.defaults.sandboxMode || '');
+  const effectiveReasoningEffort = activePrefs.reasoningEffort || normalizeReasoningEffort(codexOptions?.defaults.reasoningEffort || DEFAULT_REASONING_EFFORT);
+  const effectiveApprovalPolicy = activePrefs.approvalPolicy || normalizeApprovalPolicy(codexOptions?.defaults.approvalPolicy || DEFAULT_APPROVAL_POLICY);
+  const effectiveSandboxMode = activePrefs.sandboxMode || normalizeSandboxMode(codexOptions?.defaults.sandboxMode || DEFAULT_SANDBOX_MODE);
   const permissionPresetValue = inferPermissionPresetValue(activePrefs.approvalPolicy, activePrefs.sandboxMode);
   const effectivePermissionPresetValue = inferPermissionPresetValue(effectiveApprovalPolicy, effectiveSandboxMode);
   const composerControlsSummary = [
