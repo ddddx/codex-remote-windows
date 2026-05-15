@@ -1357,6 +1357,7 @@ textarea {
 
 .composer-controls-usage {
   margin-left: auto;
+  position: relative;
 }
 
 .composer-mobile-toggle {
@@ -1411,16 +1412,24 @@ textarea {
   align-items: end;
 }
 
+.context-usage-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .context-usage-ring {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 4px 10px 4px 6px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: color-mix(in srgb, var(--card-strong) 92%, transparent);
   color: var(--muted);
+  cursor: pointer;
 }
 
 .context-usage-ring-visual {
@@ -1444,32 +1453,47 @@ textarea {
   font-weight: 700;
 }
 
-.context-usage-ring-text {
-  min-width: 0;
-  display: flex;
+.context-usage-ring-visual-fallback {
+  background:
+    radial-gradient(circle closest-side, var(--card-strong) 68%, transparent 70% 100%),
+    conic-gradient(color-mix(in srgb, var(--line) 80%, transparent) 100%, color-mix(in srgb, var(--line) 80%, transparent) 0);
+}
+
+.context-usage-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 6;
+  min-width: 116px;
+  display: none;
   flex-direction: column;
-  gap: 1px;
-}
-
-.context-usage-ring-label {
-  font-size: 10px;
-  line-height: 1.2;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-strong);
   color: var(--muted);
-}
-
-.context-usage-ring-text strong {
-  font-size: 12px;
-  line-height: 1.2;
-  color: var(--ink);
-  font-weight: 700;
+  box-shadow: 0 12px 28px rgba(31, 26, 23, 0.14);
   white-space: nowrap;
 }
 
-.context-usage-ring.is-text-only {
-  padding-left: 10px;
+.context-usage-popover.is-open,
+.context-usage-anchor:hover .context-usage-popover {
+  display: flex;
 }
 
-.context-usage-ring.is-empty .context-usage-ring-text strong {
+.context-usage-popover strong {
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.context-usage-popover span {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.context-usage-ring.is-empty .context-usage-ring-value {
   color: var(--muted);
   font-weight: 600;
 }
@@ -1950,7 +1974,7 @@ textarea {
 
   .composer-controls-usage {
     margin-left: 0;
-    align-self: stretch;
+    align-self: flex-end;
   }
 
   .composer-select-group span {

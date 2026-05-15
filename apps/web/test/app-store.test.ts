@@ -565,7 +565,7 @@ test('thread sync does not synthesize user text from assistant items and restore
 
   const entries = useAppStore.getState().timeline.entriesBySessionId['thread-context'] || [];
   assert.equal(entries.filter((entry) => entry.role === 'user').length, 0);
-  assert.ok(entries.some((entry) => entry.id === 'turn-context:assistant-1' && entry.role === 'assistant'));
+  assert.ok(entries.some((entry) => entry.id === 'assistant-1' && entry.role === 'assistant'));
   assert.ok(entries.some((entry) => entry.id === 'compact-1' && entry.type === 'context_compaction'));
 });
 
@@ -592,7 +592,7 @@ test('thread sync restores assistant message text from structured agentMessage c
   } as any);
 
   const entries = useAppStore.getState().timeline.entriesBySessionId['thread-structured-assistant'] || [];
-  assert.ok(entries.some((entry) => entry.id === 'turn-structured-assistant:assistant-structured' && entry.text === '结构化助手回复'));
+  assert.ok(entries.some((entry) => entry.id === 'assistant-structured' && entry.text === '结构化助手回复'));
 });
 
 test('thread sync restores assistant fallback text from structured turn output', () => {
@@ -658,12 +658,86 @@ test('thread sync preserves within-turn item order when items have no timestamps
     .filter((entry) => entry.turnId === 'turn-order');
   assert.deepEqual(
     entries.map((entry) => entry.id),
-    ['turn-order:user-1', 'turn-order:assistant-1', 'change-1', 'turn-order:assistant-2'],
+    ['user-1', 'assistant-1', 'change-1', 'assistant-2'],
   );
   assert.deepEqual(
     entries.map((entry) => entry.createdAt),
     [baseTime, baseTime + 1, baseTime + 2, baseTime + 3],
   );
+});
+
+test('thread sync reuses stable item ids and drops duplicate optimistic user entries after reconnect', () => {
+  resetStore();
+
+  useAppStore.getState().appendTimelineEntry('thread-reconnect', {
+    id: 'local-user:web-1',
+    type: 'message',
+    role: 'user',
+    turnId: 'thread-reconnect:pending-turn',
+    text: 'push',
+    createdAt: 10,
+  });
+
+  mapServerMessageToStore({
+    type: 'item_completed',
+    threadId: 'thread-reconnect',
+    turnId: 'turn-reconnect',
+    item: {
+      id: 'assistant-rt-1',
+      type: 'agentMessage',
+      text: '准备推送',
+      createdAt: 11,
+    },
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'item_completed',
+    threadId: 'thread-reconnect',
+    turnId: 'turn-reconnect',
+    item: {
+      id: 'cmd-rt-1',
+      type: 'commandExecution',
+      command: 'git push origin main',
+      status: 'completed',
+      createdAt: 12,
+    },
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-reconnect',
+    turns: [{
+      id: 'turn-reconnect',
+      createdAt: 10,
+      updatedAt: 13,
+      items: [
+        {
+          id: 'user-rt-1',
+          type: 'userMessage',
+          content: [{ type: 'input_text', text: 'push' }],
+          createdAt: 10,
+        },
+        {
+          id: 'assistant-rt-1',
+          type: 'agentMessage',
+          text: '准备推送',
+          createdAt: 11,
+        },
+        {
+          id: 'cmd-rt-1',
+          type: 'commandExecution',
+          command: 'git push origin main',
+          status: 'completed',
+          createdAt: 12,
+        },
+      ],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-reconnect'] || [];
+  assert.equal(entries.filter((entry) => entry.role === 'user' && entry.text === 'push').length, 1);
+  assert.equal(entries.filter((entry) => entry.id === 'assistant-rt-1').length, 1);
+  assert.equal(entries.filter((entry) => entry.id === 'cmd-rt-1').length, 1);
 });
 
 test('state and thread sync preserve usable token usage for active session header', () => {

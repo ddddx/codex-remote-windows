@@ -699,6 +699,47 @@ function mergeTimelineEntryLists(existing: TimelineEntry[], incoming: TimelineEn
   return Array.from(merged.values()).sort(compareTimelineEntries);
 }
 
+function dedupeOptimisticUserEntries(entries: TimelineEntry[]): TimelineEntry[] {
+  const authoritativeUsers = entries.filter((entry) => (
+    entry.role === 'user'
+    && !entry.id.startsWith('local-user:')
+    && typeof entry.text === 'string'
+    && entry.text.trim()
+  ));
+
+  if (!authoritativeUsers.length) {
+    return entries;
+  }
+
+  return entries.filter((entry) => {
+    const entryText = typeof entry.text === 'string' ? entry.text.trim() : '';
+    if (
+      entry.role !== 'user'
+      || !entry.id.startsWith('local-user:')
+      || !entryText
+    ) {
+      return true;
+    }
+
+    return !authoritativeUsers.some((authoritative) => {
+      const authoritativeText = typeof authoritative.text === 'string' ? authoritative.text.trim() : '';
+      if (authoritativeText !== entryText) {
+        return false;
+      }
+      if (authoritative.turnId && entry.turnId && authoritative.turnId === entry.turnId) {
+        return true;
+      }
+      if (entry.turnId?.endsWith(':pending-turn')) {
+        return true;
+      }
+      if (typeof authoritative.createdAt === 'number' && typeof entry.createdAt === 'number') {
+        return Math.abs(authoritative.createdAt - entry.createdAt) <= 5 * 60 * 1000;
+      }
+      return false;
+    });
+  });
+}
+
 function extractPatchText(value: unknown): string | undefined {
   if (typeof value === 'string') {
     return value.trim() ? value : undefined;
@@ -1428,7 +1469,7 @@ function mergeThreadSyncEntries(
     entries = mergeTurnDiffIntoFileChangeEntry(entries, message.threadId, turnId, diff);
   }
 
-  return entries;
+  return dedupeOptimisticUserEntries(entries);
 }
 
 function extractTokenUsageFromThreadSync(
@@ -1480,7 +1521,7 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
           .join('\n');
         if (text) {
           entries.push({
-            id: `${turnId}:${item.id || 'user'}`,
+            id: typeof item?.id === 'string' ? item.id : `${turnId}:user`,
             type: 'message',
             role: 'user',
             turnId,
@@ -1501,7 +1542,7 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
           continue;
         }
         entries.push({
-          id: `${turnId}:${item.id || 'assistant'}`,
+          id: typeof item?.id === 'string' ? item.id : `${turnId}:assistant`,
           type: 'message',
           role: 'assistant',
           turnId,
@@ -1515,7 +1556,7 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
 
       if (item?.type === 'commandExecution') {
         entries.push({
-          id: `${turnId}:${item.id || 'command'}`,
+          id: typeof item?.id === 'string' ? item.id : `${turnId}:command`,
           type: 'command',
           role: 'system',
           turnId,

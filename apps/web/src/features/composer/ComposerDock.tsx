@@ -1,5 +1,5 @@
 import type { CodexOptionModel } from '@codex-remote/protocol';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TokenUsageDisplay } from '../../app/view-helpers.js';
 import { useAppStore } from '../../store/appStore.js';
 import { uploadImage } from '../../transport/http/uploads.js';
@@ -179,6 +179,8 @@ export function ComposerDock(props: ComposerDockProps) {
   const removeAttachment = useAppStore((state) => state.removeAttachment);
   const token = useAppStore((state) => state.auth.token);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const usagePopoverRef = useRef<HTMLDivElement | null>(null);
+  const [usagePopoverOpen, setUsagePopoverOpen] = useState(false);
   const attachments = useMemo(() => {
     const key = activeSessionId || '__new__';
     return attachmentsBySessionId[key] || [];
@@ -201,6 +203,25 @@ export function ComposerDock(props: ComposerDockProps) {
     textarea.style.overflowY = 'hidden';
     textarea.scrollTop = 0;
   }, [resetSignal]);
+
+  useEffect(() => {
+    if (!usagePopoverOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent | TouchEvent) {
+      if (!usagePopoverRef.current?.contains(event.target as Node)) {
+        setUsagePopoverOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [usagePopoverOpen]);
 
   if (!activeSessionId) {
     return (
@@ -278,23 +299,37 @@ export function ComposerDock(props: ComposerDockProps) {
         </label>
 
         <div
-          id="contextUsage"
-          className={`context-usage-ring composer-controls-usage${tokenUsage.percentRemaining === null ? ' is-text-only' : ''}${tokenUsage.detail === '未统计' ? ' is-empty' : ''}`}
-          title={tokenUsage.detail}
-          aria-label={`上下文用量：${tokenUsage.detail}`}
+          ref={usagePopoverRef}
+          className={`context-usage-anchor composer-controls-usage${usagePopoverOpen ? ' is-open' : ''}`}
+          onMouseEnter={() => setUsagePopoverOpen(true)}
+          onMouseLeave={() => setUsagePopoverOpen(false)}
         >
-          {tokenUsage.percentRemaining !== null ? (
-            <div
-              className="context-usage-ring-visual"
-              style={{ ['--usage-ring-value' as string]: `${tokenUsage.percentRemaining}` }}
-              aria-hidden="true"
-            >
-              <span className="context-usage-ring-value">{tokenUsage.percentRemaining}%</span>
-            </div>
-          ) : null}
-          <div className="context-usage-ring-text">
-            <span className="context-usage-ring-label">{tokenUsage.label}</span>
-            <strong>{tokenUsage.percentRemaining !== null ? `剩余 ${tokenUsage.percentRemaining}%` : tokenUsage.detail}</strong>
+          <button
+            id="contextUsage"
+            className={`context-usage-ring${tokenUsage.percentRemaining === null ? ' is-text-only' : ''}${tokenUsage.detail === '未统计' ? ' is-empty' : ''}`}
+            type="button"
+            aria-label={`上下文用量：${tokenUsage.detail}`}
+            aria-expanded={usagePopoverOpen ? 'true' : 'false'}
+            onClick={() => setUsagePopoverOpen((value) => !value)}
+          >
+            {tokenUsage.percentRemaining !== null ? (
+              <div
+                className="context-usage-ring-visual"
+                style={{ ['--usage-ring-value' as string]: `${tokenUsage.percentRemaining}` }}
+                aria-hidden="true"
+              >
+                <span className="context-usage-ring-value">{tokenUsage.percentRemaining}%</span>
+              </div>
+            ) : (
+              <div className="context-usage-ring-visual context-usage-ring-visual-fallback" aria-hidden="true">
+                <span className="context-usage-ring-value">-</span>
+              </div>
+            )}
+          </button>
+          <div className={`context-usage-popover${usagePopoverOpen ? ' is-open' : ''}`} role="status">
+            <strong>{tokenUsage.label}</strong>
+            <span>{tokenUsage.percentRemaining !== null ? `剩余 ${tokenUsage.percentRemaining}%` : tokenUsage.detail}</span>
+            {tokenUsage.percentRemaining !== null ? <span>{tokenUsage.detail}</span> : null}
           </div>
         </div>
       </div>
