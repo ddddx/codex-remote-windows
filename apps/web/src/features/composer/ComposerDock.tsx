@@ -17,8 +17,6 @@ type ComposerDockProps = {
   resetSignal: number;
   busy: boolean;
   composerError: string;
-  workspacePath: string;
-  setWorkspacePath: (value: string) => void;
   tokenReady: boolean;
   activeSessionId: string | null;
   controlsOpen: boolean;
@@ -35,9 +33,7 @@ type ComposerDockProps = {
 };
 
 const REASONING_OPTIONS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-const APPROVAL_OPTIONS = ['', 'untrusted', 'on-request', 'never', 'on-failure'];
-const SANDBOX_OPTIONS = ['', 'read-only', 'workspace-write', 'danger-full-access'];
-const PRESET_OPTIONS = ['', 'read-only', 'auto', 'full-access', 'custom'];
+const PRESET_OPTIONS = ['', 'read-only', 'auto', 'full-access'];
 const MIN_TEXTAREA_HEIGHT = 42;
 const MAX_TEXTAREA_HEIGHT = 88;
 
@@ -114,10 +110,17 @@ function formatPresetLabel(value: string): string {
   if (value === 'full-access') {
     return 'Full Access';
   }
-  if (value === 'custom') {
-    return '自定义';
-  }
   return value;
+}
+
+function formatPresetDisplayLabel(value: string, approvalPolicy: string, sandboxMode: string): string {
+  if (value) {
+    return formatPresetLabel(value);
+  }
+  if (approvalPolicy && sandboxMode) {
+    return `${formatApprovalLabel(approvalPolicy)} / ${formatSandboxLabel(sandboxMode)}`;
+  }
+  return '未设置';
 }
 
 function syncTextareaHeight(textarea: HTMLTextAreaElement, value: string) {
@@ -142,8 +145,6 @@ export function ComposerDock(props: ComposerDockProps) {
     resetSignal,
     busy,
     composerError,
-    workspacePath,
-    setWorkspacePath,
     tokenReady,
     activeSessionId,
     controlsOpen,
@@ -164,6 +165,11 @@ export function ComposerDock(props: ComposerDockProps) {
   const effectiveApprovalPolicy = prefs.approvalPolicy || defaults.approvalPolicy;
   const effectiveSandboxMode = prefs.sandboxMode || defaults.sandboxMode;
   const resolvedPermissionPresetValue = permissionPresetValue || effectivePermissionPresetValue;
+  const resolvedPermissionPresetLabel = formatPresetDisplayLabel(
+    resolvedPermissionPresetValue,
+    effectiveApprovalPolicy,
+    effectiveSandboxMode,
+  );
 
   const attachmentsBySessionId = useAppStore((state) => state.composer.attachmentsBySessionId);
   const addAttachment = useAppStore((state) => state.addAttachment);
@@ -262,37 +268,7 @@ export function ComposerDock(props: ComposerDockProps) {
           >
             {PRESET_OPTIONS.map((value) => (
               <option key={value || 'default'} value={value}>
-                {value ? formatPresetLabel(value) : formatPresetLabel(resolvedPermissionPresetValue)}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="composer-select-group">
-          <span>执行批准</span>
-          <select
-            id="approvalPolicySelect"
-            value={prefs.approvalPolicy}
-            onChange={(event) => onPrefsChange({ approvalPolicy: event.target.value })}
-          >
-            {APPROVAL_OPTIONS.map((value) => (
-              <option key={value || 'default'} value={value}>
-                {value ? formatApprovalLabel(value) : formatApprovalLabel(effectiveApprovalPolicy)}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="composer-select-group">
-          <span>权限范围</span>
-          <select
-            id="sandboxModeSelect"
-            value={prefs.sandboxMode}
-            onChange={(event) => onPrefsChange({ sandboxMode: event.target.value })}
-          >
-            {SANDBOX_OPTIONS.map((value) => (
-              <option key={value || 'default'} value={value}>
-                {value ? formatSandboxLabel(value) : formatSandboxLabel(effectiveSandboxMode)}
+                {value ? formatPresetLabel(value) : resolvedPermissionPresetLabel}
               </option>
             ))}
           </select>

@@ -158,7 +158,7 @@ function inferPermissionPresetValue(approvalPolicy: string, sandboxMode: string)
       return value;
     }
   }
-  return 'custom';
+  return '';
 }
 
 function formatPermissionPresetLabel(value: string): string {
@@ -174,10 +174,17 @@ function formatPermissionPresetLabel(value: string): string {
   if (value === 'full-access') {
     return 'Full Access';
   }
-  if (value === 'custom') {
-    return '自定义';
-  }
   return value;
+}
+
+function formatPermissionPresetSummary(value: string, approvalPolicy: string, sandboxMode: string): string {
+  if (value) {
+    return formatPermissionPresetLabel(value);
+  }
+  if (approvalPolicy && sandboxMode) {
+    return `${formatApprovalPolicyLabel(approvalPolicy)} / ${formatSandboxModeLabel(sandboxMode)}`;
+  }
+  return '未设置';
 }
 
 function buildDefaultComposerPrefs(options: CodexOptionsResponse | null): ComposerPrefs {
@@ -659,7 +666,7 @@ export function App() {
   const composerControlsSummary = [
     effectiveModel || '未设置',
     formatReasoningEffortLabel(effectiveReasoningEffort),
-    formatPermissionPresetLabel(effectivePermissionPresetValue || (effectiveApprovalPolicy || effectiveSandboxMode ? 'custom' : '')),
+    formatPermissionPresetSummary(effectivePermissionPresetValue, effectiveApprovalPolicy, effectiveSandboxMode),
   ].join(' · ');
 
   return (
@@ -799,8 +806,6 @@ export function App() {
               resetSignal={composerResetSignal}
               busy={Boolean(queuedPrompt)}
               composerError={composerError}
-              workspacePath={workspacePath}
-              setWorkspacePath={setWorkspacePath}
               tokenReady={Boolean(token)}
               activeSessionId={resolvedActiveSessionId}
               controlsOpen={composerControlsOpen}

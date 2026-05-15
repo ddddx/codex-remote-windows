@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.tmp/
 .codex-home/
 .codex-remote-uploads/
 .npm-cache/
