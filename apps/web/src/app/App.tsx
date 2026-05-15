@@ -72,7 +72,7 @@ function normalizeSandboxMode(value: string): string {
 
 function formatReasoningEffortLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'none') {
     return '关闭';
@@ -97,7 +97,7 @@ function formatReasoningEffortLabel(value: string): string {
 
 function formatApprovalPolicyLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'untrusted') {
     return '仅不受信命令需批准';
@@ -116,7 +116,7 @@ function formatApprovalPolicyLabel(value: string): string {
 
 function formatSandboxModeLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'read-only') {
     return '只读';
@@ -160,7 +160,7 @@ function inferPermissionPresetValue(approvalPolicy: string, sandboxMode: string)
 
 function formatPermissionPresetLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'read-only') {
     return 'Read Only';
@@ -647,11 +647,16 @@ export function App() {
   const activeTitle = activeSession?.name || 'Codex Remote Control';
   const connectionTone = buildConnectionStatusTone(connectionStatus, health?.status);
   const unreadWarning = pendingApprovals > 0;
+  const effectiveModel = activePrefs.model || normalizeModel(codexOptions?.defaults.model || '');
+  const effectiveReasoningEffort = activePrefs.reasoningEffort || normalizeReasoningEffort(codexOptions?.defaults.reasoningEffort || '');
+  const effectiveApprovalPolicy = activePrefs.approvalPolicy || normalizeApprovalPolicy(codexOptions?.defaults.approvalPolicy || '');
+  const effectiveSandboxMode = activePrefs.sandboxMode || normalizeSandboxMode(codexOptions?.defaults.sandboxMode || '');
   const permissionPresetValue = inferPermissionPresetValue(activePrefs.approvalPolicy, activePrefs.sandboxMode);
+  const effectivePermissionPresetValue = inferPermissionPresetValue(effectiveApprovalPolicy, effectiveSandboxMode);
   const composerControlsSummary = [
-    activePrefs.model || normalizeModel(codexOptions?.defaults.model || '') || '默认模型',
-    formatReasoningEffortLabel(activePrefs.reasoningEffort || normalizeReasoningEffort(codexOptions?.defaults.reasoningEffort || '')),
-    formatPermissionPresetLabel(permissionPresetValue),
+    effectiveModel || '未设置',
+    formatReasoningEffortLabel(effectiveReasoningEffort),
+    formatPermissionPresetLabel(effectivePermissionPresetValue || (effectiveApprovalPolicy || effectiveSandboxMode ? 'custom' : '')),
   ].join(' · ');
 
   return (
@@ -802,6 +807,7 @@ export function App() {
               onPrefsChange={updateComposerPrefs}
               onPresetChange={applyPermissionPreset}
               permissionPresetValue={permissionPresetValue}
+              effectivePermissionPresetValue={effectivePermissionPresetValue}
               modelOptions={codexOptions?.models || []}
               defaults={buildDefaultComposerPrefs(codexOptions)}
               optionsStatus={codexOptionsStatus}

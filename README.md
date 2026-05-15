@@ -1,27 +1,28 @@
 # Codex Remote Rebuild
 
-用于远程控制本机 Codex 会话的新架构版本。当前主链路已经切到 monorepo：
+用于远程控制本机 Codex 会话的 monorepo 项目。当前主运行链路是：
 
-- `apps/server`: Fastify + WebSocket server
-- `apps/web`: React + Vite 控制台
-- `packages/protocol`: shared HTTP / WS types 与 schemas
-- `packages/domain`: domain entities / factories / repositories
-- `packages/adapters`: SQLite 与 legacy import adapters
+- `apps/server`：Fastify + WebSocket 服务端
+- `apps/web`：React + Vite 控制台
+- `packages/protocol`：前后端共享协议类型
+- `packages/domain`：领域模型与接口定义
+- `packages/adapters`：SQLite 与 legacy 导入适配层
 
-运行时已经完全切到新 `server + web` 链路，不再依赖旧兼容层。
+服务端会在本机连接 Codex app-server，对外提供网页控制台、工作区接口、上传接口和 WebSocket 实时消息。
 
-## 能力
+## 当前能力
 
-- 会话列表、会话创建、线程同步
-- prompt 发送与实时 timeline
-- turn 分组、reasoning / plan / command / file change 语义展示
-- 内联审批与 inspector 审批面板
-- workspace 浏览与建目录
-- 图片上传与附件发送
+- 会话列表、创建会话、关闭会话标签
+- 线程同步与时间线展示
+- reasoning / plan / command / file change / approval 语义渲染
+- 内联审批与 `request_user_input` 响应
+- 工作区浏览、目录选择、建目录
+- 图片上传并作为附件发送
 - SQLite 持久化
-- legacy JSON 状态导入
+- legacy JSON 状态迁移
+- WebSocket Token 鉴权
 
-## 环境
+## 环境要求
 
 - Windows
 - Node.js 22+
@@ -33,67 +34,40 @@
 npm install
 ```
 
-## 启动
+## 启动方式
 
-开发模式:
+开发模式：
 
 ```bash
 npm run dev:web
 npm run dev:server
 ```
 
-生产模式:
+生产模式：
 
 ```bash
 npm start
 ```
 
-默认地址:
+默认地址：
 
-- dev web: `http://127.0.0.1:5173`
-- server: `http://127.0.0.1:18637`
+- web dev：`http://127.0.0.1:5173`
+- server：`http://127.0.0.1:18637`
 
-## 关键命令
+生产模式下，server 会直接托管 `apps/web/dist`。
 
-类型检查:
+## 本地配置
 
-```bash
-npm run typecheck
-```
+服务端启动时会优先读取仓库根目录的 `config.local.json`。
 
-workspace tests:
+如果这个文件不存在，server 会自动生成一个，至少包含：
 
-```bash
-npm test
-```
+- `PORT`
+- `WS_TOKEN`
+- `CODEX_CMD`
+- `CODEX_APP_SERVER_WS`
 
-integration:
-
-```bash
-npm run test:integration
-```
-
-e2e:
-
-```bash
-npm run test:e2e
-```
-
-legacy state migration:
-
-```bash
-npm run migrate:legacy-state
-```
-
-可选参数:
-
-```bash
-npm run migrate:legacy-state -- --sqlite-file .codex-remote.sqlite --app-state .codex-remote-state.json --window-map .window-map.json
-```
-
-## 配置
-
-server 读取这些变量:
+当前代码实际读取的环境变量有：
 
 - `HOST`
 - `PORT`
@@ -101,12 +75,56 @@ server 读取这些变量:
 - `NODE_ENV`
 - `MAX_IMAGE_UPLOAD_BYTES`
 - `SQLITE_FILE`
-- `CODEX_CMD`
-- `CODEX_HOME`
-- `CODEX_CONNECT_TIMEOUT`
-- `CODEX_REQUEST_TIMEOUT`
 
-`config.local.json` 固定放在仓库根目录，仅作为新 server 的本地环境文件来源。
+说明：
+
+- `WS_TOKEN` 用于 WebSocket 和部分 HTTP 接口鉴权
+- `SQLITE_FILE` 默认是 `.codex-remote.sqlite`
+- 图片上传目录默认在仓库根目录下的 `.codex-remote-uploads/`
+
+## 常用命令
+
+类型检查：
+
+```bash
+npm run typecheck
+```
+
+单元/工作区测试：
+
+```bash
+npm test
+```
+
+集成测试：
+
+```bash
+npm run test:integration
+```
+
+E2E：
+
+```bash
+npm run test:e2e
+```
+
+构建：
+
+```bash
+npm run build
+```
+
+legacy 状态迁移：
+
+```bash
+npm run migrate:legacy-state
+```
+
+可选参数：
+
+```bash
+npm run migrate:legacy-state -- --sqlite-file .codex-remote.sqlite --app-state .codex-remote-state.json --window-map .window-map.json
+```
 
 ## 项目结构
 
@@ -122,32 +140,19 @@ cc-workspace/
 ├── docs/
 ├── scripts/
 ├── test/
-├── tests/
-│   ├── e2e/
-│   └── integration/
+└── tests/
+    ├── e2e/
+    └── integration/
 ```
 
-## 迁移与切换
+## 文档
 
-执行顺序:
-
-1. `npm run typecheck`
-2. `npm test`
-3. `npm run test:integration`
-4. `npm run test:e2e`
-5. `npm run migrate:legacy-state`
-
-详细执行文档见:
-
+- `docs/current-behavior.md`
+- `docs/manual-regression-checklist.md`
 - `docs/migration-runbook.md`
 - `docs/implementation-roadmap.md`
 - `docs/rebuild-plan.md`
 
-## 当前状态
+## 友情链接
 
-当前 rebuild 已完成以下验证:
-
-- workspace typecheck 通过
-- package tests 通过
-- integration tests 通过
-- Playwright E2E 通过
+- [Linux.do](https://linux.do)

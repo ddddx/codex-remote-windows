@@ -28,6 +28,7 @@ type ComposerDockProps = {
   onPrefsChange: (next: Partial<ComposerPrefs>) => void;
   onPresetChange: (value: string) => void;
   permissionPresetValue: string;
+  effectivePermissionPresetValue: string;
   modelOptions: CodexOptionModel[];
   defaults: ComposerPrefs;
   optionsStatus: 'idle' | 'loading' | 'ready' | 'error';
@@ -42,7 +43,7 @@ const MAX_TEXTAREA_HEIGHT = 88;
 
 function formatReasoningLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'none') {
     return '关闭';
@@ -67,7 +68,7 @@ function formatReasoningLabel(value: string): string {
 
 function formatApprovalLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'untrusted') {
     return '仅不受信命令需批准';
@@ -86,7 +87,7 @@ function formatApprovalLabel(value: string): string {
 
 function formatSandboxLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'read-only') {
     return '只读';
@@ -102,7 +103,7 @@ function formatSandboxLabel(value: string): string {
 
 function formatPresetLabel(value: string): string {
   if (!value) {
-    return '跟随当前配置';
+    return '未设置';
   }
   if (value === 'read-only') {
     return 'Read Only';
@@ -152,10 +153,17 @@ export function ComposerDock(props: ComposerDockProps) {
     onPrefsChange,
     onPresetChange,
     permissionPresetValue,
+    effectivePermissionPresetValue,
     modelOptions,
     defaults,
     optionsStatus,
   } = props;
+
+  const effectiveModel = prefs.model || defaults.model;
+  const effectiveReasoningEffort = prefs.reasoningEffort || defaults.reasoningEffort;
+  const effectiveApprovalPolicy = prefs.approvalPolicy || defaults.approvalPolicy;
+  const effectiveSandboxMode = prefs.sandboxMode || defaults.sandboxMode;
+  const resolvedPermissionPresetValue = permissionPresetValue || effectivePermissionPresetValue;
 
   const attachmentsBySessionId = useAppStore((state) => state.composer.attachmentsBySessionId);
   const addAttachment = useAppStore((state) => state.addAttachment);
@@ -223,7 +231,7 @@ export function ComposerDock(props: ComposerDockProps) {
             disabled={optionsStatus === 'loading'}
             onChange={(event) => onPrefsChange({ model: event.target.value })}
           >
-            <option value="">{defaults.model ? `跟随当前配置（${defaults.model}）` : '跟随当前配置'}</option>
+            <option value="">{effectiveModel || '未设置'}</option>
             {modelOptions.map((item) => (
               <option key={item.id || item.model} value={item.model}>{item.displayName || item.model}</option>
             ))}
@@ -239,7 +247,7 @@ export function ComposerDock(props: ComposerDockProps) {
           >
             {REASONING_OPTIONS.map((value) => (
               <option key={value || 'default'} value={value}>
-                {value ? formatReasoningLabel(value) : (defaults.reasoningEffort ? `跟随当前配置（${formatReasoningLabel(defaults.reasoningEffort)}）` : '跟随当前配置')}
+                {value ? formatReasoningLabel(value) : formatReasoningLabel(effectiveReasoningEffort)}
               </option>
             ))}
           </select>
@@ -253,7 +261,9 @@ export function ComposerDock(props: ComposerDockProps) {
             onChange={(event) => onPresetChange(event.target.value)}
           >
             {PRESET_OPTIONS.map((value) => (
-              <option key={value || 'default'} value={value}>{formatPresetLabel(value)}</option>
+              <option key={value || 'default'} value={value}>
+                {value ? formatPresetLabel(value) : formatPresetLabel(resolvedPermissionPresetValue)}
+              </option>
             ))}
           </select>
         </label>
@@ -267,7 +277,7 @@ export function ComposerDock(props: ComposerDockProps) {
           >
             {APPROVAL_OPTIONS.map((value) => (
               <option key={value || 'default'} value={value}>
-                {value ? formatApprovalLabel(value) : (defaults.approvalPolicy ? `跟随当前配置（${formatApprovalLabel(defaults.approvalPolicy)}）` : '跟随当前配置')}
+                {value ? formatApprovalLabel(value) : formatApprovalLabel(effectiveApprovalPolicy)}
               </option>
             ))}
           </select>
@@ -282,7 +292,7 @@ export function ComposerDock(props: ComposerDockProps) {
           >
             {SANDBOX_OPTIONS.map((value) => (
               <option key={value || 'default'} value={value}>
-                {value ? formatSandboxLabel(value) : (defaults.sandboxMode ? `跟随当前配置（${formatSandboxLabel(defaults.sandboxMode)}）` : '跟随当前配置')}
+                {value ? formatSandboxLabel(value) : formatSandboxLabel(effectiveSandboxMode)}
               </option>
             ))}
           </select>
