@@ -1,12 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
-import fs from 'node:fs';
 import { URL } from 'node:url';
+import { allocateLoopbackWsUrl, findPreferredOfficialAppServer } from './app-server-discovery.js';
 import { terminateProcessTree } from './process-termination.js';
 
 type AppServerSupervisorOptions = {
   codexCmd?: string;
-  codexHome?: string | null;
   wsUrl?: string | null;
   cwd?: string;
   connectTimeoutMs?: number;
@@ -109,8 +108,7 @@ async function waitForAppServerReady(host: string, port: number, readyUrl: strin
 
 export class CodexAppServerSupervisor {
   readonly codexCmd: string;
-  readonly codexHome: string | null;
-  readonly wsUrl: string | null;
+  wsUrl: string | null;
   readonly cwd: string;
   readonly connectTimeoutMs: number;
   proc: ChildProcess | null;
@@ -119,7 +117,6 @@ export class CodexAppServerSupervisor {
 
   constructor(options: AppServerSupervisorOptions = {}) {
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
-    this.codexHome = options.codexHome || process.env.CODEX_HOME || null;
     this.wsUrl = options.wsUrl || process.env.CODEX_APP_SERVER_WS || null;
     this.cwd = options.cwd || process.cwd();
     this.connectTimeoutMs = parsePositiveInteger(options.connectTimeoutMs || process.env.CODEX_CONNECT_TIMEOUT, 10000);
@@ -129,14 +126,14 @@ export class CodexAppServerSupervisor {
   }
 
   get enabled(): boolean {
-    return Boolean(this.wsUrl);
+    return true;
+  }
+
+  getWsUrl(): string | null {
+    return this.wsUrl;
   }
 
   async ensureStarted(): Promise<void> {
-    if (!this.wsUrl) {
-      return;
-    }
-
     if (this.startPromise) {
       await this.startPromise;
       return;
@@ -152,7 +149,13 @@ export class CodexAppServerSupervisor {
 
   private async ensureStartedInternal(): Promise<void> {
     if (!this.wsUrl) {
-      return;
+      const discovered = await findPreferredOfficialAppServer(['ws://127.0.0.1:34792']).catch(() => null);
+      if (discovered) {
+        this.wsUrl = discovered.wsUrl;
+        this.managed = false;
+        return;
+      }
+      this.wsUrl = await allocateLoopbackWsUrl();
     }
 
     const parsed = new URL(this.wsUrl);
@@ -176,20 +179,12 @@ export class CodexAppServerSupervisor {
       throw new Error(`port ${targetHost}:${port} is already in use by a non-Codex service; expected ready endpoint at ${readyUrl}`);
     }
 
-    const env = { ...process.env };
-    if (this.codexHome) {
-      if (!fs.existsSync(this.codexHome)) {
-        fs.mkdirSync(this.codexHome, { recursive: true });
-      }
-      env.CODEX_HOME = this.codexHome;
-    }
-
     this.proc = spawn(
       this.codexCmd,
       ['app-server', '--listen', this.wsUrl],
       {
         cwd: this.cwd,
-        env,
+        env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         shell: true,

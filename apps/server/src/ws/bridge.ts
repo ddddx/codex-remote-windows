@@ -25,6 +25,9 @@ export function broadcastMessage(app: FastifyInstance, message: ServerMessage): 
 export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
   if (!app.runtimeState.codexStarted) {
     await app.appServerSupervisor.ensureStarted();
+    const wsUrl = app.appServerSupervisor.getWsUrl();
+    app.codexClient.setWsUrl(wsUrl);
+    app.windowManager.setAppServerWs(wsUrl);
     await app.codexClient.start();
     app.runtimeState.codexStarted = true;
   }

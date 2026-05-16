@@ -59,6 +59,7 @@ function createAppStub() {
       },
     },
     codexClient: {
+      setWsUrl() {},
       async start() {},
       async listThreads() {
         return [{
@@ -78,7 +79,13 @@ function createAppStub() {
     },
     appServerSupervisor: {
       async ensureStarted() {},
+      getWsUrl() {
+        return null;
+      },
       async stop() {},
+    },
+    windowManager: {
+      setAppServerWs() {},
     },
     windowAttachments: {
       async refreshAllTabsWindowStatus() {

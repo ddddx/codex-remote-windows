@@ -34,6 +34,7 @@ type WorkspaceManagerLike = {
 type CodexClientLike = {
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  setWsUrl: (wsUrl: string | null) => void;
   listThreads: (limit?: number) => Promise<Array<Record<string, unknown>>>;
   startThread: (options?: {
     name?: string | null;

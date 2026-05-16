@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import WebSocket from 'ws';
 import { terminateProcessTree } from './process-termination.js';
 
@@ -22,7 +21,6 @@ type StartTurnOptions = {
 
 type CodexClientOptions = {
   codexCmd?: string;
-  codexHome?: string | null;
   cwd?: string;
   wsUrl?: string | null;
   requestTimeoutMs?: number;
@@ -31,9 +29,8 @@ type CodexClientOptions = {
 
 export class CodexAppServerClient extends EventEmitter {
   readonly codexCmd: string;
-  readonly codexHome: string | null;
   readonly defaultCwd: string;
-  readonly wsUrl: string | null;
+  wsUrl: string | null;
   readonly requestTimeoutMs: number;
   readonly connectTimeoutMs: number;
   proc: ReturnType<typeof spawn> | null;
@@ -53,7 +50,6 @@ export class CodexAppServerClient extends EventEmitter {
   constructor(options: CodexClientOptions = {}) {
     super();
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
-    this.codexHome = options.codexHome || process.env.CODEX_HOME || null;
     this.defaultCwd = options.cwd || process.cwd();
     this.wsUrl = options.wsUrl || process.env.CODEX_APP_SERVER_WS || null;
     this.requestTimeoutMs = parsePositiveInteger(options.requestTimeoutMs)
@@ -83,10 +79,6 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     this.startPromise = (async () => {
-      if (this.codexHome && !fs.existsSync(this.codexHome)) {
-        fs.mkdirSync(this.codexHome, { recursive: true });
-      }
-
       if (this.wsUrl) {
         await this.startWebSocket();
       } else {
@@ -102,6 +94,13 @@ export class CodexAppServerClient extends EventEmitter {
     } finally {
       this.startPromise = null;
     }
+  }
+
+  setWsUrl(wsUrl: string | null): void {
+    if (this.started && this.wsUrl !== wsUrl) {
+      throw new Error('cannot change codex app-server websocket after client start');
+    }
+    this.wsUrl = wsUrl;
   }
 
   async stop() {
@@ -253,17 +252,12 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   private async startStdio() {
-    const env = { ...process.env };
-    if (this.codexHome) {
-      env.CODEX_HOME = this.codexHome;
-    }
-
     this.proc = spawn(
       this.codexCmd,
       ['app-server', '--listen', 'stdio://'],
       {
         cwd: this.defaultCwd,
-        env,
+        env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         shell: true,

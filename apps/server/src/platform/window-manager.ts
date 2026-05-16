@@ -206,13 +206,13 @@ function backupCorruptedJsonFile(filePath: string, error: Error, scope: string) 
 
 export class CodexWindowManager {
   readonly codexCmd: string;
-  readonly appServerWs: string;
+  appServerWs: string | null;
   readonly mapFile: string;
   map: Map<string, number>;
 
   constructor(options: { codexCmd?: string; appServerWs?: string; mapFile?: string } = {}) {
     this.codexCmd = options.codexCmd || process.env.CODEX_CMD || 'codex.cmd';
-    this.appServerWs = options.appServerWs || process.env.CODEX_APP_SERVER_WS || 'ws://127.0.0.1:34792';
+    this.appServerWs = options.appServerWs || process.env.CODEX_APP_SERVER_WS || null;
     this.mapFile = options.mapFile || process.env.WINDOW_MAP_FILE || resolveRepoPath('.window-map.json');
     this.map = new Map();
     this.load();
@@ -220,6 +220,9 @@ export class CodexWindowManager {
 
   async openWindow(threadId: string): Promise<number> {
     assertThreadId(threadId);
+    if (!this.appServerWs) {
+      throw new Error('codex app-server websocket is not ready');
+    }
     const escapedCmd = this.codexCmd.replace(/'/g, "''");
     const escapedWs = this.appServerWs.replace(/'/g, "''");
     const escapedThread = threadId.replace(/'/g, "''");
@@ -237,6 +240,10 @@ export class CodexWindowManager {
     this.map.set(threadId, pid);
     this.save();
     return pid;
+  }
+
+  setAppServerWs(appServerWs: string | null): void {
+    this.appServerWs = appServerWs;
   }
 
   async closeWindow(threadId: string): Promise<void> {

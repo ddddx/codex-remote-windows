@@ -110,6 +110,7 @@ function createAppStub() {
       },
     },
     codexClient: {
+      setWsUrl() {},
       async start() {},
       async stop() {},
       async listThreads() {
@@ -172,7 +173,13 @@ function createAppStub() {
     },
     appServerSupervisor: {
       async ensureStarted() {},
+      getWsUrl() {
+        return null;
+      },
       async stop() {},
+    },
+    windowManager: {
+      setAppServerWs() {},
     },
   };
 

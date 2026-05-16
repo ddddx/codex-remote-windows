@@ -8,8 +8,21 @@ export const CONFIG_FILE_NAME = 'config.local.json';
 export const DEFAULT_CONFIG = Object.freeze({
   PORT: 18637,
   CODEX_CMD: 'codex.cmd',
-  CODEX_APP_SERVER_WS: 'ws://127.0.0.1:34792',
 });
+
+const LOCAL_CONFIG_ENV_KEYS = new Set([
+  'HOST',
+  'PORT',
+  'WS_TOKEN',
+  'NODE_ENV',
+  'MAX_IMAGE_UPLOAD_BYTES',
+  'SQLITE_FILE',
+  'CODEX_CMD',
+  'CODEX_APP_SERVER_WS',
+  'CODEX_CONNECT_TIMEOUT',
+  'CODEX_REQUEST_TIMEOUT',
+  'WINDOW_MAP_FILE',
+]);
 
 function resolveConfigPath(): string {
   return path.join(repoRoot, CONFIG_FILE_NAME);
@@ -77,6 +90,9 @@ export function applyLocalConfig(): {
 
   for (const [key, value] of Object.entries(config)) {
     if (value == null || process.env[key] !== undefined) {
+      continue;
+    }
+    if (!LOCAL_CONFIG_ENV_KEYS.has(key)) {
       continue;
     }
     process.env[key] = String(value);
