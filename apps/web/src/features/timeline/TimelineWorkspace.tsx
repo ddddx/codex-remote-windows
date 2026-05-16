@@ -60,6 +60,15 @@ function MarkdownMessage({
   className: string;
   partial?: boolean;
 }) {
+  if (partial) {
+    return (
+      <div className={`${className} timeline-plain-text`}>
+        {text}
+        <span className="cursor">▌</span>
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
       <ReactMarkdown
@@ -71,7 +80,6 @@ function MarkdownMessage({
       >
         {text}
       </ReactMarkdown>
-      {partial ? <span className="cursor">▌</span> : null}
     </div>
   );
 }

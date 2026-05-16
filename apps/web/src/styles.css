@@ -818,6 +818,11 @@ textarea {
   word-break: break-word;
 }
 
+.timeline-plain-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .user-message-text > :first-child,
 .timeline-entry-text > :first-child {
   margin-top: 0;
