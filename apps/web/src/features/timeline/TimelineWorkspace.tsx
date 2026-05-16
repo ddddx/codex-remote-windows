@@ -856,43 +856,13 @@ const VirtualizedRenderable = memo(function VirtualizedRenderable({
   item,
   sessionId,
   onRespondApproval,
-  onMeasure,
 }: {
   item: TimelineRenderable;
   sessionId: string;
   onRespondApproval: (request: ServerRequestItem, response: unknown) => void;
-  onMeasure: (id: string, height: number) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) {
-      return;
-    }
-
-    const measure = () => {
-      const nextHeight = node.offsetHeight;
-      if (nextHeight > 0) {
-        onMeasure(item.id, nextHeight);
-      }
-    };
-
-    measure();
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      measure();
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [item.id, onMeasure]);
-
   return (
-    <div ref={containerRef} data-renderable-id={item.id}>
+    <div data-renderable-id={item.id}>
       {item.kind === 'entry'
         ? <TimelineEntryCard entry={item.entry} sessionId={sessionId} />
         : <ApprovalCard request={item.request} onRespond={onRespondApproval} />}
@@ -1278,12 +1248,10 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
   const stickToBottomRef = useRef(true);
   const previousFirstRenderedIdRef = useRef<string | null>(null);
   const prependAnchorRef = useRef<{ id: string; top: number } | null>(null);
-  const itemHeightsRef = useRef<Record<string, number>>({});
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [hasUnreadBelow, setHasUnreadBelow] = useState(false);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDERABLE_LIMIT);
   const [viewportState, setViewportState] = useState<ViewportState>({ listScrollTop: 0, viewportHeight: 0 });
-  const [heightVersion, setHeightVersion] = useState(0);
   const hideJumpNotice = () => {
     setShowJumpToBottom((value) => value ? false : value);
     setHasUnreadBelow((value) => value ? false : value);
@@ -1316,8 +1284,8 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
     [totalRenderableCount, visibleRenderables],
   );
   const itemHeights = useMemo(
-    () => visibleRenderables.map((item) => itemHeightsRef.current[item.id] || DEFAULT_RENDERABLE_HEIGHT),
-    [heightVersion, visibleRenderables],
+    () => visibleRenderables.map(() => DEFAULT_RENDERABLE_HEIGHT),
+    [visibleRenderables],
   );
   const virtualWindow = useMemo(
     () => buildVirtualWindow(itemHeights, viewportState.listScrollTop, viewportState.viewportHeight),
@@ -1358,8 +1326,6 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
       lastSignatureRef.current = '';
       previousFirstRenderedIdRef.current = null;
       prependAnchorRef.current = null;
-      itemHeightsRef.current = {};
-      setHeightVersion((value) => value + 1);
       setRenderLimit(INITIAL_RENDERABLE_LIMIT);
       window.requestAnimationFrame(() => {
         const currentBody = messagesRef.current;
@@ -1410,33 +1376,21 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
   }, [activeSessionId, contentSignature, firstVisibleRenderableId, updateViewportState]);
 
   useEffect(() => {
-    const body = messagesRef.current;
-    if (!body || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
+    const handleResize = () => {
+      const body = messagesRef.current;
+      if (!body) {
+        return;
+      }
       updateViewportState();
       if (!stickToBottomRef.current) {
         return;
       }
       body.scrollTop = body.scrollHeight;
       hideJumpNotice();
-    });
-    observer.observe(body);
-    return () => observer.disconnect();
-  }, [updateViewportState]);
-
-  const handleRenderableMeasure = (id: string, height: number) => {
-    const normalizedHeight = Math.max(1, Math.round(height));
-    if (itemHeightsRef.current[id] === normalizedHeight) {
-      return;
-    }
-    itemHeightsRef.current = {
-      ...itemHeightsRef.current,
-      [id]: normalizedHeight,
     };
-    setHeightVersion((value) => value + 1);
-  };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [updateViewportState]);
 
   return (
     <div className="timeline-shell">
@@ -1498,7 +1452,6 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
                   item={item}
                   sessionId={activeSessionId}
                   onRespondApproval={onRespondApproval}
-                  onMeasure={handleRenderableMeasure}
                 />
               ))}
             </div>
