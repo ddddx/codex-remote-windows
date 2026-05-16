@@ -301,6 +301,22 @@ export function ComposerDock(props: ComposerDockProps) {
           </select>
         </label>
 
+        <div className="composer-controls-usage">
+          <div className="context-usage-anchor">
+            <button
+              type="button"
+              className={`context-usage-ring${tokenUsage.percentRemaining === null ? ' is-empty' : ''}`}
+              aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
+              title={`${tokenUsage.label}：${tokenUsage.detail}`}
+            >
+              <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
+            </button>
+            <div className="context-usage-popover">
+              <strong>{tokenUsage.label}</strong>
+              <span>{tokenUsage.detail}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="composer-input-row">
