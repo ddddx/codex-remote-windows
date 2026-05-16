@@ -685,6 +685,7 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
                   {renderableChanges.map((change, index) => (
                     <span key={`${entry.id}-change-${index}`} className="tool-chip">
                       {[change.kind, change.path].filter(Boolean).join(': ')}
+                      {renderFileChangeStats(change)}
                     </span>
                   ))}
                 </div>
@@ -717,9 +718,17 @@ function TimelineEntryCard({ entry }: { entry: TimelineEntry }) {
                       ? ` · ${formatExecutionStatus(entry.status)}`
                       : ''}
                   </div>
-                  <pre className="timeline-inline-pre timeline-inline-pre-shell">{details.command || entry.text || '执行命令'}</pre>
+                  <MarkdownMessage
+                    className="timeline-inline-pre timeline-inline-pre-shell timeline-inline-markdown"
+                    text={details.command || entry.text || '执行命令'}
+                  />
                   {details.cwd ? <div className="timeline-inline-meta timeline-inline-meta-code">cwd: {details.cwd}</div> : null}
-                  {details.output ? <pre className="timeline-inline-pre timeline-inline-pre-output">{details.output}</pre> : null}
+                  {details.output ? (
+                    <MarkdownMessage
+                      className="timeline-inline-pre timeline-inline-pre-output timeline-inline-markdown"
+                      text={details.output}
+                    />
+                  ) : null}
                 </>
               }
             />

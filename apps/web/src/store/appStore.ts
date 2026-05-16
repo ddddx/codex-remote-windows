@@ -494,12 +494,18 @@ function extractTurnUserText(turn: any): string {
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
   const itemTextParts = items.flatMap((item: any) => {
-    if (item?.type === 'userMessage' && Array.isArray(item?.content)) {
-      return item.content
-        .map((part: any) => extractStructuredText(part))
-        .filter(Boolean);
+    if (item?.type !== 'userMessage') {
+      return [];
     }
-    return [];
+    return [
+      item.text,
+      item.content,
+      item.input,
+      item.message,
+      item.parts,
+    ]
+      .map((part: any) => extractStructuredText(part))
+      .filter(Boolean);
   });
   if (itemTextParts.length) {
     return itemTextParts.join('\n');
@@ -1266,8 +1272,14 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const item = items[itemIndex];
       const fallbackItemTime = createdAt + itemIndex;
-      if (item?.type === 'userMessage' && Array.isArray(item?.content)) {
-        const text = item.content
+      if (item?.type === 'userMessage') {
+        const text = [
+          item?.text,
+          item?.content,
+          item?.input,
+          item?.message,
+          item?.parts,
+        ]
           .map((part: any) => extractStructuredText(part))
           .filter(Boolean)
           .join('\n');
@@ -2056,7 +2068,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
 
   if (message.type === 'item_started') {
     const item = message.item as Record<string, unknown> | undefined;
-    const entry = createTimelineEntryFromItemEvent('item_started', message.threadId, item, message.turnId);
+    const entry = createTimelineEntryFromItemEvent('item_started', message.threadId, item, message.turnId, message.startedAt);
     if (entry) {
       store.upsertTimelineEntry(message.threadId, entry);
     }
@@ -2083,13 +2095,13 @@ export function mapServerMessageToStore(message: ServerMessage) {
           text: text.trim(),
           status: 'completed',
           partial: false,
-          createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+          createdAt: typeof item.createdAt === 'number' ? item.createdAt : message.completedAt,
         }));
       }
       return;
     }
 
-    const entry = createTimelineEntryFromItemEvent('item_completed', message.threadId, item, message.turnId);
+    const entry = createTimelineEntryFromItemEvent('item_completed', message.threadId, item, message.turnId, message.completedAt);
     if (entry) {
       store.upsertTimelineEntry(message.threadId, entry);
     }

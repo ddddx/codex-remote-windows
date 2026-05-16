@@ -170,6 +170,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     threadId: z.string(),
     turnId: z.string().optional(),
     item: z.unknown().optional(),
+    completedAt: z.number().optional(),
   }),
   z.object({
     type: z.literal('item_delta'),

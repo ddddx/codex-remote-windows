@@ -21,7 +21,7 @@ export type ServerMessage =
   | { type: 'agent_delta'; threadId: string; turnId?: string; itemId?: string; delta?: string; startedAt?: number }
   | { type: 'mcp_tool_progress'; threadId: string; turnId?: string; itemId?: string; message?: string; startedAt?: number }
   | { type: 'item_started'; threadId: string; turnId?: string; item?: unknown; startedAt?: number }
-  | { type: 'item_completed'; threadId: string; turnId?: string; item?: unknown }
+  | { type: 'item_completed'; threadId: string; turnId?: string; item?: unknown; completedAt?: number }
   | { type: 'item_delta'; threadId: string; turnId?: string; itemId?: string; method?: string; delta?: string; patch?: string; changes?: unknown[]; part?: unknown; startedAt?: number }
   | { type: 'codex_error'; threadId?: string; error?: unknown }
   | { type: 'backend_error'; message: string }

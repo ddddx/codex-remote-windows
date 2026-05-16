@@ -275,6 +275,11 @@ export function handleCodexNotification(
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
       item: params.item,
+      completedAt: typeof params.completedAt === 'number'
+        ? params.completedAt
+        : typeof params.completedAtMs === 'number'
+          ? params.completedAtMs
+          : Date.now(),
     });
     return;
   }

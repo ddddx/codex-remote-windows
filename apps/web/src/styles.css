@@ -1154,6 +1154,26 @@ textarea {
   background: color-mix(in srgb, var(--surface-soft) 70%, transparent);
 }
 
+.timeline-inline-markdown p {
+  margin: 0 0 8px;
+}
+
+.timeline-inline-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.timeline-inline-markdown pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--cmd-output-bg);
+  overflow-x: auto;
+}
+
+.timeline-inline-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .timeline-inline-diff {
   border: 1px solid rgba(123, 110, 93, 0.12);
   border-radius: 12px;
@@ -1215,6 +1235,9 @@ textarea {
   border-radius: 14px;
   background: var(--surface-soft);
   color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .file-change-list {

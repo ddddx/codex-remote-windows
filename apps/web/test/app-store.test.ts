@@ -618,6 +618,34 @@ test('thread sync restores assistant fallback text from structured turn output',
   assert.ok(entries.some((entry) => entry.role === 'user' && entry.text === '用户问题'));
 });
 
+test('thread sync restores user message text from direct userMessage text fields', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-direct-user-text',
+    turns: [{
+      id: 'turn-direct-user-text',
+      createdAt: 1,
+      items: [
+        {
+          id: 'user-direct',
+          type: 'userMessage',
+          text: '直接用户消息',
+        },
+        {
+          id: 'assistant-direct',
+          type: 'agentMessage',
+          text: '助手回复',
+        },
+      ],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-direct-user-text'] || [];
+  assert.ok(entries.some((entry) => entry.id === 'user-direct' && entry.role === 'user' && entry.text === '直接用户消息'));
+});
+
 test('thread sync preserves within-turn item order when items have no timestamps', () => {
   resetStore();
   const baseTime = 1_700_000_000_000;
@@ -738,6 +766,42 @@ test('thread sync reuses stable item ids and drops duplicate optimistic user ent
   assert.equal(entries.filter((entry) => entry.role === 'user' && entry.text === 'push').length, 1);
   assert.equal(entries.filter((entry) => entry.id === 'assistant-rt-1').length, 1);
   assert.equal(entries.filter((entry) => entry.id === 'cmd-rt-1').length, 1);
+});
+
+test('real-time item started uses server event time so command stays after pending user prompt', () => {
+  resetStore();
+  const userTime = 1_700_000_000_100;
+  const commandTime = 1_700_000_000_101;
+
+  useAppStore.getState().appendTimelineEntry('thread-live-order', {
+    id: 'local-user:web-live-order',
+    type: 'message',
+    role: 'user',
+    turnId: 'thread-live-order:pending-turn',
+    text: 'run tests',
+    createdAt: userTime,
+  });
+
+  mapServerMessageToStore({
+    type: 'item_started',
+    threadId: 'thread-live-order',
+    turnId: 'turn-live-order',
+    startedAt: commandTime,
+    item: {
+      id: 'cmd-live-order',
+      type: 'commandExecution',
+      command: 'npm test',
+      status: 'running',
+    },
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-live-order'] || [];
+  const renderOrder = [...entries].sort((left, right) => (left.createdAt || 0) - (right.createdAt || 0));
+  assert.deepEqual(
+    renderOrder.map((entry) => entry.id),
+    ['local-user:web-live-order', 'cmd-live-order'],
+  );
+  assert.equal(entries.find((entry) => entry.id === 'cmd-live-order')?.createdAt, commandTime);
 });
 
 test('state and thread sync preserve usable token usage for active session header', () => {
