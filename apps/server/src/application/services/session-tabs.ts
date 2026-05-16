@@ -11,6 +11,8 @@ export type RuntimeTab = {
   windowStatus: string;
   approvalPolicy?: string;
   sandboxMode?: string;
+  model?: string;
+  reasoningEffort?: string;
   tokenUsage?: unknown;
 };
 
@@ -55,6 +57,14 @@ export function normalizeTab(source: Record<string, unknown>): RuntimeTab {
     normalized.sandboxMode = source.sandboxMode;
   }
 
+  if (typeof source.model === 'string') {
+    normalized.model = source.model;
+  }
+
+  if (typeof source.reasoningEffort === 'string') {
+    normalized.reasoningEffort = source.reasoningEffort;
+  }
+
   return normalized;
 }
 
@@ -74,11 +84,13 @@ export function upsertRuntimeTab(app: FastifyInstance, source: Record<string, un
     createdAt: merged.createdAt,
     updatedAt: merged.updatedAt,
   }));
-  if (merged.approvalPolicy || merged.sandboxMode) {
+  if (merged.approvalPolicy || merged.sandboxMode || merged.model || merged.reasoningEffort) {
     app.repositories.threadPreferences.upsertThreadPreference(createThreadPreferenceRecord({
       threadId: merged.threadId,
       approvalPolicy: merged.approvalPolicy || '',
       sandboxMode: merged.sandboxMode || '',
+      model: merged.model || '',
+      reasoningEffort: merged.reasoningEffort || '',
     }));
   }
   return merged;

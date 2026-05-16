@@ -1549,6 +1549,19 @@ textarea {
   text-overflow: ellipsis;
 }
 
+.composer-mobile-toggle-usage {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-strong) 92%, transparent);
+  color: var(--muted);
+}
+
 .composer-select-group {
   display: flex;
   align-items: center;

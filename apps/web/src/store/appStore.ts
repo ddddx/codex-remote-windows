@@ -203,18 +203,18 @@ function normalizeTab(tab: any): SessionItem {
   const candidates = [tab?.name, tab?.threadName, tab?.thread_name, tab?.preview];
   const resolvedName = candidates.find((value) => typeof value === 'string' && value.trim());
   return {
-    threadId: String(tab?.threadId || ''),
+    threadId: String(tab?.threadId || tab?.thread_id || tab?.id || ''),
     name: String(resolvedName || '').trim() || '未命名会话',
     cwd: typeof tab?.cwd === 'string' ? tab.cwd : '',
     status: typeof tab?.status === 'string' ? tab.status : '',
-    windowStatus: typeof tab?.windowStatus === 'string' ? tab.windowStatus : '',
-    approvalPolicy: typeof tab?.approvalPolicy === 'string' ? tab.approvalPolicy : '',
-    sandboxMode: typeof tab?.sandboxMode === 'string' ? tab.sandboxMode : '',
+    windowStatus: typeof tab?.windowStatus === 'string' ? tab.windowStatus : typeof tab?.window_status === 'string' ? tab.window_status : '',
+    approvalPolicy: typeof tab?.approvalPolicy === 'string' ? tab.approvalPolicy : typeof tab?.approval_policy === 'string' ? tab.approval_policy : '',
+    sandboxMode: typeof tab?.sandboxMode === 'string' ? tab.sandboxMode : typeof tab?.sandbox_mode === 'string' ? tab.sandbox_mode : '',
     model: typeof tab?.model === 'string' ? tab.model : '',
-    reasoningEffort: typeof tab?.reasoningEffort === 'string' ? tab.reasoningEffort : '',
+    reasoningEffort: typeof tab?.reasoningEffort === 'string' ? tab.reasoningEffort : typeof tab?.reasoning_effort === 'string' ? tab.reasoning_effort : '',
     tokenUsage: normalizeTokenUsage(tab),
-    createdAt: typeof tab?.createdAt === 'number' ? tab.createdAt : 0,
-    updatedAt: typeof tab?.updatedAt === 'number' ? tab.updatedAt : 0,
+    createdAt: typeof tab?.createdAt === 'number' ? tab.createdAt : typeof tab?.created_at === 'number' ? tab.created_at : 0,
+    updatedAt: typeof tab?.updatedAt === 'number' ? tab.updatedAt : typeof tab?.updated_at === 'number' ? tab.updated_at : 0,
   };
 }
 

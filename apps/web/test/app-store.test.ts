@@ -970,6 +970,30 @@ test('state payload tabs initialize composer permission prefs by session', () =>
   assert.equal(prefs?.sandboxMode, 'danger-full-access');
 });
 
+test('state payload tabs normalize snake_case composer prefs after reload', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'state',
+    tabs: [{
+      thread_id: 'thread-snake-prefs',
+      name: 'Snake Prefs',
+      approval_policy: 'never',
+      sandbox_mode: 'danger-full-access',
+      model: 'gpt-5.5',
+      reasoning_effort: 'high',
+    }],
+    serverRequests: [],
+    globalSupplementalItems: [],
+  } as any);
+
+  const prefs = useAppStore.getState().composer.prefsBySessionId['thread-snake-prefs'];
+  assert.equal(prefs?.model, 'gpt-5.5');
+  assert.equal(prefs?.reasoningEffort, 'high');
+  assert.equal(prefs?.approvalPolicy, 'never');
+  assert.equal(prefs?.sandboxMode, 'danger-full-access');
+});
+
 test('nested token usage payloads are normalized for header display', () => {
   resetStore();
 

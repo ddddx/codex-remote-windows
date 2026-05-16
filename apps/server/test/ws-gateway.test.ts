@@ -55,6 +55,9 @@ function createAppStub() {
         upsertPendingRequest() {},
       },
       threadPreferences: {
+        getThreadPreference() {
+          return null;
+        },
         upsertThreadPreference() {},
       },
     },

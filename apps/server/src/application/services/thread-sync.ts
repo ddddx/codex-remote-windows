@@ -7,7 +7,16 @@ import { listRuntimeTabs, upsertRuntimeTab, type RuntimeTab } from './session-ta
 export function hydratePersistedRuntimeState(app: FastifyInstance): void {
   if (!app.runtimeState.tabsById.size) {
     for (const persisted of app.repositories.sessions.listSessions()) {
-      app.runtimeState.tabsById.set(persisted.threadId, persisted as any);
+      const preference = typeof app.repositories.threadPreferences.getThreadPreference === 'function'
+        ? app.repositories.threadPreferences.getThreadPreference(persisted.threadId)
+        : null;
+      app.runtimeState.tabsById.set(persisted.threadId, {
+        ...persisted,
+        approvalPolicy: preference?.approvalPolicy || persisted.approvalPolicy || '',
+        sandboxMode: preference?.sandboxMode || persisted.sandboxMode || '',
+        model: preference?.model || (persisted as any).model || '',
+        reasoningEffort: preference?.reasoningEffort || (persisted as any).reasoningEffort || '',
+      } as any);
     }
   }
   if (!app.runtimeState.serverRequestsById.size) {

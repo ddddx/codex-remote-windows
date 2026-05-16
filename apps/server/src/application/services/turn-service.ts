@@ -52,6 +52,8 @@ export function createTurnService(app: FastifyInstance) {
           updatedAt: Math.floor(Date.now() / 1000),
           approvalPolicy: message.approvalPolicy || current.approvalPolicy || '',
           sandboxMode: message.sandboxMode || current.sandboxMode || '',
+          model: message.model || current.model || '',
+          reasoningEffort: message.effort || current.reasoningEffort || '',
         });
         broadcastMessage(app, { type: 'tab_updated', tab });
         return;

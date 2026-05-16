@@ -8,6 +8,8 @@ type RuntimeTab = {
   windowStatus: string;
   approvalPolicy?: string;
   sandboxMode?: string;
+  model?: string;
+  reasoningEffort?: string;
 };
 
 export type AuthSessionRecord = {

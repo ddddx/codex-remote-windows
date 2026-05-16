@@ -25,6 +25,7 @@ export function createSessionService(app: FastifyInstance) {
         cwd: typeof thread.cwd === 'string' ? thread.cwd : workspacePath,
         approvalPolicy: message.approvalPolicy || '',
         sandboxMode: message.sandboxMode || '',
+        model: message.model || '',
       });
       const attachedTab = await app.windowAttachments.openWindowForThread(tab.threadId) as RuntimeTab | null;
       const nextTab = attachedTab || tab;
