@@ -600,7 +600,7 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
 }
 
 function compactText(value: unknown, max = 280): string {
-  const text = typeof value === 'string' ? value : '';
+  const text = typeof value === 'string' ? value : extractStructuredText(value);
   const normalized = text.trim();
   if (!normalized) {
     return '';
@@ -609,6 +609,65 @@ function compactText(value: unknown, max = 280): string {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function formatMethodLabel(method: string): string {
+  const labels: Record<string, string> = {
+    'thread/closed': '会话已关闭',
+    'thread/archived': '会话已归档',
+    'thread/unarchived': '会话已取消归档',
+    'thread/compacted': '上下文压缩',
+    'thread/goal/updated': '目标已更新',
+    'thread/goal/cleared': '目标已清除',
+    'thread/realtime/started': '实时会话已开始',
+    'thread/realtime/itemAdded': '实时项目',
+    'thread/realtime/transcript/delta': '实时转写',
+    'thread/realtime/transcript/done': '实时转写完成',
+    'thread/realtime/outputAudio/delta': '实时音频',
+    'thread/realtime/sdp': '实时 SDP',
+    'thread/realtime/error': '实时会话错误',
+    'thread/realtime/closed': '实时会话已关闭',
+    'process/outputDelta': '进程输出',
+    'process/exited': '进程结束',
+    'command/exec/outputDelta': '命令输出',
+    'rawResponseItem/completed': '原始响应项',
+    'model/verification': '模型校验',
+  };
+  return labels[method] || method || '事件';
+}
+
+function decodeBase64Text(value: unknown): string {
+  if (typeof value !== 'string' || !value) {
+    return '';
+  }
+  try {
+    if (typeof globalThis.atob === 'function') {
+      const binary = globalThis.atob(value);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
+function extractEventText(method: string, params: Record<string, unknown>, fallback = ''): string {
+  if (method === 'process/outputDelta' || method === 'command/exec/outputDelta') {
+    return decodeBase64Text(params.deltaBase64) || compactText(params.delta);
+  }
+  if (method === 'thread/realtime/transcript/delta' || method === 'thread/realtime/transcript/done') {
+    return compactText(params.delta) || compactText(params.text) || compactText(params.transcript);
+  }
+  if (method === 'rawResponseItem/completed') {
+    return compactText(params.item);
+  }
+  return compactText(params.message)
+    || compactText(params.error)
+    || compactText(params.reason)
+    || compactText(params.goal)
+    || compactText(params.item)
+    || fallback;
 }
 
 function summarizeFileChangeText(
@@ -1187,6 +1246,23 @@ function createTimelineEntryFromItemEvent(
     };
   }
 
+  if (itemType === 'hookPrompt') {
+    const fragments = Array.isArray(item.fragments) ? item.fragments : [];
+    return {
+      id: itemId,
+      type: 'hook',
+      role: 'system',
+      turnId,
+      itemId,
+      title: 'Hook 提示',
+      text: compactText(fragments) || 'Hook 提示',
+      status: kind === 'item_started' ? 'running' : 'completed',
+      meta: [`片段 ${fragments.length}`],
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
   if (itemType === 'mcpToolCall') {
     return {
       id: itemId,
@@ -1213,6 +1289,28 @@ function createTimelineEntryFromItemEvent(
       title: '动态工具',
       text: [item.namespace, item.tool].filter((value) => typeof value === 'string' && value).join('.'),
       status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
+  if (itemType === 'collabAgentToolCall') {
+    const receivers = Array.isArray(item.receiverThreadIds)
+      ? item.receiverThreadIds.filter((value): value is string => typeof value === 'string')
+      : [];
+    return {
+      id: itemId,
+      type: 'collab_tool',
+      role: 'system',
+      turnId,
+      itemId,
+      title: '协作代理',
+      text: [
+        typeof item.tool === 'string' ? item.tool : '',
+        compactText(item.prompt, 160),
+      ].filter(Boolean).join(' · ') || '协作代理调用',
+      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      meta: receivers.length ? [`目标 ${receivers.length} 个线程`] : [],
       createdAt: startedAt,
       details: item,
     };
@@ -1246,7 +1344,64 @@ function createTimelineEntryFromItemEvent(
     };
   }
 
-  return null;
+  if (itemType === 'imageView') {
+    return {
+      id: itemId,
+      type: 'image_view',
+      role: 'system',
+      turnId,
+      itemId,
+      title: '查看图片',
+      text: compactText(item.path) || '查看图片',
+      status: kind === 'item_started' ? 'running' : 'completed',
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
+  if (itemType === 'imageGeneration') {
+    return {
+      id: itemId,
+      type: 'image_generation',
+      role: 'system',
+      turnId,
+      itemId,
+      title: '图片生成',
+      text: compactText(item.savedPath) || compactText(item.result) || compactText(item.revisedPrompt) || '图片生成',
+      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      meta: [compactText(item.revisedPrompt, 160)].filter(Boolean),
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
+  if (itemType === 'enteredReviewMode' || itemType === 'exitedReviewMode') {
+    return {
+      id: itemId,
+      type: 'review_mode',
+      role: 'system',
+      turnId,
+      itemId,
+      title: itemType === 'enteredReviewMode' ? '进入 Review 模式' : '退出 Review 模式',
+      text: compactText(item.review) || 'Review 模式变更',
+      status: 'completed',
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
+  return {
+    id: itemId,
+    type: 'item_delta',
+    role: 'system',
+    turnId,
+    itemId,
+    title: itemType || '项目事件',
+    text: summarizeUnknownObject(item, 5) || itemType || '项目事件',
+    status: kind === 'item_started' ? 'running' : 'completed',
+    createdAt: startedAt,
+    details: item,
+  };
 }
 
 function buildSystemTimelineEntry(
@@ -2283,10 +2438,10 @@ export function mapServerMessageToStore(message: ServerMessage) {
     if (eventType === 'turn_started' || eventType === 'turn_completed' || eventType === 'token_usage' || eventType === 'model_rerouted') {
       return true;
     }
-    if (eventType === 'agent_delta' || eventType === 'plan_delta' || eventType === 'mcp_tool_progress' || eventType === 'item_started' || eventType === 'item_delta') {
+    if (eventType === 'agent_delta' || eventType === 'plan_delta' || eventType === 'mcp_tool_progress' || eventType === 'item_started' || eventType === 'item_delta' || eventType === 'thread_event') {
       return true;
     }
-    if (eventType === 'item_completed') {
+    if (eventType === 'item_completed' || eventType === 'warning' || eventType === 'error_notice') {
       return true;
     }
     return false;
@@ -2482,10 +2637,34 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'hook_started' || message.type === 'hook_completed') {
+    const run = message.run && typeof message.run === 'object' ? message.run as Record<string, unknown> : {};
+    const runId = typeof run.id === 'string'
+      ? run.id
+      : `${message.threadId}:${message.turnId || 'turn'}:${message.type}`;
+    store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'hook', {
+      id: runId,
+      turnId: message.turnId,
+      itemId: runId,
+      title: 'Hook',
+      text: typeof run.command === 'string' && run.command ? run.command : message.type === 'hook_started' ? 'Hook 开始' : 'Hook 完成',
+      status: typeof run.status === 'string' ? run.status : message.type === 'hook_started' ? 'running' : 'completed',
+      meta: [
+        message.type === 'hook_started' ? 'started' : 'completed',
+        typeof run.exitCode === 'number' ? `退出码 ${run.exitCode}` : '',
+      ].filter(Boolean),
+      details: message.run,
+    }));
     return;
   }
 
   if (message.type === 'guardian_review_started' || message.type === 'guardian_review_completed') {
+    store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'guardian_review', {
+      id: `${message.threadId}:${message.turnId || 'turn'}:${message.type}`,
+      turnId: message.turnId,
+      title: 'Guardian 审查',
+      text: message.type === 'guardian_review_started' ? '审查开始' : '审查完成',
+      status: message.type === 'guardian_review_started' ? 'running' : 'completed',
+    }));
     return;
   }
 
@@ -2650,6 +2829,51 @@ export function mapServerMessageToStore(message: ServerMessage) {
       return;
     }
 
+    const genericParams = {
+      method: message.method,
+      delta: message.delta,
+      patch: message.patch,
+      changes: message.changes,
+      part: message.part,
+    };
+    store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'item_delta', {
+      id: entryId,
+      turnId: message.turnId,
+      itemId: message.itemId,
+      title: formatMethodLabel(message.method || 'item_delta'),
+      text: compactText(message.delta) || compactText(message.part) || compactText(message.patch) || summarizeUnknownObject(genericParams, 5) || '项目流式更新',
+      status: 'running',
+      meta: [message.method || 'item_delta'].filter(Boolean),
+      createdAt: message.startedAt,
+      partial: true,
+      details: genericParams,
+    }));
+    return;
+  }
+
+  if (message.type === 'thread_event') {
+    const params = message.params && typeof message.params === 'object' ? message.params as Record<string, unknown> : {};
+    const entryId = message.itemId || `${message.threadId}:${message.turnId || 'thread'}:${message.method}`;
+    const current = (useAppStore.getState().timeline.entriesBySessionId[message.threadId] || []).find((entry) => entry.id === entryId);
+    const deltaText = extractEventText(message.method, params) || message.delta || '';
+    const isStreaming = message.method === 'process/outputDelta'
+      || message.method === 'command/exec/outputDelta'
+      || message.method === 'thread/realtime/transcript/delta';
+    const text = isStreaming
+      ? `${current?.text || ''}${deltaText}`
+      : message.message || deltaText || extractEventText(message.method, params, formatMethodLabel(message.method));
+    store.upsertTimelineEntry(message.threadId, buildSystemTimelineEntry(message.threadId, 'thread_event', {
+      id: entryId,
+      turnId: message.turnId,
+      itemId: message.itemId,
+      title: formatMethodLabel(message.method),
+      text,
+      status: message.status || (isStreaming ? 'running' : 'completed'),
+      meta: [message.method].filter(Boolean),
+      createdAt: message.createdAt,
+      partial: isStreaming,
+      details: params,
+    }));
     return;
   }
 

@@ -704,3 +704,40 @@ test('model reroute notifications update runtime tab model and broadcast effecti
     reason: { type: 'server' },
   });
 });
+
+test('bridge preserves thread-scoped errors and generic codex notifications in timeline cache', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  handleCodexNotification(app, {
+    method: 'error',
+    params: {
+      threadId: 'thread-error',
+      turnId: 'turn-error',
+      error: { message: 'model disconnected' },
+      willRetry: false,
+    },
+  });
+  handleCodexNotification(app, {
+    method: 'process/outputDelta',
+    params: {
+      threadId: 'thread-error',
+      turnId: 'turn-error',
+      processHandle: 'proc-1',
+      stream: 'stdout',
+      deltaBase64: 'aGVsbG8=',
+    },
+  });
+
+  const messages = socket.sent as Array<any>;
+  assert.equal(messages[0]?.type, 'error_notice');
+  assert.equal(messages[0]?.message, 'model disconnected');
+  assert.equal(messages[1]?.type, 'thread_event');
+  assert.equal(messages[1]?.method, 'process/outputDelta');
+  assert.equal(messages[1]?.itemId, 'proc-1');
+  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-error') || [];
+  assert.equal(cachedEvents.length, 2);
+  assert.equal(cachedEvents[0]?.type, 'error_notice');
+  assert.equal(cachedEvents[1]?.type, 'thread_event');
+});

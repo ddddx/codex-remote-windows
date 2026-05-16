@@ -47,3 +47,18 @@ test('server message schema rejects missing required threadId for token usage', 
 
   assert.equal(result.success, false);
 });
+
+test('server message schema accepts generic thread event payloads', () => {
+  const result = serverMessageSchema.safeParse({
+    type: 'thread_event',
+    threadId: 'thread-1',
+    turnId: 'turn-1',
+    itemId: 'process-1',
+    method: 'process/outputDelta',
+    params: { processHandle: 'process-1', deltaBase64: 'aGVsbG8=' },
+    delta: 'aGVsbG8=',
+    createdAt: 1,
+  });
+
+  assert.equal(result.success, true);
+});

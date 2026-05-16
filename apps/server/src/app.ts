@@ -48,6 +48,23 @@ export async function createApp(config: ServerConfig) {
   app.decorate('services', createAppServices(app));
   app.windowAttachments = createWindowAttachmentService(app, app.windowManager) as any;
   app.runtimeState.repositories = repositories as any;
+  app.addHook('onClose', async () => {
+    try {
+      await app.codexClient.stop();
+    } catch {
+      // Tests may replace the client, or it may already be stopped.
+    }
+    try {
+      await app.appServerSupervisor.stop();
+    } catch {
+      // The supervisor may never have started during lightweight tests.
+    }
+    try {
+      app.sqlite.close();
+    } catch {
+      // The database may already be closed by a test or shutdown path.
+    }
+  });
 
   await app.register(websocket);
   await app.register(fastifyStatic, {

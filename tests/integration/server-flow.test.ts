@@ -43,6 +43,7 @@ function createCodexStub() {
   return {
     listeners,
     client: {
+      setWsUrl() {},
       async start() {},
       async stop() {},
       async listThreads() {
@@ -116,6 +117,19 @@ function createCodexStub() {
   };
 }
 
+function createAppServerSupervisorStub() {
+  return {
+    get enabled() {
+      return true;
+    },
+    getWsUrl() {
+      return 'ws://127.0.0.1:34792';
+    },
+    async ensureStarted() {},
+    async stop() {},
+  };
+}
+
 async function buildIntegrationApp() {
   const tempDir = createTempDir('codex-remote-integration-');
   const app = await createApp({
@@ -129,6 +143,7 @@ async function buildIntegrationApp() {
 
   const codex = createCodexStub();
   app.workspaceManager = createWorkspaceStub() as any;
+  app.appServerSupervisor = createAppServerSupervisorStub() as any;
   app.codexClient = codex.client as any;
   app.services = (await import('../../apps/server/src/application/services/index.js')).createAppServices(app);
 
@@ -139,14 +154,34 @@ async function buildIntegrationApp() {
   };
 }
 
+async function createAuthCookie(app: Awaited<ReturnType<typeof buildIntegrationApp>>['app']): Promise<string> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/auth/session',
+    headers: {
+      'x-codex-remote-token': 'secret-token',
+    },
+    payload: {
+      token: 'secret-token',
+      deviceName: 'Integration Test',
+      deviceId: 'integration-test-device',
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  const setCookie = response.headers['set-cookie'];
+  assert.ok(setCookie);
+  return String(Array.isArray(setCookie) ? setCookie[0] : setCookie).split(';')[0];
+}
+
 test('workspace, codex options, upload and thread sync flow work together', async () => {
   const { app, tempDir } = await buildIntegrationApp();
   try {
+    const cookie = await createAuthCookie(app);
     const workspace = await app.inject({
       method: 'GET',
       url: '/api/workspace/list?path=C:%5Cworkspace',
       headers: {
-        'x-codex-remote-token': 'secret-token',
+        cookie,
       },
     });
     assert.equal(workspace.statusCode, 200);
@@ -156,7 +191,7 @@ test('workspace, codex options, upload and thread sync flow work together', asyn
       method: 'GET',
       url: '/api/codex/options?cwd=C:%5Cworkspace',
       headers: {
-        'x-codex-remote-token': 'secret-token',
+        cookie,
       },
     });
     assert.equal(options.statusCode, 200);
@@ -166,7 +201,7 @@ test('workspace, codex options, upload and thread sync flow work together', asyn
       method: 'POST',
       url: '/api/uploads/image',
       headers: {
-        'x-codex-remote-token': 'secret-token',
+        cookie,
         'content-type': 'image/png',
         'x-upload-filename': encodeURIComponent('demo.png'),
       },
@@ -186,14 +221,13 @@ test('workspace, codex options, upload and thread sync flow work together', asyn
       method: 'GET',
       url: uploadPayload.url,
       headers: {
-        'x-codex-remote-token': 'secret-token',
+        cookie,
       },
     });
     assert.equal(fetchedUpload.statusCode, 200);
     assert.equal(Buffer.compare(fetchedUpload.rawPayload, Buffer.from([137, 80, 78, 71])), 0);
   } finally {
     await app.close();
-    app.sqlite.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
@@ -239,7 +273,6 @@ test('thread sync restores persisted requests and upload metadata from repositor
     assert.equal(app.repositories.uploads.listUploads().length, 1);
   } finally {
     await app.close();
-    app.sqlite.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

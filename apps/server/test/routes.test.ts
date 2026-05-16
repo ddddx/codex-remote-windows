@@ -75,6 +75,19 @@ function createCodexStub() {
   };
 }
 
+function createAppServerSupervisorStub() {
+  return {
+    get enabled() {
+      return true;
+    },
+    getWsUrl() {
+      return 'ws://127.0.0.1:34792';
+    },
+    async ensureStarted() {},
+    async stop() {},
+  };
+}
+
 async function buildTestApp() {
   const tempSqlitePath = `C:\\Users\\Administrator\\Desktop\\cc-workspace\\tmp-server-test-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`;
   const app = await createApp({
@@ -87,6 +100,7 @@ async function buildTestApp() {
   });
 
   app.workspaceManager = createWorkspaceStub() as any;
+  app.appServerSupervisor = createAppServerSupervisorStub() as any;
   app.codexClient = createCodexStub() as any;
   return app;
 }

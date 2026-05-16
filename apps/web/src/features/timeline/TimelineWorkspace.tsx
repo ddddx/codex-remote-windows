@@ -148,7 +148,7 @@ function buildTimelineKind(entry: TimelineEntry): string {
   if (entry.type === 'reasoning' || entry.type === 'plan' || entry.type === 'turn_plan') {
     return 'thinking';
   }
-  if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'web_search') {
+  if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'collab_tool' || entry.type === 'web_search' || entry.type === 'thread_event') {
     return 'command';
   }
   if (entry.type === 'file_change' || entry.type === 'turn_diff') {
@@ -577,7 +577,7 @@ function buildTurnActivityStatus(
       fileChangeEntry = entry;
       continue;
     }
-    if (!toolEntry && (entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'web_search')) {
+    if (!toolEntry && (entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'collab_tool' || entry.type === 'web_search' || entry.type === 'thread_event')) {
       toolEntry = entry;
       continue;
     }
@@ -749,7 +749,7 @@ function buildTimelineMarkerSymbol(entry: TimelineEntry): string {
   if (stateClass === 'state-running') {
     return '…';
   }
-  if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'web_search') {
+  if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'collab_tool' || entry.type === 'web_search' || entry.type === 'thread_event') {
     return '›';
   }
   if (entry.type === 'file_change' || entry.type === 'turn_diff') {

@@ -1361,3 +1361,86 @@ test('turn_send error removes optimistic local user entry and raises notificatio
   assert.ok(entries.some((entry) => entry.type === 'notice' && entry.text === 'start turn failed'));
   assert.ok(notifications.some((item) => item.id === 'send-error:web-123'));
 });
+
+test('generic thread events decode process output and restore from thread sync', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_event',
+    threadId: 'thread-generic-event',
+    turnId: 'turn-generic-event',
+    itemId: 'proc-1',
+    method: 'process/outputDelta',
+    params: {
+      processHandle: 'proc-1',
+      stream: 'stdout',
+      deltaBase64: 'aGVsbG8=',
+    },
+    delta: 'aGVsbG8=',
+    createdAt: 1,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'thread_event',
+    threadId: 'thread-generic-event',
+    turnId: 'turn-generic-event',
+    itemId: 'proc-1',
+    method: 'process/outputDelta',
+    params: {
+      processHandle: 'proc-1',
+      stream: 'stdout',
+      deltaBase64: 'IHdvcmxk',
+    },
+    delta: 'IHdvcmxk',
+    createdAt: 2,
+  } as any);
+
+  let entries = useAppStore.getState().timeline.entriesBySessionId['thread-generic-event'] || [];
+  let processEntry = entries.find((entry) => entry.id === 'proc-1');
+  assert.equal(processEntry?.type, 'thread_event');
+  assert.equal(processEntry?.text, 'hello world');
+
+  resetStore();
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-generic-event',
+    turns: [],
+    timelineEvents: [{
+      type: 'thread_event',
+      threadId: 'thread-generic-event',
+      turnId: 'turn-generic-event',
+      itemId: 'proc-1',
+      method: 'process/outputDelta',
+      params: { processHandle: 'proc-1', deltaBase64: 'cmVzdG9yZWQ=' },
+      delta: 'cmVzdG9yZWQ=',
+      createdAt: 1,
+    }],
+  } as any);
+
+  entries = useAppStore.getState().timeline.entriesBySessionId['thread-generic-event'] || [];
+  processEntry = entries.find((entry) => entry.id === 'proc-1');
+  assert.equal(processEntry?.text, 'restored');
+});
+
+test('additional codex thread item variants map to visible timeline entries', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-item-variants',
+    turns: [{
+      id: 'turn-item-variants',
+      createdAt: 1,
+      items: [
+        { id: 'collab-1', type: 'collabAgentToolCall', tool: 'spawnAgent', status: 'completed', prompt: 'inspect', receiverThreadIds: ['agent-1'] },
+        { id: 'image-1', type: 'imageView', path: 'C:\\workspace\\image.png' },
+        { id: 'review-1', type: 'enteredReviewMode', review: 'review changes' },
+      ],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-item-variants'] || [];
+  assert.ok(entries.some((entry) => entry.id === 'collab-1' && entry.type === 'collab_tool'));
+  assert.ok(entries.some((entry) => entry.id === 'image-1' && entry.type === 'image_view'));
+  assert.ok(entries.some((entry) => entry.id === 'review-1' && entry.type === 'review_mode'));
+});

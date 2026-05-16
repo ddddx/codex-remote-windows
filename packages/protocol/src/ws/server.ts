@@ -23,6 +23,7 @@ export type ServerMessage =
   | { type: 'item_started'; threadId: string; turnId?: string; item?: unknown; startedAt?: number }
   | { type: 'item_completed'; threadId: string; turnId?: string; item?: unknown; completedAt?: number }
   | { type: 'item_delta'; threadId: string; turnId?: string; itemId?: string; method?: string; delta?: string; patch?: string; changes?: unknown[]; part?: unknown; startedAt?: number }
+  | { type: 'thread_event'; threadId: string; turnId?: string; itemId?: string; method: string; params?: unknown; message?: string; delta?: string; status?: string; createdAt?: number }
   | { type: 'codex_error'; threadId?: string; error?: unknown }
   | { type: 'backend_error'; message: string }
   | { type: 'error'; message: string; code?: string; op?: string; threadId?: string; clientMessageId?: string }

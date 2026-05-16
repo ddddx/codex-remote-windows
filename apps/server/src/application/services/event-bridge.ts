@@ -42,6 +42,86 @@ function broadcastThreadTimelineMessage(app: FastifyInstance, message: Record<st
   broadcastMessage(app, message as any);
 }
 
+function getThreadId(params: Record<string, unknown>): string | undefined {
+  return typeof params.threadId === 'string' ? params.threadId : undefined;
+}
+
+function getTurnId(params: Record<string, unknown>): string | undefined {
+  return typeof params.turnId === 'string' ? params.turnId : undefined;
+}
+
+function getItemId(params: Record<string, unknown>): string | undefined {
+  if (typeof params.itemId === 'string') {
+    return params.itemId;
+  }
+  if (typeof params.processId === 'string') {
+    return params.processId;
+  }
+  if (typeof params.processHandle === 'string') {
+    return params.processHandle;
+  }
+  if (typeof params.callId === 'string') {
+    return params.callId;
+  }
+  return undefined;
+}
+
+function extractNoticeMessage(params: Record<string, unknown>, fallback: string): string {
+  if (typeof params.message === 'string' && params.message.trim()) {
+    return params.message;
+  }
+  if (typeof params.error === 'string' && params.error.trim()) {
+    return params.error;
+  }
+  const error = params.error && typeof params.error === 'object' ? params.error as Record<string, unknown> : null;
+  if (typeof error?.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function extractStatus(params: Record<string, unknown>): string | undefined {
+  if (typeof params.status === 'string') {
+    return params.status;
+  }
+  if (typeof params.reason === 'string') {
+    return params.reason;
+  }
+  if (typeof params.success === 'boolean') {
+    return params.success ? 'completed' : 'failed';
+  }
+  return undefined;
+}
+
+function broadcastGenericThreadEvent(
+  app: FastifyInstance,
+  method: string,
+  params: Record<string, unknown>,
+): boolean {
+  const threadId = getThreadId(params);
+  if (!threadId) {
+    return false;
+  }
+
+  broadcastThreadTimelineMessage(app, {
+    type: 'thread_event',
+    threadId,
+    turnId: getTurnId(params),
+    itemId: getItemId(params),
+    method,
+    params,
+    message: typeof params.message === 'string' ? params.message : undefined,
+    delta: typeof params.delta === 'string'
+      ? params.delta
+      : typeof params.deltaBase64 === 'string'
+        ? params.deltaBase64
+        : undefined,
+    status: extractStatus(params),
+    createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+  });
+  return true;
+}
+
 function flushAgentDeltaByKey(app: FastifyInstance, key: string): void {
   const pending = pendingAgentDeltas.get(key);
   if (!pending) {
@@ -183,6 +263,19 @@ export function handleCodexNotification(
       type: 'turn_completed',
       threadId: params.threadId,
       turnId,
+    });
+    return;
+  }
+
+  if (method === 'error' && typeof params.threadId === 'string') {
+    const message = extractNoticeMessage(params, 'Codex error');
+    broadcastThreadTimelineMessage(app, {
+      type: 'error_notice',
+      message,
+      threadId: params.threadId,
+      noticeId: typeof params.noticeId === 'string' ? params.noticeId : undefined,
+      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'error',
     });
     return;
   }
@@ -390,6 +483,39 @@ export function handleCodexNotification(
     return;
   }
 
+  if (method === 'thread/closed' && typeof params.threadId === 'string') {
+    const current = app.runtimeState.tabsById.get(params.threadId);
+    if (current) {
+      const tab = upsertRuntimeTab(app, {
+        ...current,
+        status: 'closed',
+        updatedAt: nowUnix(),
+      });
+      broadcastMessage(app, { type: 'tab_updated', tab });
+    }
+    broadcastGenericThreadEvent(app, method, params);
+    return;
+  }
+
+  if (method === 'thread/archived' || method === 'thread/unarchived') {
+    broadcastGenericThreadEvent(app, method, params);
+    return;
+  }
+
+  if (method === 'thread/compacted' && typeof params.threadId === 'string') {
+    broadcastThreadTimelineMessage(app, {
+      type: 'item_completed',
+      threadId: params.threadId,
+      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
+      item: {
+        id: `context-compaction:${params.turnId || Date.now()}`,
+        type: 'contextCompaction',
+      },
+      completedAt: Date.now(),
+    });
+    return;
+  }
+
   if (method === 'item/fileChange/patchUpdated') {
     if (typeof params.threadId === 'string' && typeof params.turnId === 'string' && typeof params.patch === 'string') {
       setCachedTurnDiff(app.runtimeState, params.threadId, params.turnId, params.patch);
@@ -427,6 +553,20 @@ export function handleCodexNotification(
       startedAt: typeof params.startedAt === 'number' ? params.startedAt : Date.now(),
     });
     return;
+  }
+
+  if (
+    method === 'process/outputDelta'
+    || method === 'process/exited'
+    || method === 'command/exec/outputDelta'
+    || method === 'rawResponseItem/completed'
+    || method === 'model/verification'
+    || method.startsWith('thread/realtime/')
+    || method.startsWith('thread/goal/')
+  ) {
+    if (broadcastGenericThreadEvent(app, method, params)) {
+      return;
+    }
   }
 
   if (method === 'serverRequest/resolved') {
@@ -478,6 +618,22 @@ export function handleCodexNotification(
           : 'Error',
       noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'error',
       createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+    });
+    broadcastMessage(app, {
+      type: 'error_notice',
+      message: extractNoticeMessage(params, 'Error'),
+      noticeId: typeof params.noticeId === 'string' ? params.noticeId : undefined,
+      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
+      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'error',
+    });
+    return;
+  }
+
+  if (method) {
+    broadcastMessage(app, {
+      type: 'notification',
+      method,
+      params,
     });
   }
 }

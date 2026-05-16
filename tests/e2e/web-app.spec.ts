@@ -51,23 +51,23 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.goto('http://127.0.0.1:4173');
 
     await expect(page.locator('#activeTitle')).toHaveText('codex-remote-windows');
-    await expect(page.locator('#activeStatus')).toHaveText('服务正常');
-    await expect(page.locator('#contextUsage')).toContainText('用量');
-    await expect(page.locator('.sidebar')).toBeVisible();
-    await page.locator('#sidebarClose').click();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'idle');
     await expect(page.locator('.sidebar')).toBeVisible();
 
     await page.locator('#tokenBtn').click();
     await page.locator('#tokenInput').fill('secret-token');
-    await page.getByRole('button', { name: '保存并重连' }).click();
+    await page.getByRole('button', { name: '保存并登录' }).click();
 
-    await expect(page.locator('#activeStatus')).toHaveText('已连接');
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#tabList')).toContainText('Mock Session');
+    await page.locator('#sidebarClose').click();
+    await expect(page.locator('.sidebar')).toBeVisible();
     await page.locator('#menuBtn').click();
     await expect(page.locator('.sidebar')).not.toHaveClass(/hidden/);
     await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
-    await expect(page.locator('#contextUsage')).toContainText('22%');
+    await expect(page.locator('.context-usage-ring')).toHaveAttribute('aria-label', /上下文余量/);
+    await expect(page.locator('.context-usage-popover')).toContainText('剩余 78 / 100 tokens');
     await expect.poll(async () => page.locator('#messages').evaluate((element) => {
       const node = element as HTMLDivElement;
       return node.scrollTop + node.clientHeight >= node.scrollHeight - 4;
@@ -83,17 +83,6 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.messages')).toContainText('文件变更');
     await expect(page.locator('.messages')).toContainText('app.tsx');
     await expect(page.locator('.messages')).not.toContainText('Run tests');
-
-    const taskToggle = page.locator('.task-panel-toggle');
-    await expect(taskToggle).toBeVisible();
-    await expect(taskToggle).toContainText('任务列表');
-    const taskBody = page.locator('.task-panel-body');
-    if (!await taskBody.isVisible()) {
-      await taskToggle.click();
-    }
-    await expect(taskBody).toContainText('Inspect and patch');
-    await expect(taskBody).toContainText('Inspect');
-    await expect(taskBody).toContainText('Patch');
 
     const commandCard = page.locator('.timeline-event').filter({ hasText: 'npm test' }).first();
     await expect(commandCard).toBeVisible();

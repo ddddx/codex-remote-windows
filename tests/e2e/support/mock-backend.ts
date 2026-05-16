@@ -20,19 +20,59 @@ export async function startMockBackend(): Promise<MockBackend> {
     pendingTimers.add(timer);
   }
 
-  function applyCors(response: http.ServerResponse) {
-    response.setHeader('Access-Control-Allow-Origin', '*');
+  function applyCors(request: http.IncomingMessage, response: http.ServerResponse) {
+    const origin = request.headers.origin || '*';
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Access-Control-Allow-Credentials', 'true');
     response.setHeader('Access-Control-Allow-Headers', 'content-type, x-codex-remote-token, x-upload-filename');
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   }
 
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url || '/', 'http://127.0.0.1');
-    applyCors(response);
+    applyCors(request, response);
 
     if (request.method === 'OPTIONS') {
       response.writeHead(204);
       response.end();
+      return;
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/session') {
+      const now = Date.now();
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'set-cookie': 'codex_remote_session=mock-session.mock-secret; Path=/; HttpOnly; SameSite=Lax',
+      });
+      response.end(JSON.stringify({
+        ok: true,
+        session: {
+          sessionId: 'mock-session',
+          deviceName: 'Playwright',
+          createdAt: now,
+          lastSeenAt: now,
+          expiresAt: now + 3600000,
+          current: true,
+          online: true,
+        },
+      }));
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/auth/sessions') {
+      const now = Date.now();
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        sessions: [{
+          sessionId: 'mock-session',
+          deviceName: 'Playwright',
+          createdAt: now,
+          lastSeenAt: now,
+          expiresAt: now + 3600000,
+          current: true,
+          online: true,
+        }],
+      }));
       return;
     }
 

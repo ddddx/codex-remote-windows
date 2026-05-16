@@ -186,6 +186,18 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     startedAt: z.number().optional(),
   }),
   z.object({
+    type: z.literal('thread_event'),
+    threadId: z.string(),
+    turnId: z.string().optional(),
+    itemId: z.string().optional(),
+    method: z.string(),
+    params: z.unknown().optional(),
+    message: z.string().optional(),
+    delta: z.string().optional(),
+    status: z.string().optional(),
+    createdAt: z.number().optional(),
+  }),
+  z.object({
     type: z.literal('codex_error'),
     threadId: z.string().optional(),
     error: z.unknown().optional(),

@@ -257,8 +257,20 @@ export function describeTimelineType(entry: TimelineEntry): string {
   if (entry.type === 'dynamic_tool') {
     return '动态工具';
   }
+  if (entry.type === 'collab_tool') {
+    return '协作代理';
+  }
   if (entry.type === 'web_search') {
     return '网页搜索';
+  }
+  if (entry.type === 'image_view') {
+    return '查看图片';
+  }
+  if (entry.type === 'image_generation') {
+    return '图片生成';
+  }
+  if (entry.type === 'review_mode') {
+    return 'Review 模式';
   }
   if (entry.type === 'context_compaction') {
     return '上下文压缩';
@@ -277,6 +289,9 @@ export function describeTimelineType(entry: TimelineEntry): string {
   }
   if (entry.type === 'item_delta') {
     return '流式更新';
+  }
+  if (entry.type === 'thread_event') {
+    return '线程事件';
   }
   return entry.type || '事件';
 }
