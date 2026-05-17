@@ -1241,12 +1241,27 @@ textarea {
 }
 
 .timeline-diff-line {
+  display: grid;
+  grid-template-columns: 44px 44px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
   padding: 4px 10px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.timeline-diff-line-number {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.timeline-diff-line-code {
+  min-width: 0;
+  white-space: pre-wrap;
 }
 
 .timeline-diff-line.kind-file {
@@ -1419,6 +1434,8 @@ textarea {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .file-change-line-stats-add {

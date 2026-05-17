@@ -92,6 +92,8 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.messages')).toContainText('npm test');
     await expect(page.locator('.messages')).toContainText('文件变更');
     await expect(page.locator('.messages')).toContainText('app.tsx');
+    await expect(page.locator('.messages')).toContainText('+2');
+    await expect(page.locator('.messages')).toContainText('-1');
     await expect(page.locator('.messages')).not.toContainText('Run tests');
 
     const commandCard = page.locator('.timeline-event').filter({ hasText: 'npm test' }).first();
@@ -108,6 +110,11 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
       fileDetails = fileCard.locator('.timeline-inline-detail-body');
     }
     await expect(fileDetails).toContainText('*** Update File: app.tsx');
+    await expect(fileCard.locator('.timeline-marker-state')).toHaveText('±');
+    await expect(fileCard.locator('.file-change-line-stats-add').first()).toHaveText('+2');
+    await expect(fileCard.locator('.file-change-line-stats-delete').first()).toHaveText('-1');
+    await expect(fileDetails.locator('.timeline-diff-line').filter({ hasText: 'oldCall();' }).locator('.timeline-diff-line-number').first()).toHaveText('3');
+    await expect(fileDetails.locator('.timeline-diff-line').filter({ hasText: 'newCall();' }).locator('.timeline-diff-line-number').nth(1)).toHaveText('3');
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();

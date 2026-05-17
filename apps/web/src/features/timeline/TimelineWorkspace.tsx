@@ -254,14 +254,57 @@ function classifyDiffLine(line: string): string {
   return 'context';
 }
 
-function renderDiffBlock(text: string) {
+type DiffLineView = {
+  text: string;
+  kind: string;
+  oldLine?: number;
+  newLine?: number;
+};
+
+export function buildDiffLineViews(text: string): DiffLineView[] {
   const normalized = String(text || '').replace(/\r\n/g, '\n');
   const lines = normalized.split('\n');
+  let oldLine: number | undefined;
+  let newLine: number | undefined;
+
+  return lines.map((line) => {
+    const kind = classifyDiffLine(line);
+    const hunkMatch = line.match(/^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+    if (hunkMatch) {
+      oldLine = Number(hunkMatch[1]);
+      newLine = Number(hunkMatch[2]);
+      return { text: line, kind };
+    }
+
+    if (kind === 'add') {
+      const view = { text: line, kind, newLine };
+      newLine = typeof newLine === 'number' ? newLine + 1 : undefined;
+      return view;
+    }
+    if (kind === 'delete') {
+      const view = { text: line, kind, oldLine };
+      oldLine = typeof oldLine === 'number' ? oldLine + 1 : undefined;
+      return view;
+    }
+    if (kind === 'context') {
+      const view = { text: line, kind, oldLine, newLine };
+      oldLine = typeof oldLine === 'number' ? oldLine + 1 : undefined;
+      newLine = typeof newLine === 'number' ? newLine + 1 : undefined;
+      return view;
+    }
+    return { text: line, kind };
+  });
+}
+
+function renderDiffBlock(text: string) {
+  const lines = buildDiffLineViews(text);
   return (
     <div className="timeline-inline-diff">
       {lines.map((line, index) => (
-        <div key={`diff-${index}`} className={`timeline-diff-line kind-${classifyDiffLine(line)}`}>
-          {line || ' '}
+        <div key={`diff-${index}`} className={`timeline-diff-line kind-${line.kind}`}>
+          <span className="timeline-diff-line-number">{line.oldLine ?? ' '}</span>
+          <span className="timeline-diff-line-number">{line.newLine ?? ' '}</span>
+          <span className="timeline-diff-line-code">{line.text || ' '}</span>
         </div>
       ))}
     </div>
@@ -331,6 +374,19 @@ function parsePatchChangeSummary(patch: string | undefined): Array<{
   return changes;
 }
 
+function buildDiffStats(diff: string | undefined): { addedLines: number; deletedLines: number } {
+  const lines = String(diff || '').replace(/\r\n/g, '\n').split('\n');
+  return lines.reduce((result, line) => {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      return { ...result, addedLines: result.addedLines + 1 };
+    }
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      return { ...result, deletedLines: result.deletedLines + 1 };
+    }
+    return result;
+  }, { addedLines: 0, deletedLines: 0 });
+}
+
 function basenameLike(path: string | undefined): string {
   const value = typeof path === 'string' ? path.trim() : '';
   if (!value) {
@@ -354,17 +410,29 @@ export function buildRenderableChangesFromSource(source: {
     return derived;
   }
   if (!derived.length) {
-    return explicit;
+    return explicit.map((change) => {
+      const diffStats = buildDiffStats(change.diff);
+      return {
+        ...change,
+        addedLines: typeof change.addedLines === 'number' ? change.addedLines : diffStats.addedLines || undefined,
+        deletedLines: typeof change.deletedLines === 'number' ? change.deletedLines : diffStats.deletedLines || undefined,
+      };
+    });
   }
 
   const derivedByPath = new Map(derived.map((change) => [change.path, change]));
   const merged = explicit.map((change) => {
     const fallback = change.path ? derivedByPath.get(change.path) : null;
+    const diffStats = buildDiffStats(change.diff);
     return {
       ...change,
       kind: change.kind || fallback?.kind,
-      addedLines: typeof change.addedLines === 'number' ? change.addedLines : fallback?.addedLines,
-      deletedLines: typeof change.deletedLines === 'number' ? change.deletedLines : fallback?.deletedLines,
+      addedLines: typeof change.addedLines === 'number'
+        ? change.addedLines
+        : (fallback?.addedLines ?? diffStats.addedLines) || undefined,
+      deletedLines: typeof change.deletedLines === 'number'
+        ? change.deletedLines
+        : (fallback?.deletedLines ?? diffStats.deletedLines) || undefined,
       diff: typeof change.diff === 'string' ? change.diff : undefined,
     };
   });
@@ -507,8 +575,22 @@ function renderFileChangeStats(change: { addedLines?: number; deletedLines?: num
   );
 }
 
-function buildFileChangeHeadline(entry: TimelineEntry): string {
-  return buildFileChangeHeadlineText(buildProcessHeadline(entry), buildRenderableChanges(entry));
+function renderFileChangeHeadline(entry: TimelineEntry) {
+  const headline = buildProcessHeadline(entry);
+  const changes = buildRenderableChanges(entry);
+  const totals = changes.reduce<{ addedLines: number; deletedLines: number }>(
+    (result, change) => ({
+      addedLines: result.addedLines + Math.max(0, Number(change.addedLines) || 0),
+      deletedLines: result.deletedLines + Math.max(0, Number(change.deletedLines) || 0),
+    }),
+    { addedLines: 0, deletedLines: 0 },
+  );
+  return (
+    <>
+      <span>{headline}</span>
+      {renderFileChangeStats(totals)}
+    </>
+  );
 }
 
 function renderFileChangeList(changes: RenderableFileChange[], keyPrefix: string) {
@@ -804,6 +886,9 @@ function buildRenderableSignature(renderables: TimelineRenderable[], totalRender
 }
 
 function buildTimelineMarkerSymbol(entry: TimelineEntry): string {
+  if (entry.type === 'file_change' || entry.type === 'turn_diff') {
+    return '±';
+  }
   const stateClass = buildTimelineStateClass(entry);
   if (stateClass === 'state-success') {
     return '✓';
@@ -819,9 +904,6 @@ function buildTimelineMarkerSymbol(entry: TimelineEntry): string {
   }
   if (entry.type === 'command' || entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'collab_tool' || entry.type === 'web_search' || entry.type === 'thread_event') {
     return '›';
-  }
-  if (entry.type === 'file_change' || entry.type === 'turn_diff') {
-    return '+';
   }
   if (entry.type === 'reasoning' || entry.type === 'plan' || entry.type === 'turn_plan') {
     return '~';
@@ -940,7 +1022,7 @@ const TimelineEntryCard = memo(function TimelineEntryCard({ entry, sessionId }: 
           <div className="timeline-content">
             <ExpandableFileChangeRow
               className={`timeline-card-${kind}`}
-              title={buildFileChangeHeadline(entry)}
+              title={renderFileChangeHeadline(entry)}
               summary={buildProcessPreview(entry) || describeTimelineType(entry)}
               details={(
                 <>

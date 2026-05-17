@@ -373,7 +373,7 @@ export async function startMockBackend(): Promise<MockBackend> {
           turnId: 'turn-2',
           itemId: 'file-2',
           method: 'item/fileChange/patchUpdated',
-          patch: '*** Begin Patch\n*** Update File: app.tsx\n*** End Patch',
+          patch: '*** Begin Patch\n*** Update File: app.tsx\n@@ -2,2 +2,3 @@\n const oldValue = 1;\n-oldCall();\n+newCall();\n+extraCall();\n*** End Patch',
           changes: [{ path: 'app.tsx', kind: 'update' }],
           startedAt: 3,
         })));
