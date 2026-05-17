@@ -18,6 +18,11 @@ function buildStatusDotClass(status: string | undefined): string {
   return 'closed';
 }
 
+function isSessionWindowOpen(session: { windowStatus?: string }): boolean {
+  const normalized = (session.windowStatus || '').trim().toLowerCase();
+  return normalized === 'attached' || normalized === 'opening' || normalized === 'pending';
+}
+
 export function SessionRail({ onNewSession, onCloseSessionWindow }: SessionRailProps) {
   const sessions = useAppStore((state) => state.sessions.items);
   const activeSessionId = useAppStore((state) => state.sessions.activeSessionId);
@@ -35,13 +40,13 @@ export function SessionRail({ onNewSession, onCloseSessionWindow }: SessionRailP
     return counts;
   }, [approvals]);
 
-  const openSessions = sessions.filter((session) => (session.status || '').trim().toLowerCase() !== 'closed');
-  const closedSessions = sessions.filter((session) => (session.status || '').trim().toLowerCase() === 'closed');
+  const openSessions = sessions.filter(isSessionWindowOpen);
+  const closedSessions = sessions.filter((session) => !isSessionWindowOpen(session));
 
   function renderSession(session: typeof sessions[number]) {
     const pendingCount = pendingCountsBySessionId[session.threadId] || 0;
     const isActive = session.threadId === activeSessionId;
-    const isClosed = (session.status || '').trim().toLowerCase() === 'closed';
+    const isClosed = !isSessionWindowOpen(session);
     return (
       <div
         key={session.threadId}

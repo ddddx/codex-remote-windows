@@ -60,6 +60,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#tabList')).toContainText('Mock Session');
+    await expect(page.locator('#tabList > .tab-item')).toContainText('Mock Session');
     await expect(page.locator('#tabList')).not.toContainText('Closed Session');
     await expect(page.locator('.tab-section-toggle')).toContainText('未打开');
     await page.locator('.tab-section-toggle').click();
