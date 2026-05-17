@@ -85,6 +85,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#composerControlsSummary')).toContainText('gpt-5.5');
     await expect(page.locator('#composerControlsSummary')).toContainText('高');
     await expect(page.locator('#composerControlsSummary')).toContainText('Full Access');
+    await page.waitForTimeout(300);
     await expect.poll(async () => page.locator('#messages').evaluate((element) => {
       const node = element as HTMLDivElement;
       return node.scrollTop + node.clientHeight >= node.scrollHeight - 4;

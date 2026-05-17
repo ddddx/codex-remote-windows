@@ -1441,17 +1441,11 @@ textarea {
 .file-change-line-stats-add {
   color: var(--diff-add-ink);
   font-weight: 700;
-  background: var(--diff-add-bg);
-  border-radius: 999px;
-  padding: 2px 8px;
 }
 
 .file-change-line-stats-delete {
   color: var(--diff-delete-ink);
   font-weight: 700;
-  background: var(--diff-delete-bg);
-  border-radius: 999px;
-  padding: 2px 8px;
 }
 
 .cmd-output {
