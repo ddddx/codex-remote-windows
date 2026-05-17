@@ -30,6 +30,12 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     sandboxMode: z.string().optional(),
   }),
   z.object({
+    type: z.literal('command_send'),
+    threadId: z.string(),
+    text: z.string(),
+    clientMessageId: z.string().optional(),
+  }),
+  z.object({
     type: z.literal('thread_sync'),
     threadId: z.string(),
   }),

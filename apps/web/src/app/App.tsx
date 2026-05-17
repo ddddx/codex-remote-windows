@@ -251,6 +251,10 @@ function buildClientMessageId(): string {
   return `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function isComposerCommand(text: string): boolean {
+  return text.startsWith('/') || text.startsWith('!');
+}
+
 function useRefreshHealth(
   token: string,
   connectionStatus: string,
@@ -645,6 +649,35 @@ export function App() {
     }
 
     setComposerError('');
+
+    if (isComposerCommand(text)) {
+      if (!activeSessionId) {
+        setComposerError('请先选择一个会话再执行命令。');
+        return;
+      }
+      const clientMessageId = buildClientMessageId();
+      const sent = socketClient.send({
+        type: 'command_send',
+        threadId: activeSessionId,
+        text,
+        clientMessageId,
+      });
+      if (!sent) {
+        setComposerError('执行命令失败。');
+        return;
+      }
+      appendTimelineEntry(activeSessionId, {
+        id: `local-user:${clientMessageId}`,
+        type: 'message',
+        role: 'user',
+        turnId: `${activeSessionId}:command`,
+        text,
+        createdAt: Date.now(),
+      });
+      setDraft('');
+      setComposerResetSignal((value) => value + 1);
+      return;
+    }
 
     if (!activeSessionId) {
       setDraft(text);

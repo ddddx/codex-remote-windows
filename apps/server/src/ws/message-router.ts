@@ -34,6 +34,21 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
     return;
   }
 
+  if (message.type === 'command_send') {
+    try {
+      await app.services.commands.runCommand(message);
+    } catch (error) {
+      sendMessage(socket, {
+        type: 'error',
+        op: 'command_send',
+        threadId: message.threadId,
+        clientMessageId: message.clientMessageId,
+        message: error instanceof Error ? error.message : '执行命令失败',
+      });
+    }
+    return;
+  }
+
   if (message.type === 'tab_close') {
     const tab = await app.services.sessions.closeTabWindow(message.threadId);
     if (tab) {

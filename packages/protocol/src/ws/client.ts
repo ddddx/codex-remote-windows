@@ -23,6 +23,12 @@ export type ClientMessage =
     sandboxMode?: string;
   }
   | {
+    type: 'command_send';
+    threadId: string;
+    text: string;
+    clientMessageId?: string;
+  }
+  | {
     type: 'thread_sync';
     threadId: string;
   }

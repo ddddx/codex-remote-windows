@@ -51,6 +51,17 @@ type CodexClientLike = {
     approvalPolicy?: string | null;
     sandboxPolicy?: Record<string, unknown> | null;
   }) => Promise<Record<string, unknown>>;
+  runThreadShellCommand: (threadId: string, command: string) => Promise<unknown>;
+  compactThread: (threadId: string) => Promise<unknown>;
+  stopBackgroundTerminals: (threadId: string) => Promise<unknown>;
+  setThreadName: (threadId: string, name: string) => Promise<unknown>;
+  setThreadGoal: (threadId: string, params: {
+    objective?: string;
+    status?: 'active' | 'paused' | 'budgetLimited' | 'complete';
+    tokenBudget?: number | null;
+  }) => Promise<unknown>;
+  getThreadGoal: (threadId: string) => Promise<unknown>;
+  clearThreadGoal: (threadId: string) => Promise<unknown>;
   listModels: (options?: { includeHidden?: boolean; limit?: number }) => Promise<Array<Record<string, unknown>>>;
   readConfig: (options?: { cwd?: string }) => Promise<{ config?: Record<string, unknown> }>;
   respond: (id: string | number, result?: unknown) => void;

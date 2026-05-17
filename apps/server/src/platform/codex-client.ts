@@ -226,6 +226,51 @@ export class CodexAppServerClient extends EventEmitter {
     return result.turn;
   }
 
+  async runThreadShellCommand(threadId: string, command: string) {
+    return this.request('thread/shellCommand', {
+      threadId,
+      command,
+    });
+  }
+
+  async compactThread(threadId: string) {
+    return this.request('thread/compact/start', { threadId });
+  }
+
+  async stopBackgroundTerminals(threadId: string) {
+    return this.request('thread/backgroundTerminals/clean', { threadId });
+  }
+
+  async setThreadName(threadId: string, name: string) {
+    return this.request('thread/name/set', { threadId, name });
+  }
+
+  async setThreadGoal(threadId: string, params: {
+    objective?: string;
+    status?: 'active' | 'paused' | 'budgetLimited' | 'complete';
+    tokenBudget?: number | null;
+  }) {
+    const requestParams: Record<string, unknown> = { threadId };
+    if (params.objective !== undefined) {
+      requestParams.objective = params.objective;
+    }
+    if (params.status !== undefined) {
+      requestParams.status = params.status;
+    }
+    if (params.tokenBudget !== undefined) {
+      requestParams.tokenBudget = params.tokenBudget;
+    }
+    return this.request('thread/goal/set', requestParams);
+  }
+
+  async getThreadGoal(threadId: string) {
+    return this.request('thread/goal/get', { threadId });
+  }
+
+  async clearThreadGoal(threadId: string) {
+    return this.request('thread/goal/clear', { threadId });
+  }
+
   async listModels({ includeHidden = false, limit = 200 } = {}) {
     const data: Array<Record<string, unknown>> = [];
     let cursor: string | null = null;

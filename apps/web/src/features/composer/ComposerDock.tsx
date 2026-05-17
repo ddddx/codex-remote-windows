@@ -1,5 +1,5 @@
 import type { CodexOptionModel } from '@codex-remote/protocol';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TokenUsageDisplay } from '../../app/view-helpers.js';
 import { useAppStore, type AttachmentItem } from '../../store/appStore.js';
 import { uploadImage } from '../../transport/http/uploads.js';
@@ -39,6 +39,61 @@ const PRESET_OPTIONS = ['', 'read-only', 'auto', 'full-access'];
 const MIN_TEXTAREA_HEIGHT = 42;
 const MAX_TEXTAREA_HEIGHT = 88;
 const EMPTY_ATTACHMENTS: AttachmentItem[] = [];
+
+type SlashCommandItem = {
+  command: string;
+  aliases?: string[];
+  description: string;
+  args?: string;
+  executable: boolean;
+};
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  { command: 'goal', description: 'set or view the goal for a long-running task', args: '[objective | clear | pause | resume | complete]', executable: true },
+  { command: 'compact', description: 'summarize conversation to prevent hitting the context limit', executable: true },
+  { command: 'rename', description: 'rename the current thread', args: '<name>', executable: true },
+  { command: 'stop', aliases: ['clean'], description: 'stop all background terminals', executable: true },
+  { command: 'review', description: 'review my current changes and find issues', executable: false },
+  { command: 'plan', description: 'switch to Plan mode', executable: false },
+  { command: 'diff', description: 'show git diff (including untracked files)', executable: false },
+  { command: 'status', description: 'show current session configuration and token usage', executable: false },
+  { command: 'model', description: 'choose what model and reasoning effort to use', executable: false },
+  { command: 'permissions', description: 'choose what Codex is allowed to do', executable: false },
+  { command: 'new', description: 'start a new chat during a conversation', executable: false },
+  { command: 'resume', description: 'resume a saved chat', executable: false },
+  { command: 'fork', description: 'fork the current chat', executable: false },
+  { command: 'init', description: 'create an AGENTS.md file with instructions for Codex', executable: false },
+  { command: 'copy', description: 'copy last response as markdown', executable: false },
+  { command: 'mention', description: 'mention a file', executable: false },
+  { command: 'skills', description: 'use skills to improve how Codex performs specific tasks', executable: false },
+  { command: 'mcp', description: 'list configured MCP tools; use /mcp verbose for details', executable: false },
+  { command: 'apps', description: 'manage apps', executable: false },
+  { command: 'plugins', description: 'browse plugins', executable: false },
+  { command: 'logout', description: 'log out of Codex', executable: false },
+  { command: 'quit', aliases: ['exit'], description: 'exit Codex', executable: false },
+];
+
+function getSlashQuery(value: string): string | null {
+  if (!value.startsWith('/') || value.includes('\n')) {
+    return null;
+  }
+  const body = value.slice(1);
+  if (body.includes(' ')) {
+    return null;
+  }
+  return body.toLowerCase();
+}
+
+function getSlashMatches(query: string): SlashCommandItem[] {
+  return SLASH_COMMANDS
+    .filter((item) => item.command.startsWith(query) || item.aliases?.some((alias) => alias.startsWith(query)))
+    .slice(0, 9);
+}
+
+function completeSlashCommand(current: string, command: SlashCommandItem): string {
+  const suffix = command.args ? ' ' : '';
+  return `/${command.command}${suffix || (current === `/${command.command}` ? '' : ' ')}`;
+}
 
 function formatReasoningLabel(value: string): string {
   if (!value) {
@@ -198,6 +253,19 @@ export function ComposerDock(props: ComposerDockProps) {
   const addAttachment = useAppStore((state) => state.addAttachment);
   const removeAttachment = useAppStore((state) => state.removeAttachment);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const slashQuery = getSlashQuery(draft);
+  const slashMatches = useMemo(() => slashQuery === null ? [] : getSlashMatches(slashQuery), [slashQuery]);
+  const slashMenuOpen = slashQuery !== null && slashMatches.length > 0;
+  const selectedSlashIndex = slashMatches.length ? Math.min(slashIndex, slashMatches.length - 1) : 0;
+
+  function applySlashCompletion(command: SlashCommandItem) {
+    const nextDraft = completeSlashCommand(draft, command);
+    setDraft(nextDraft);
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+  }
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -206,6 +274,10 @@ export function ComposerDock(props: ComposerDockProps) {
     }
     syncTextareaHeight(textarea, draft);
   }, [draft]);
+
+  useLayoutEffect(() => {
+    setSlashIndex(0);
+  }, [slashQuery]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -372,13 +444,49 @@ export function ComposerDock(props: ComposerDockProps) {
               syncTextareaHeight(event.currentTarget, event.target.value);
             }}
             onKeyDown={(event) => {
+              if (slashMenuOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                event.preventDefault();
+                setSlashIndex((index) => {
+                  const offset = event.key === 'ArrowDown' ? 1 : -1;
+                  return (index + offset + slashMatches.length) % slashMatches.length;
+                });
+                return;
+              }
+              if (slashMenuOpen && (event.key === 'Tab' || event.key === 'Enter')) {
+                event.preventDefault();
+                applySlashCompletion(slashMatches[selectedSlashIndex]);
+                return;
+              }
+              if (slashMenuOpen && event.key === 'Escape') {
+                event.preventDefault();
+                setDraft('');
+                return;
+              }
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit();
               }
             }}
           />
-          <div id="slashMenu" className="slash-menu" hidden></div>
+          <div id="slashMenu" className="slash-menu" hidden={!slashMenuOpen}>
+            {slashMatches.map((command, index) => (
+              <button
+                key={command.command}
+                type="button"
+                className={`slash-menu-item${index === selectedSlashIndex ? ' active' : ''}`}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  applySlashCompletion(command);
+                }}
+              >
+                <span className="slash-menu-command">/{command.command}</span>
+                {command.args ? <span className="slash-menu-args">{command.args}</span> : null}
+                <span className="slash-menu-description">{command.description}</span>
+                {!command.executable ? <span className="slash-menu-badge">提示</span> : null}
+              </button>
+            ))}
+            <div className="slash-menu-hint">`!命令` 会作为用户 shell 命令执行。</div>
+          </div>
         </div>
 
         <button type="submit" className="btn" disabled={busy || (!draft.trim() && !attachments.length) || !tokenReady}>
