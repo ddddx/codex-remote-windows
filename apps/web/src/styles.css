@@ -1278,6 +1278,57 @@ textarea {
   color: var(--warning-ink-strong);
 }
 
+.turn-plan-card {
+  border: 1px solid color-mix(in srgb, var(--thinking-ink-strong) 20%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-strong) 92%, var(--thinking-ink-strong) 8%);
+  padding: 12px 14px;
+}
+
+.turn-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.turn-plan-step {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.turn-plan-step-state {
+  width: 64px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-soft) 84%, transparent);
+}
+
+.turn-plan-step.status-completed .turn-plan-step-state {
+  color: var(--diff-add-ink);
+  background: var(--diff-add-bg);
+}
+
+.turn-plan-step.status-inProgress .turn-plan-step-state {
+  color: var(--thinking-ink-strong);
+  background: color-mix(in srgb, var(--thinking-ink-strong) 14%, transparent);
+}
+
+.turn-plan-step-text {
+  min-width: 0;
+  color: var(--timeline-body);
+  overflow-wrap: anywhere;
+}
+
 .kind-command .timeline-inline-title,
 .kind-mcp_tool .timeline-inline-title,
 .kind-dynamic_tool .timeline-inline-title,

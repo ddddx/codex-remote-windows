@@ -498,7 +498,9 @@ function extractTurnUserText(turn: any): string {
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
   const itemTextParts = items.flatMap((item: any) => {
-    if (item?.type !== 'userMessage') {
+    const itemType = typeof item?.type === 'string' ? item.type : '';
+    const itemRole = typeof item?.role === 'string' ? item.role : '';
+    if (itemType !== 'userMessage' && !(itemType === 'message' && itemRole === 'user')) {
       return [];
     }
     return [
@@ -542,7 +544,9 @@ function extractTurnAssistantText(turn: any): string {
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
   for (const item of items) {
-    if (item?.type !== 'agentMessage') {
+    const itemType = typeof item?.type === 'string' ? item.type : '';
+    const itemRole = typeof item?.role === 'string' ? item.role : '';
+    if (itemType !== 'agentMessage' && !(itemType === 'message' && itemRole === 'assistant')) {
       continue;
     }
     const text = extractStructuredText(item?.text)
@@ -668,6 +672,10 @@ function extractEventText(method: string, params: Record<string, unknown>, fallb
     || compactText(params.goal)
     || compactText(params.item)
     || fallback;
+}
+
+function shouldDisplayThreadEvent(method: string): boolean {
+  return method !== 'thread/goal/cleared';
 }
 
 function summarizeFileChangeText(
@@ -1122,6 +1130,52 @@ function createTimelineEntryFromItemEvent(
         ? item.createdAt
         : fallbackStartedAt,
   );
+  const itemRole = typeof item.role === 'string' ? item.role : '';
+
+  if (itemType === 'userMessage' || (itemType === 'message' && itemRole === 'user')) {
+    const text = extractStructuredText(item.text)
+      || extractStructuredText(item.content)
+      || extractStructuredText(item.input)
+      || extractStructuredText(item.message)
+      || extractStructuredText(item.parts);
+    if (!text) {
+      return null;
+    }
+    return {
+      id: itemId,
+      type: 'message',
+      role: 'user',
+      turnId,
+      itemId,
+      text,
+      status: typeof item.status === 'string' ? item.status : 'completed',
+      createdAt: startedAt,
+      details: item,
+    };
+  }
+
+  if (itemType === 'agentMessage' || (itemType === 'message' && itemRole === 'assistant')) {
+    const text = extractStructuredText(item.text)
+      || extractStructuredText(item.content)
+      || extractStructuredText(item.output)
+      || extractStructuredText(item.message)
+      || extractStructuredText(item.parts);
+    if (!text) {
+      return null;
+    }
+    return {
+      id: itemId,
+      type: 'message',
+      role: 'assistant',
+      turnId,
+      itemId,
+      text,
+      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      createdAt: startedAt,
+      partial: kind === 'item_started',
+      details: item,
+    };
+  }
 
   if (itemType === 'reasoning') {
     const summaryText = Array.isArray(item.summary)
@@ -1625,7 +1679,9 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const item = items[itemIndex];
       const fallbackItemTime = createdAt + itemIndex;
-      if (item?.type === 'userMessage') {
+      const itemType = typeof item?.type === 'string' ? item.type : '';
+      const itemRole = typeof item?.role === 'string' ? item.role : '';
+      if (itemType === 'userMessage' || (itemType === 'message' && itemRole === 'user')) {
         const text = [
           item?.text,
           item?.content,
@@ -1651,7 +1707,7 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
         continue;
       }
 
-      if (item?.type === 'agentMessage') {
+      if (itemType === 'agentMessage' || (itemType === 'message' && itemRole === 'assistant')) {
         const text = extractStructuredText(item?.text)
           || extractStructuredText(item?.content)
           || extractStructuredText(item?.output);
@@ -2273,14 +2329,15 @@ export const useAppStore = create<AppStore>((set) => ({
     } else {
       entries.push(normalizeTimelineEntry(entry));
     }
-    if (areTimelineEntryListsEqual(currentEntries, entries)) {
+    const dedupedEntries = dedupeOptimisticUserEntries(entries);
+    if (areTimelineEntryListsEqual(currentEntries, dedupedEntries)) {
       return state;
     }
     return {
       timeline: {
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
-          [threadId]: entries,
+          [threadId]: dedupedEntries,
         },
       },
     };
@@ -2434,6 +2491,9 @@ export function mapServerMessageToStore(message: ServerMessage) {
     const eventType = typeof event.type === 'string' ? event.type : '';
     if (!eventType) {
       return false;
+    }
+    if (eventType === 'thread_event') {
+      return shouldDisplayThreadEvent(typeof event.method === 'string' ? event.method : '');
     }
     if (eventType === 'turn_started' || eventType === 'turn_completed' || eventType === 'token_usage' || eventType === 'model_rerouted') {
       return true;
@@ -2852,6 +2912,9 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'thread_event') {
+    if (!shouldDisplayThreadEvent(message.method)) {
+      return;
+    }
     const params = message.params && typeof message.params === 'object' ? message.params as Record<string, unknown> : {};
     const entryId = message.itemId || `${message.threadId}:${message.turnId || 'thread'}:${message.method}`;
     const current = (useAppStore.getState().timeline.entriesBySessionId[message.threadId] || []).find((entry) => entry.id === entryId);

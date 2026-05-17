@@ -528,6 +528,74 @@ function renderFileChangeList(changes: RenderableFileChange[], keyPrefix: string
   );
 }
 
+function formatPlanStepStatus(status: string | undefined): string {
+  const normalized = normalizePlanStepStatus(status);
+  if (normalized === 'completed') {
+    return '已完成';
+  }
+  if (normalized === 'inProgress') {
+    return '进行中';
+  }
+  return '待处理';
+}
+
+function getPlanSteps(entry: TimelineEntry): Array<{ step: string; status: string }> {
+  const details = entry.details && typeof entry.details === 'object'
+    ? entry.details as Record<string, unknown>
+    : {};
+  const detailPlan = Array.isArray(details.plan) ? details.plan : [];
+  const steps = detailPlan
+    .map((item) => {
+      const value = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+      return {
+        step: typeof value.step === 'string' ? value.step.trim() : '',
+        status: typeof value.status === 'string' ? value.status : '',
+      };
+    })
+    .filter((item) => item.step);
+  if (steps.length) {
+    return steps;
+  }
+
+  return (entry.meta || [])
+    .map((line) => {
+      const [status = '', ...rest] = String(line).split(':');
+      return {
+        step: rest.join(':').trim(),
+        status: status.trim(),
+      };
+    })
+    .filter((item) => item.step);
+}
+
+function renderTurnPlan(entry: TimelineEntry) {
+  const steps = getPlanSteps(entry);
+  return (
+    <div className={`timeline-event kind-thinking ${buildTimelineStateClass(entry)}`}>
+      <div className="timeline-marker"><span className="timeline-marker-state" aria-hidden="true">{buildTimelineMarkerSymbol(entry)}</span></div>
+      <div className="timeline-content">
+        <article className="turn-plan-card">
+          <div className="timeline-inline-title">{entry.title || '执行计划'}</div>
+          {entry.text?.trim() ? (
+            <div className="timeline-inline-meta">{entry.text.trim()}</div>
+          ) : null}
+          <div className="turn-plan-steps">
+            {steps.map((item, index) => {
+              const normalizedStatus = normalizePlanStepStatus(item.status);
+              return (
+                <div key={`${entry.id}-plan-step-${index}`} className={`turn-plan-step status-${normalizedStatus}`}>
+                  <span className="turn-plan-step-state">{formatPlanStepStatus(item.status)}</span>
+                  <span className="turn-plan-step-text">{item.step}</span>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      </div>
+    </div>
+  );
+}
+
 function buildTurnActivityStatus(
   entries: TimelineEntry[],
   turnState: { active?: boolean; turnId?: string } | undefined,
@@ -630,7 +698,7 @@ function buildLatestRenderableStatus(renderables: TimelineRenderable[]): FooterS
 }
 
 function shouldRenderTimelineEntry(entry: TimelineEntry): boolean {
-  return entry.type !== 'reasoning' && entry.type !== 'plan' && entry.type !== 'turn_plan';
+  return entry.type !== 'reasoning' && entry.type !== 'plan';
 }
 
 function buildRenderableEntry(entry: TimelineEntry): TimelineRenderable {
@@ -779,6 +847,10 @@ const TimelineEntryCard = memo(function TimelineEntryCard({ entry, sessionId }: 
     patch: entry.patch,
     changes: entry.changes,
   }), [entry]);
+
+  if (entry.type === 'turn_plan') {
+    return renderTurnPlan(entry);
+  }
 
   if (entry.role === 'user' || entry.role === 'assistant') {
     const role = entry.role === 'user' ? 'user' : 'assistant';

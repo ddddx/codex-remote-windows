@@ -668,6 +668,36 @@ test('turn diff updates are cached and broadcast for timeline diff rendering', (
   assert.equal(messages[0]?.turnId, 'turn-diff-1');
 });
 
+test('turn plan updates are cached and broadcast for plan rendering', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  handleCodexNotification(app, {
+    method: 'turn/plan/updated',
+    params: {
+      threadId: 'thread-plan-1',
+      turnId: 'turn-plan-1',
+      explanation: 'Work in stages',
+      plan: [
+        { step: 'Inspect', status: 'completed' },
+        { step: 'Patch', status: 'in_progress' },
+      ],
+    },
+  });
+
+  const cached = app.runtimeState.turnPlansByThread.get('thread-plan-1')?.get('turn-plan-1');
+  assert.equal(cached?.explanation, 'Work in stages');
+  assert.deepEqual(cached?.plan, [
+    { step: 'Inspect', status: 'completed' },
+    { step: 'Patch', status: 'in_progress' },
+  ]);
+  const messages = socket.sent as Array<any>;
+  assert.equal(messages[0]?.type, 'turn_plan_updated');
+  assert.equal(messages[0]?.turnId, 'turn-plan-1');
+  assert.equal(messages[0]?.explanation, 'Work in stages');
+});
+
 test('model reroute notifications update runtime tab model and broadcast effective model', () => {
   const { app } = createAppStub();
   const socket = createSocket();

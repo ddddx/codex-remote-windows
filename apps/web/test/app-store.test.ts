@@ -387,6 +387,24 @@ test('reasoning, turn updates and notices are normalized into timeline semantics
   assert.ok(notifications.some((entry) => entry.message === 'Watch out' && entry.level === 'warning'));
 });
 
+test('turn plan entries remain visible in renderable timeline output', async () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'turn_plan_updated',
+    threadId: 'thread-plan-visible',
+    turnId: 'turn-plan-visible',
+    explanation: 'Do work',
+    plan: [{ step: 'Inspect', status: 'completed' }, { step: 'Patch', status: 'in_progress' }],
+  } as any);
+
+  const { TimelineWorkspace } = await import('../src/features/timeline/TimelineWorkspace.js');
+  assert.equal(typeof TimelineWorkspace, 'function');
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-plan-visible'] || [];
+  assert.ok(entries.some((entry) => entry.type === 'turn_plan'));
+});
+
 test('turn diff updates merge into the existing file change entry for the same turn', () => {
   resetStore();
 
@@ -747,6 +765,38 @@ test('thread sync restores user message text from direct userMessage text fields
   assert.ok(entries.some((entry) => entry.id === 'user-direct' && entry.role === 'user' && entry.text === '直接用户消息'));
 });
 
+test('thread sync restores user message text from generic message items with user role', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-generic-user-message',
+    turns: [{
+      id: 'turn-generic-user-message',
+      createdAt: 1,
+      updatedAt: 2,
+      items: [
+        {
+          id: 'user-generic',
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '通用用户消息' }],
+        },
+        {
+          id: 'assistant-generic',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: '通用助手回复' }],
+        },
+      ],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-generic-user-message'] || [];
+  assert.ok(entries.some((entry) => entry.id === 'user-generic' && entry.role === 'user' && entry.text === '通用用户消息'));
+  assert.ok(entries.some((entry) => entry.id === 'assistant-generic' && entry.role === 'assistant' && entry.text === '通用助手回复'));
+});
+
 test('thread sync preserves within-turn item order when items have no timestamps', () => {
   resetStore();
   const baseTime = 1_700_000_000_000;
@@ -867,6 +917,38 @@ test('thread sync reuses stable item ids and drops duplicate optimistic user ent
   assert.equal(entries.filter((entry) => entry.role === 'user' && entry.text === 'push').length, 1);
   assert.equal(entries.filter((entry) => entry.id === 'assistant-rt-1').length, 1);
   assert.equal(entries.filter((entry) => entry.id === 'cmd-rt-1').length, 1);
+});
+
+test('real-time user message completion dedupes optimistic local user entry', () => {
+  resetStore();
+
+  useAppStore.getState().appendTimelineEntry('thread-live-user-dedupe', {
+    id: 'local-user:web-live-user',
+    type: 'message',
+    role: 'user',
+    turnId: 'thread-live-user-dedupe:pending-turn',
+    text: 'deploy it',
+    createdAt: 10,
+  });
+
+  mapServerMessageToStore({
+    type: 'item_completed',
+    threadId: 'thread-live-user-dedupe',
+    turnId: 'turn-live-user-dedupe',
+    item: {
+      id: 'user-live-1',
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text: 'deploy it' }],
+      createdAt: 11,
+    },
+    completedAt: 11,
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-live-user-dedupe'] || [];
+  assert.equal(entries.filter((entry) => entry.role === 'user' && entry.text === 'deploy it').length, 1);
+  assert.ok(entries.some((entry) => entry.id === 'user-live-1'));
+  assert.ok(!entries.some((entry) => entry.id === 'local-user:web-live-user'));
 });
 
 test('real-time item started uses server event time so command stays after pending user prompt', () => {
@@ -1420,6 +1502,39 @@ test('generic thread events decode process output and restore from thread sync',
   entries = useAppStore.getState().timeline.entriesBySessionId['thread-generic-event'] || [];
   processEntry = entries.find((entry) => entry.id === 'proc-1');
   assert.equal(processEntry?.text, 'restored');
+});
+
+test('thread goal cleared events are ignored in real-time and thread sync restore', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_event',
+    threadId: 'thread-goal-cleared',
+    turnId: 'turn-goal-cleared',
+    method: 'thread/goal/cleared',
+    params: {},
+    createdAt: 1,
+  } as any);
+
+  let entries = useAppStore.getState().timeline.entriesBySessionId['thread-goal-cleared'] || [];
+  assert.equal(entries.length, 0);
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-goal-cleared',
+    turns: [],
+    timelineEvents: [{
+      type: 'thread_event',
+      threadId: 'thread-goal-cleared',
+      turnId: 'turn-goal-cleared',
+      method: 'thread/goal/cleared',
+      params: {},
+      createdAt: 1,
+    }],
+  } as any);
+
+  entries = useAppStore.getState().timeline.entriesBySessionId['thread-goal-cleared'] || [];
+  assert.equal(entries.length, 0);
 });
 
 test('additional codex thread item variants map to visible timeline entries', () => {

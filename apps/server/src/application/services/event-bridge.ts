@@ -461,6 +461,21 @@ export function handleCodexNotification(
     return;
   }
 
+  if (method === 'turn/plan/updated' && typeof params.threadId === 'string') {
+    const turnId = typeof params.turnId === 'string' ? params.turnId : undefined;
+    if (turnId) {
+      setCachedTurnPlan(app.runtimeState, params.threadId, turnId, params);
+    }
+    broadcastThreadTimelineMessage(app, {
+      type: 'turn_plan_updated',
+      threadId: params.threadId,
+      turnId,
+      explanation: typeof params.explanation === 'string' ? params.explanation : '',
+      plan: Array.isArray(params.plan) ? params.plan : [],
+    });
+    return;
+  }
+
   if (method === 'model/rerouted' && typeof params.threadId === 'string') {
     const current = app.runtimeState.tabsById.get(params.threadId);
     const toModel = typeof params.toModel === 'string' ? params.toModel : '';

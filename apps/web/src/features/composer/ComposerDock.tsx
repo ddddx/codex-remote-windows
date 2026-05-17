@@ -264,7 +264,7 @@ export function ComposerDock(props: ComposerDockProps) {
           >
             <option value="">{effectiveModel || '未设置'}</option>
             {modelOptions.map((item) => (
-              <option key={item.id || item.model} value={item.model}>{item.displayName || item.model}</option>
+              <option key={item.id || item.model} value={item.model}>{item.model || item.displayName}</option>
             ))}
           </select>
         </label>
