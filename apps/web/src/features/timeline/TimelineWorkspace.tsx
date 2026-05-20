@@ -694,19 +694,19 @@ function getLatestTurnPlanEntry(entries: TimelineEntry[]): TimelineEntry | null 
   return null;
 }
 
-function FloatingPlanDock({ entry }: { entry: TimelineEntry | null }) {
+function FloatingPlanDock({ entry, sessionId }: { entry: TimelineEntry | null; sessionId: string | null }) {
   const [open, setOpen] = useState(false);
-  const [dismissedEntryId, setDismissedEntryId] = useState<string | null>(null);
-  const entryId = entry?.id || null;
-  const isDismissed = entryId !== null && dismissedEntryId === entryId;
+  const [dismissedPlanKey, setDismissedPlanKey] = useState<string | null>(null);
+  const planKey = entry && sessionId ? `${sessionId}:${entry.id}` : null;
+  const isDismissed = planKey !== null && dismissedPlanKey === planKey;
 
   useEffect(() => {
-    if (!entryId) {
+    if (!planKey) {
       setOpen(false);
       return;
     }
-    setOpen(dismissedEntryId !== entryId);
-  }, [dismissedEntryId, entryId]);
+    setOpen(dismissedPlanKey !== planKey);
+  }, [dismissedPlanKey, planKey]);
 
   if (!entry) {
     return null;
@@ -734,7 +734,7 @@ function FloatingPlanDock({ entry }: { entry: TimelineEntry | null }) {
                 aria-label="关闭执行计划浮窗"
                 title="关闭"
                 onClick={() => {
-                  setDismissedEntryId(entry.id);
+                  setDismissedPlanKey(planKey);
                   setOpen(false);
                 }}
               >
@@ -752,7 +752,9 @@ function FloatingPlanDock({ entry }: { entry: TimelineEntry | null }) {
         aria-label={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
         title={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
         onClick={() => {
-          setDismissedEntryId(null);
+          if (planKey && dismissedPlanKey === planKey) {
+            setDismissedPlanKey(null);
+          }
           setOpen((value) => !(value && !isDismissed));
         }}
       >
@@ -1578,7 +1580,7 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
         {hasUnreadBelow ? '新消息 ︾' : '回到底部'}
       </button>
 
-      <FloatingPlanDock entry={activeSessionId ? latestPlanEntry : null} />
+      <FloatingPlanDock entry={activeSessionId ? latestPlanEntry : null} sessionId={activeSessionId} />
 
       {footerStatus ? (
         <div className="timeline-status-dock">
