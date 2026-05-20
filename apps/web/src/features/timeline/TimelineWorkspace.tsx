@@ -650,30 +650,115 @@ function getPlanSteps(entry: TimelineEntry): Array<{ step: string; status: strin
     .filter((item) => item.step);
 }
 
-function renderTurnPlan(entry: TimelineEntry) {
+function renderTurnPlanContent(entry: TimelineEntry, className = 'turn-plan-card') {
   const steps = getPlanSteps(entry);
+  return (
+    <article className={className}>
+      <div className="timeline-inline-title">{entry.title || '执行计划'}</div>
+      {entry.text?.trim() ? (
+        <div className="timeline-inline-meta">{entry.text.trim()}</div>
+      ) : null}
+      <div className="turn-plan-steps">
+        {steps.map((item, index) => {
+          const normalizedStatus = normalizePlanStepStatus(item.status);
+          return (
+            <div key={`${entry.id}-plan-step-${index}`} className={`turn-plan-step status-${normalizedStatus}`}>
+              <span className="turn-plan-step-state">{formatPlanStepStatus(item.status)}</span>
+              <span className="turn-plan-step-text">{item.step}</span>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function renderTurnPlan(entry: TimelineEntry) {
   return (
     <div className={`timeline-event kind-thinking ${buildTimelineStateClass(entry)}`}>
       <div className="timeline-marker"><span className="timeline-marker-state" aria-hidden="true">{buildTimelineMarkerSymbol(entry)}</span></div>
       <div className="timeline-content">
-        <article className="turn-plan-card">
-          <div className="timeline-inline-title">{entry.title || '执行计划'}</div>
-          {entry.text?.trim() ? (
-            <div className="timeline-inline-meta">{entry.text.trim()}</div>
-          ) : null}
-          <div className="turn-plan-steps">
-            {steps.map((item, index) => {
-              const normalizedStatus = normalizePlanStepStatus(item.status);
-              return (
-                <div key={`${entry.id}-plan-step-${index}`} className={`turn-plan-step status-${normalizedStatus}`}>
-                  <span className="turn-plan-step-state">{formatPlanStepStatus(item.status)}</span>
-                  <span className="turn-plan-step-text">{item.step}</span>
-                </div>
-              );
-            })}
-          </div>
-        </article>
+        {renderTurnPlanContent(entry)}
       </div>
+    </div>
+  );
+}
+
+function getLatestTurnPlanEntry(entries: TimelineEntry[]): TimelineEntry | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.type === 'turn_plan' && getPlanSteps(entry).length) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function FloatingPlanDock({ entry }: { entry: TimelineEntry | null }) {
+  const [open, setOpen] = useState(false);
+  const [dismissedEntryId, setDismissedEntryId] = useState<string | null>(null);
+  const entryId = entry?.id || null;
+  const isDismissed = entryId !== null && dismissedEntryId === entryId;
+
+  useEffect(() => {
+    if (!entryId) {
+      setOpen(false);
+      return;
+    }
+    setOpen(dismissedEntryId !== entryId);
+  }, [dismissedEntryId, entryId]);
+
+  if (!entry) {
+    return null;
+  }
+
+  return (
+    <div className={`floating-plan-dock${open && !isDismissed ? ' is-open' : ''}`}>
+      {open && !isDismissed ? (
+        <section className="floating-plan-panel" aria-label="当前执行计划">
+          <div className="floating-plan-panel-head">
+            <span>执行计划</span>
+            <div className="floating-plan-panel-actions">
+              <button
+                type="button"
+                className="floating-plan-icon-btn"
+                aria-label="收缩执行计划"
+                title="收缩"
+                onClick={() => setOpen(false)}
+              >
+                -
+              </button>
+              <button
+                type="button"
+                className="floating-plan-icon-btn"
+                aria-label="关闭执行计划浮窗"
+                title="关闭"
+                onClick={() => {
+                  setDismissedEntryId(entry.id);
+                  setOpen(false);
+                }}
+              >
+                x
+              </button>
+            </div>
+          </div>
+          {renderTurnPlanContent(entry, 'floating-plan-content')}
+        </section>
+      ) : null}
+      <button
+        type="button"
+        className="floating-plan-button"
+        aria-expanded={open && !isDismissed}
+        aria-label={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
+        title={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
+        onClick={() => {
+          setDismissedEntryId(null);
+          setOpen((value) => !(value && !isDismissed));
+        }}
+      >
+        <span className="floating-plan-button-icon" aria-hidden="true">~</span>
+        <span className="floating-plan-button-text">计划</span>
+      </button>
     </div>
   );
 }
@@ -1326,6 +1411,10 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
     [totalRenderableCount, visibleRenderables],
   );
   const firstVisibleRenderableId = visibleRenderables[0]?.id || null;
+  const latestPlanEntry = useMemo(
+    () => getLatestTurnPlanEntry(entries),
+    [entries],
+  );
 
   const footerStatus = useMemo(
     () => activeTurnStatus || buildLatestRenderableStatus(visibleRenderables),
@@ -1488,6 +1577,8 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
         >
         {hasUnreadBelow ? '新消息 ︾' : '回到底部'}
       </button>
+
+      <FloatingPlanDock entry={activeSessionId ? latestPlanEntry : null} />
 
       {footerStatus ? (
         <div className="timeline-status-dock">

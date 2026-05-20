@@ -1398,6 +1398,104 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.floating-plan-dock {
+  position: absolute;
+  right: 18px;
+  bottom: 64px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(420px, calc(100% - 32px));
+  pointer-events: none;
+}
+
+.floating-plan-dock > * {
+  pointer-events: auto;
+}
+
+.floating-plan-panel {
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(56vh, 520px);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--thinking-ink-strong) 28%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-strong) 94%, var(--thinking-ink-strong) 6%);
+  box-shadow: 0 18px 36px rgba(31, 26, 23, 0.18);
+}
+
+.floating-plan-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 8px;
+  color: var(--thinking-ink-strong);
+  font-size: 13px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--card-strong) 96%, var(--thinking-ink-strong) 4%);
+  border-bottom: 1px solid color-mix(in srgb, var(--thinking-ink-strong) 14%, transparent);
+}
+
+.floating-plan-panel-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.floating-plan-icon-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid color-mix(in srgb, var(--thinking-ink-strong) 22%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-soft) 82%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.floating-plan-content {
+  padding: 10px 12px 12px;
+}
+
+.floating-plan-content .timeline-inline-title {
+  display: none;
+}
+
+.floating-plan-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 13px 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--thinking-ink-strong) 28%, var(--line));
+  border-radius: 999px;
+  background: var(--card-strong);
+  color: var(--ink);
+  box-shadow: 0 12px 24px rgba(31, 26, 23, 0.14);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.floating-plan-button-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #8f78c9;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 13px;
+  line-height: 1;
+}
+
 .kind-command .timeline-inline-title,
 .kind-mcp_tool .timeline-inline-title,
 .kind-dynamic_tool .timeline-inline-title,
@@ -2420,6 +2518,12 @@ textarea {
     bottom: 14px;
   }
 
+  .floating-plan-dock {
+    right: 14px;
+    bottom: 62px;
+    max-width: calc(100% - 28px);
+  }
+
   .task-panel-body {
     width: 100%;
   }
@@ -2474,6 +2578,21 @@ textarea {
   .health-home {
     width: 100%;
     grid-template-columns: 1fr;
+  }
+
+  .floating-plan-panel {
+    width: calc(100vw - 28px);
+    max-height: 50vh;
+  }
+
+  .floating-plan-button-text {
+    display: none;
+  }
+
+  .floating-plan-button {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 9px;
   }
 
   .message.user,
