@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { broadcastMessage, ensureCodexReady } from '../../ws/bridge.js';
 import { upsertSupplementalItem } from './runtime-cache.js';
 import { bootstrapTabs } from './thread-sync.js';
-import { upsertRuntimeTab } from './session-tabs.js';
+import { toSessionTabPayload, upsertRuntimeTab } from './session-tabs.js';
 
 type TurnSendMessage = Extract<ClientMessage, { type: 'turn_send' }>;
 
@@ -71,7 +71,7 @@ export function createTurnService(app: FastifyInstance) {
           model: message.model || current.model || '',
           reasoningEffort: message.effort || current.reasoningEffort || '',
         });
-        broadcastMessage(app, { type: 'tab_updated', tab });
+        broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
         return;
       }
 

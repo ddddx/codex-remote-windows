@@ -10,6 +10,7 @@ import {
   formatApprovalMethodLabel,
   formatHealthStatus,
   formatTimelineLabel,
+  getMcpSchemaProperties,
   getDecisionLabel,
   isDynamicToolApproval,
   isMcpElicitationApproval,
@@ -1265,6 +1266,7 @@ const ApprovalCard = memo(function ApprovalCard({
 
           {isDynamicToolApproval(request) ? (
             <div className="approval-form">
+              {request.arguments ? <pre className="timeline-entry-pre">{JSON.stringify(request.arguments, null, 2)}</pre> : null}
               <textarea
                 className="approval-text-input"
                 placeholder='填写 JSON 数组，例如 [{"type":"inputText","text":"ok"}]'
@@ -1308,9 +1310,9 @@ const ApprovalCard = memo(function ApprovalCard({
               {request.mode === 'url' && request.url ? (
                 <a className="approval-link" href={request.url} target="_blank" rel="noreferrer">{request.url}</a>
               ) : null}
-              {request.mode !== 'url' && (request.requestedSchema || request.responseSchema) && typeof (request.requestedSchema || request.responseSchema) === 'object' ? (
+              {request.mode !== 'url' && Object.keys(getMcpSchemaProperties(request)).length ? (
                 <div className="approval-question">
-                  {Object.entries(((((request.requestedSchema || request.responseSchema) as any)?.properties || {}) as Record<string, Record<string, unknown>>)).map(([fieldKey, fieldSpec]) => (
+                  {Object.entries(getMcpSchemaProperties(request)).map(([fieldKey, fieldSpec]) => (
                     <label key={fieldKey} className="modal-label">
                       <span>{typeof fieldSpec?.title === 'string' ? fieldSpec.title : fieldKey}</span>
                       <input
@@ -1335,12 +1337,12 @@ const ApprovalCard = memo(function ApprovalCard({
                         type="button"
                         disabled={request.status === 'submitting'}
                         onClick={() => {
-                          const properties = (((request.responseSchema as any)?.properties || {}) as Record<string, Record<string, unknown>>);
+                          const properties = getMcpSchemaProperties(request);
                           const content = Object.fromEntries(
-                          Object.entries(properties).map(([fieldKey, fieldSpec]) => [fieldKey, normalizeSchemaFieldValue(mcpValues[fieldKey] || '', fieldSpec)]),
-                        );
-                        onRespond(request, { action: 'accept', content, _meta: request.meta });
-                      }}
+                            Object.entries(properties).map(([fieldKey, fieldSpec]) => [fieldKey, normalizeSchemaFieldValue(mcpValues[fieldKey] || '', fieldSpec)]),
+                          );
+                          onRespond(request, { action: 'accept', content, _meta: request.meta });
+                        }}
                         >
                         提交
                       </button>

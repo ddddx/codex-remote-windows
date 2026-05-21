@@ -126,6 +126,27 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();
+    const userInputApproval = page.locator('.approval-banner').filter({ hasText: 'Environment' });
+    await expect(userInputApproval).toContainText('API Token');
+    await userInputApproval.getByLabel('staging').check();
+    await userInputApproval.locator('input[type="password"]').fill('secret-value');
+    await userInputApproval.getByRole('button', { name: '提交回答' }).click();
+
+    const dynamicToolApproval = page.locator('.approval-banner').filter({ hasText: 'mock.math.sum' });
+    await expect(dynamicToolApproval).toContainText('"a": 1');
+    await dynamicToolApproval.getByPlaceholder('填写 JSON 数组，例如 [{"type":"inputText","text":"ok"}]').fill('[{"type":"inputText","text":"ok from tool"}]');
+    await dynamicToolApproval.getByRole('button', { name: '提交结果' }).click();
+
+    const mcpFormApproval = page.locator('.approval-banner').filter({ hasText: 'Collect deployment data' });
+    await expect(mcpFormApproval).toContainText('Ticket');
+    await mcpFormApproval.locator('input').nth(0).fill('ABC-123');
+    await mcpFormApproval.locator('input').nth(1).fill('true');
+    await mcpFormApproval.locator('input').nth(2).fill('2');
+    await mcpFormApproval.getByRole('button', { name: '提交' }).click();
+
+    const mcpUrlApproval = page.locator('.approval-banner').filter({ hasText: 'Authorize external service' });
+    await expect(mcpUrlApproval).toContainText('https://example.com/authorize');
+    await mcpUrlApproval.getByRole('button', { name: '允许' }).click();
     await expect(page.locator('.approval-banner')).toHaveCount(0);
 
     await page.locator('#imageInput').setInputFiles({

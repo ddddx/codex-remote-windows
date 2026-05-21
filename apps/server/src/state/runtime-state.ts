@@ -2,6 +2,13 @@ import type {
   PersistedServerRequestRecord,
   RuntimeServerRequest,
 } from '../application/services/server-requests.js';
+import type {
+  GlobalSupplementalItemPayload,
+  SupplementalItemPayload,
+  TimelineEventPayload,
+  TurnDiffPayload,
+  TurnPlanPayload,
+} from '@codex-remote/protocol';
 
 type RuntimeTab = {
   threadId: string;
@@ -28,47 +35,11 @@ export type AuthSessionRecord = {
   revokedAt?: number | null;
 };
 
-export type TurnPlanSnapshot = {
-  turnId: string;
-  explanation: string;
-  plan: Array<{ step?: string; status?: string }>;
-  updatedAt: number;
-};
-
-export type TurnDiffSnapshot = {
-  turnId: string;
-  diff: string;
-  updatedAt: number;
-};
-
-export type SupplementalItemSnapshot = {
-  id: string;
-  type: string;
-  _turnId?: string | null;
-  phase?: string;
-  status?: string;
-  run?: Record<string, unknown>;
-  review?: Record<string, unknown> | null;
-  action?: Record<string, unknown> | null;
-  targetItemId?: string | null;
-  decisionSource?: string | null;
-  createdAt?: number;
-  updatedAt?: number;
-  startedAt?: number;
-  completedAt?: number | null;
-  [key: string]: unknown;
-};
-
-export type GlobalNoticeSnapshot = {
-  id: string;
-  type: string;
-  text: string;
-  noticeKind?: string;
-  createdAt: number;
-  [key: string]: unknown;
-};
-
-export type TimelineEventSnapshot = Record<string, unknown>;
+export type TurnPlanSnapshot = TurnPlanPayload;
+export type TurnDiffSnapshot = TurnDiffPayload;
+export type SupplementalItemSnapshot = SupplementalItemPayload;
+export type GlobalNoticeSnapshot = GlobalSupplementalItemPayload;
+export type TimelineEventSnapshot = TimelineEventPayload;
 
 type RuntimeRepositories = {
   sessions: {

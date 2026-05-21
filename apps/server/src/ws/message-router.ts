@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
 import { ensureCodexReady } from './bridge.js';
+import { toSessionTabPayload } from '../application/services/session-tabs.js';
 
 type WsLike = {
   send: (payload: string) => void;
@@ -15,7 +16,7 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
 
   if (message.type === 'tab_create') {
     const tab = await app.services.sessions.createTab(message);
-    sendMessage(socket, { type: 'tab_created', threadId: tab.threadId, tab });
+    sendMessage(socket, { type: 'tab_created', threadId: tab.threadId, tab: toSessionTabPayload(tab) });
     return;
   }
 
@@ -52,14 +53,14 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
   if (message.type === 'tab_close') {
     const tab = await app.services.sessions.closeTabWindow(message.threadId);
     if (tab) {
-      sendMessage(socket, { type: 'tab_updated', tab });
+      sendMessage(socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     return;
   }
 
   if (message.type === 'thread_sync') {
     const { tab, message: snapshot } = await app.services.sessions.syncThread(message.threadId);
-    sendMessage(socket, { type: 'tab_updated', tab });
+    sendMessage(socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     sendMessage(socket, snapshot);
     return;
   }

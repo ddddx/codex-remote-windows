@@ -1,7 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerNotification, v2 } from '@codex-remote/codex-app-server-types';
+import type {
+  GuardianActionPayload,
+  GuardianReviewPayload,
+  HookRunPayload,
+  TimelineEventPayload,
+  TokenUsagePayload,
+  TurnPlanPayload,
+} from '@codex-remote/protocol';
 import { persistServerRequest, toServerRequestPayload } from './server-requests.js';
-import { upsertRuntimeTab } from './session-tabs.js';
+import { toSessionTabPayload, upsertRuntimeTab } from './session-tabs.js';
 import {
   appendTimelineEvent,
   pushGlobalNotice,
@@ -19,7 +27,7 @@ function nowUnix(): number {
 const AGENT_DELTA_FLUSH_MS = 40;
 
 type PendingAgentDelta = {
-  message: Record<string, unknown> & {
+  message: Extract<TimelineEventPayload, { type: 'agent_delta' }> & {
     threadId: string;
     itemId?: string;
     turnId?: string;
@@ -35,12 +43,9 @@ function buildAgentDeltaKey(threadId: string, turnId: string | undefined, itemId
   return [threadId, turnId || '', itemId || ''].join(':');
 }
 
-function broadcastThreadTimelineMessage(app: FastifyInstance, message: Record<string, unknown>): void {
-  const threadId = typeof message.threadId === 'string' ? message.threadId : undefined;
-  if (threadId) {
-    appendTimelineEvent(app.runtimeState, threadId, message);
-  }
-  broadcastMessage(app, message as any);
+function broadcastThreadTimelineMessage(app: FastifyInstance, message: TimelineEventPayload): void {
+  appendTimelineEvent(app.runtimeState, message.threadId, message);
+  broadcastMessage(app, message);
 }
 
 function getThreadId(params: Record<string, unknown>): string | undefined {
@@ -92,6 +97,59 @@ function extractStatus(params: Record<string, unknown>): string | undefined {
     return params.success ? 'completed' : 'failed';
   }
   return undefined;
+}
+
+function toHookRunPayload(run: v2.HookRunSummary | Record<string, unknown> | null | undefined): HookRunPayload | undefined {
+  if (!run || typeof run !== 'object') {
+    return undefined;
+  }
+  const source = run as Record<string, unknown>;
+  const id = typeof source.id === 'string' ? source.id : '';
+  if (!id) {
+    return undefined;
+  }
+  return {
+    id,
+    eventName: typeof source.eventName === 'string' ? source.eventName : undefined,
+    handlerType: typeof source.handlerType === 'string' ? source.handlerType : undefined,
+    executionMode: typeof source.executionMode === 'string' ? source.executionMode : undefined,
+    scope: typeof source.scope === 'string' ? source.scope : undefined,
+    sourcePath: typeof source.sourcePath === 'string' ? source.sourcePath : undefined,
+    source: typeof source.source === 'string' ? source.source : undefined,
+    displayOrder: typeof source.displayOrder === 'number' ? source.displayOrder : undefined,
+    status: typeof source.status === 'string' ? source.status : undefined,
+    statusMessage: typeof source.statusMessage === 'string' || source.statusMessage === null ? source.statusMessage as string | null : undefined,
+    startedAt: typeof source.startedAt === 'number' ? source.startedAt : undefined,
+    completedAt: typeof source.completedAt === 'number' || source.completedAt === null ? source.completedAt as number | null : undefined,
+    durationMs: typeof source.durationMs === 'number' || source.durationMs === null ? source.durationMs as number | null : undefined,
+    command: typeof source.command === 'string' ? source.command : undefined,
+    exitCode: typeof source.exitCode === 'number' || source.exitCode === null ? source.exitCode as number | null : undefined,
+    entries: Array.isArray(source.entries) ? source.entries.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object') : undefined,
+  };
+}
+
+function toGuardianReviewPayload(review: v2.GuardianApprovalReview | Record<string, unknown> | null | undefined): GuardianReviewPayload | null | undefined {
+  if (!review || typeof review !== 'object') {
+    return review === null ? null : undefined;
+  }
+  const source = review as Record<string, unknown>;
+  const status = typeof source.status === 'string' ? source.status : undefined;
+  if (!status) {
+    return undefined;
+  }
+  return {
+    status: status as GuardianReviewPayload['status'],
+    riskLevel: typeof source.riskLevel === 'string' || source.riskLevel === null ? source.riskLevel as GuardianReviewPayload['riskLevel'] : null,
+    userAuthorization: typeof source.userAuthorization === 'string' || source.userAuthorization === null ? source.userAuthorization as GuardianReviewPayload['userAuthorization'] : null,
+    rationale: typeof source.rationale === 'string' || source.rationale === null ? source.rationale as string | null : null,
+  };
+}
+
+function toGuardianActionPayload(action: v2.GuardianApprovalReviewAction | Record<string, unknown> | null | undefined): GuardianActionPayload | null | undefined {
+  if (!action || typeof action !== 'object') {
+    return action === null ? null : undefined;
+  }
+  return action as GuardianActionPayload;
 }
 
 function broadcastGenericThreadEvent(
@@ -173,7 +231,7 @@ export function handleCodexNotification(
   if (method === 'thread/started') {
     const notification = msg.params as v2.ThreadStartedNotification;
     const tab = upsertRuntimeTab(app, notification.thread as unknown as Record<string, unknown>);
-    broadcastMessage(app, { type: 'tab_updated', tab });
+    broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     return;
   }
 
@@ -187,7 +245,7 @@ export function handleCodexNotification(
       status: typeof params.status === 'string' ? params.status : current.status,
       updatedAt: nowUnix(),
     });
-    broadcastMessage(app, { type: 'tab_updated', tab });
+    broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     return;
   }
 
@@ -201,7 +259,7 @@ export function handleCodexNotification(
       name: typeof params.threadName === 'string' && params.threadName.trim() ? params.threadName : current.name,
       updatedAt: nowUnix(),
     });
-    broadcastMessage(app, { type: 'tab_updated', tab });
+    broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     return;
   }
 
@@ -213,12 +271,12 @@ export function handleCodexNotification(
         tokenUsage: params.tokenUsage ?? null,
         updatedAt: nowUnix(),
       });
-      broadcastMessage(app, { type: 'tab_updated', tab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'token_usage',
       threadId: params.threadId,
-      usage: params.tokenUsage ?? null,
+      usage: (params.tokenUsage ?? null) as TokenUsagePayload,
     });
     return;
   }
@@ -232,7 +290,7 @@ export function handleCodexNotification(
         status: 'running',
         updatedAt: nowUnix(),
       });
-      broadcastMessage(app, { type: 'tab_updated', tab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_started',
@@ -261,7 +319,7 @@ export function handleCodexNotification(
         status: nextStatus,
         updatedAt: nowUnix(),
       });
-      broadcastMessage(app, { type: 'tab_updated', tab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_completed',
@@ -327,55 +385,57 @@ export function handleCodexNotification(
   }
 
   if (method === 'hook/started' && typeof params.threadId === 'string') {
-    const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
-    const runId = typeof run.id === 'string' ? run.id : '';
+    const run = toHookRunPayload(params.run as v2.HookRunSummary | Record<string, unknown> | null | undefined);
+    const runId = run?.id || '';
     if (runId) {
       upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: runId,
         type: 'hookEvent',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
         phase: 'started',
-        status: typeof run.status === 'string' ? run.status : '',
+        status: run?.status || '',
         run,
-        startedAt: typeof run.startedAt === 'number' ? run.startedAt : Date.now(),
-        completedAt: typeof run.completedAt === 'number' ? run.completedAt : null,
+        startedAt: typeof run?.startedAt === 'number' ? run.startedAt : Date.now(),
+        completedAt: typeof run?.completedAt === 'number' || run?.completedAt === null ? run.completedAt ?? null : null,
       });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'hook_started',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      run: params.run,
+      run,
     });
     return;
   }
 
   if (method === 'hook/completed' && typeof params.threadId === 'string') {
-    const run = params.run && typeof params.run === 'object' ? params.run as Record<string, unknown> : {};
-    const runId = typeof run.id === 'string' ? run.id : '';
+    const run = toHookRunPayload(params.run as v2.HookRunSummary | Record<string, unknown> | null | undefined);
+    const runId = run?.id || '';
     if (runId) {
       upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: runId,
         type: 'hookEvent',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
         phase: 'completed',
-        status: typeof run.status === 'string' ? run.status : '',
+        status: run?.status || '',
         run,
-        startedAt: typeof run.startedAt === 'number' ? run.startedAt : Date.now(),
-        completedAt: typeof run.completedAt === 'number' ? run.completedAt : Date.now(),
+        startedAt: typeof run?.startedAt === 'number' ? run.startedAt : Date.now(),
+        completedAt: typeof run?.completedAt === 'number' ? run.completedAt : Date.now(),
       });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'hook_completed',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      run: params.run,
+      run,
     });
     return;
   }
 
   if (method === 'item/autoApprovalReview/started' && typeof params.threadId === 'string') {
     const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
+    const review = toGuardianReviewPayload(params.review as v2.GuardianApprovalReview | Record<string, unknown> | null | undefined) ?? null;
+    const action = toGuardianActionPayload(params.action as v2.GuardianApprovalReviewAction | Record<string, unknown> | null | undefined) ?? null;
     if (reviewId) {
       upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: reviewId,
@@ -383,8 +443,8 @@ export function handleCodexNotification(
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
         phase: 'started',
         status: 'running',
-        review: params.review as Record<string, unknown> | null,
-        action: params.action as Record<string, unknown> | null,
+        review,
+        action,
         targetItemId: typeof params.targetItemId === 'string' ? params.targetItemId : null,
         startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now(),
       });
@@ -399,15 +459,17 @@ export function handleCodexNotification(
 
   if (method === 'item/autoApprovalReview/completed' && typeof params.threadId === 'string') {
     const reviewId = typeof params.reviewId === 'string' ? params.reviewId : '';
+    const review = toGuardianReviewPayload(params.review as v2.GuardianApprovalReview | Record<string, unknown> | null | undefined) ?? null;
+    const action = toGuardianActionPayload(params.action as v2.GuardianApprovalReviewAction | Record<string, unknown> | null | undefined) ?? null;
     if (reviewId) {
       upsertSupplementalItem(app.runtimeState, params.threadId, {
         id: reviewId,
         type: 'guardianReview',
         _turnId: typeof params.turnId === 'string' ? params.turnId : null,
         phase: 'completed',
-        status: typeof (params.review as any)?.status === 'string' ? (params.review as any).status : 'completed',
-        review: params.review as Record<string, unknown> | null,
-        action: params.action as Record<string, unknown> | null,
+        status: review?.status || 'completed',
+        review,
+        action,
         targetItemId: typeof params.targetItemId === 'string' ? params.targetItemId : null,
         decisionSource: typeof params.decisionSource === 'string' ? params.decisionSource : null,
         startedAt: typeof params.startedAtMs === 'number' ? params.startedAtMs : Date.now(),
@@ -423,11 +485,14 @@ export function handleCodexNotification(
   }
 
   if (method === 'item/started' && typeof params.threadId === 'string') {
+    const item = params.item && typeof params.item === 'object'
+      ? params.item as v2.ThreadItem
+      : undefined;
     broadcastThreadTimelineMessage(app, {
       type: 'item_started',
       threadId: params.threadId,
       turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      item: params.item,
+      item,
       startedAt: Date.now(),
     });
     return;
@@ -469,7 +534,11 @@ export function handleCodexNotification(
     const notification = msg.params as v2.TurnPlanUpdatedNotification;
     const turnId = notification.turnId;
     if (turnId) {
-      setCachedTurnPlan(app.runtimeState, notification.threadId, turnId, notification as unknown as Record<string, unknown>);
+      const snapshot: Pick<TurnPlanPayload, 'explanation' | 'plan'> = {
+        explanation: notification.explanation || '',
+        plan: notification.plan,
+      };
+      setCachedTurnPlan(app.runtimeState, notification.threadId, turnId, snapshot);
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_plan_updated',
@@ -491,7 +560,7 @@ export function handleCodexNotification(
         model: toModel,
         updatedAt: nowUnix(),
       });
-      broadcastMessage(app, { type: 'tab_updated', tab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     broadcastThreadTimelineMessage(app, {
       type: 'model_rerouted',
@@ -512,7 +581,7 @@ export function handleCodexNotification(
         status: 'closed',
         updatedAt: nowUnix(),
       });
-      broadcastMessage(app, { type: 'tab_updated', tab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     broadcastGenericThreadEvent(app, method, params);
     return;
@@ -570,7 +639,7 @@ export function handleCodexNotification(
       delta: typeof params.delta === 'string' ? params.delta : undefined,
       patch: typeof params.patch === 'string' ? params.patch : undefined,
       changes: Array.isArray(params.changes) ? params.changes : undefined,
-      part: params.part,
+      part: params.part as TimelineEventPayload extends { type: 'item_delta'; part?: infer T } ? T : never,
       startedAt: typeof params.startedAt === 'number' ? params.startedAt : Date.now(),
     });
     return;

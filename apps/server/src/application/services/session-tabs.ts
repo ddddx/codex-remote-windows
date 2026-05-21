@@ -1,4 +1,5 @@
 import { createSessionRecord, createThreadPreferenceRecord } from '@codex-remote/domain';
+import type { SessionTabPayload, TokenUsagePayload } from '@codex-remote/protocol';
 import type { FastifyInstance } from 'fastify';
 
 export type RuntimeTab = {
@@ -104,4 +105,21 @@ export function listRuntimeTabs(app: FastifyInstance): RuntimeTab[] {
     }
     return left.threadId.localeCompare(right.threadId);
   });
+}
+
+export function toSessionTabPayload(tab: RuntimeTab): SessionTabPayload {
+  return {
+    threadId: tab.threadId,
+    name: tab.name,
+    cwd: tab.cwd,
+    status: tab.status,
+    windowStatus: tab.windowStatus,
+    approvalPolicy: tab.approvalPolicy,
+    sandboxMode: tab.sandboxMode,
+    model: tab.model,
+    reasoningEffort: tab.reasoningEffort,
+    tokenUsage: (tab.tokenUsage ?? null) as TokenUsagePayload,
+    createdAt: tab.createdAt,
+    updatedAt: tab.updatedAt,
+  };
 }

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
+import type { v2 } from '@codex-remote/codex-app-server-types';
 
 type MockBackend = {
   apiBaseUrl: string;
@@ -17,6 +18,14 @@ export async function startMockBackend(): Promise<MockBackend> {
     sandboxMode?: string;
   }>();
   const pendingTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function toErrorMessage(prefix: string, detail: string): string {
+    return `${prefix}: ${detail}`;
+  }
 
   function later(delayMs: number, task: () => void) {
     const timer = setTimeout(() => {
@@ -215,6 +224,205 @@ export async function startMockBackend(): Promise<MockBackend> {
   });
 
   wss.on('connection', (socket) => {
+    const followUpRequests: Array<Record<string, unknown>> = [
+      {
+        requestId: 'req-user-input',
+        method: 'item/tool/requestUserInput',
+        threadId: 'thread-1',
+        turnId: 'turn-2',
+        itemId: 'tool-user-input-1',
+        kind: 'user_input',
+        status: 'pending',
+        createdAt: 5,
+        questions: [
+          {
+            id: 'environment',
+            header: 'Environment',
+            question: 'Choose target environment',
+            isOther: false,
+            isSecret: false,
+            options: [
+              { label: 'staging', description: 'Deploy to staging' },
+              { label: 'production', description: 'Deploy to production' },
+            ],
+          },
+          {
+            id: 'api_token',
+            header: 'API Token',
+            question: 'Provide API token',
+            isOther: false,
+            isSecret: true,
+            options: [],
+          },
+        ],
+      },
+      {
+        requestId: 'req-dynamic-tool',
+        method: 'item/tool/call',
+        threadId: 'thread-1',
+        turnId: 'turn-2',
+        itemId: 'tool-call-1',
+        kind: 'dynamic_tool_call',
+        status: 'pending',
+        createdAt: 6,
+        namespace: 'mock.math',
+        tool: 'sum',
+        arguments: {
+          a: 1,
+          b: 2,
+        },
+      },
+      {
+        requestId: 'req-mcp-form',
+        method: 'mcpServer/elicitation/request',
+        threadId: 'thread-1',
+        turnId: 'turn-2',
+        kind: 'mcp_server_elicitation',
+        status: 'pending',
+        createdAt: 7,
+        serverName: 'mock-mcp',
+        message: 'Collect deployment data',
+        mode: 'form',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            ticket: { type: 'string', title: 'Ticket' },
+            urgent: { type: 'boolean', title: 'Urgent' },
+            attempts: { type: 'integer', title: 'Attempts' },
+          },
+        },
+        responseSchema: {
+          type: 'object',
+          properties: {
+            ticket: { type: 'string', title: 'Ticket' },
+            urgent: { type: 'boolean', title: 'Urgent' },
+            attempts: { type: 'integer', title: 'Attempts' },
+          },
+        },
+        meta: { source: 'mock-form' },
+      },
+      {
+        requestId: 'req-mcp-url',
+        method: 'mcpServer/elicitation/request',
+        threadId: 'thread-1',
+        turnId: 'turn-2',
+        kind: 'mcp_server_elicitation',
+        status: 'pending',
+        createdAt: 8,
+        serverName: 'mock-mcp',
+        message: 'Authorize external service',
+        mode: 'url',
+        url: 'https://example.com/authorize',
+        elicitationId: 'elicit-1',
+        meta: { source: 'mock-url' },
+      },
+    ];
+    let nextFollowUpIndex = 0;
+
+    function sendApprovalRequest(request: Record<string, unknown>) {
+      socket.send(JSON.stringify({
+        type: 'server_request_required',
+        request,
+      }));
+    }
+
+    function sendResolvedRequest(requestId: string) {
+      socket.send(JSON.stringify({
+        type: 'server_request_resolved',
+        requestId,
+        threadId: 'thread-1',
+      }));
+    }
+
+    function sendResponseError(message: string) {
+      socket.send(JSON.stringify({
+        type: 'error',
+        threadId: 'thread-1',
+        message,
+      }));
+    }
+
+    function queueNextFollowUpRequest() {
+      const request = followUpRequests[nextFollowUpIndex];
+      nextFollowUpIndex += 1;
+      if (!request) {
+        return;
+      }
+      later(15, () => sendApprovalRequest(request));
+    }
+
+    function validateApprovalResponse(requestId: string, response: unknown): string | null {
+      const record = isRecord(response) ? response : null;
+      if (!record) {
+        return toErrorMessage(requestId, 'response must be an object');
+      }
+
+      if (requestId === 'req-1') {
+        return record.decision === 'accept'
+          ? null
+          : toErrorMessage(requestId, `expected decision=accept, got ${JSON.stringify(response)}`);
+      }
+
+      if (requestId === 'req-user-input') {
+        const answers = isRecord(record.answers) ? record.answers : null;
+        const environment = answers && isRecord(answers.environment) ? answers.environment as v2.ToolRequestUserInputResponse['answers'][string] : null;
+        const apiToken = answers && isRecord(answers.api_token) ? answers.api_token as v2.ToolRequestUserInputResponse['answers'][string] : null;
+        if (
+          Array.isArray(environment?.answers)
+          && environment.answers[0] === 'staging'
+          && Array.isArray(apiToken?.answers)
+          && apiToken.answers[0] === 'secret-value'
+        ) {
+          return null;
+        }
+        return toErrorMessage(requestId, `unexpected answers ${JSON.stringify(response)}`);
+      }
+
+      if (requestId === 'req-dynamic-tool') {
+        const contentItems = Array.isArray(record.contentItems) ? record.contentItems : null;
+        const first = contentItems?.[0];
+        if (
+          record.success === true
+          && first
+          && isRecord(first)
+          && first.type === 'inputText'
+          && first.text === 'ok from tool'
+        ) {
+          return null;
+        }
+        return toErrorMessage(requestId, `unexpected dynamic tool payload ${JSON.stringify(response)}`);
+      }
+
+      if (requestId === 'req-mcp-form') {
+        const content = isRecord(record.content) ? record.content : null;
+        const meta = isRecord(record._meta) ? record._meta : null;
+        if (
+          record.action === 'accept'
+          && content?.ticket === 'ABC-123'
+          && content?.urgent === true
+          && content?.attempts === 2
+          && meta?.source === 'mock-form'
+        ) {
+          return null;
+        }
+        return toErrorMessage(requestId, `unexpected MCP form payload ${JSON.stringify(response)}`);
+      }
+
+      if (requestId === 'req-mcp-url') {
+        const meta = isRecord(record._meta) ? record._meta : null;
+        if (
+          record.action === 'accept'
+          && record.content === null
+          && meta?.source === 'mock-url'
+        ) {
+          return null;
+        }
+        return toErrorMessage(requestId, `unexpected MCP url payload ${JSON.stringify(response)}`);
+      }
+
+      return toErrorMessage(requestId, 'unknown request id');
+    }
+
     socket.send(JSON.stringify({
       type: 'state',
       tabs: [{
@@ -464,11 +672,20 @@ export async function startMockBackend(): Promise<MockBackend> {
       }
 
       if (message.type === 'server_request_respond') {
-        socket.send(JSON.stringify({
-          type: 'server_request_resolved',
-          requestId: message.requestId,
-          threadId: 'thread-1',
-        }));
+        const validationError = validateApprovalResponse(String(message.requestId), message.response);
+        if (validationError) {
+          sendResponseError(validationError);
+          return;
+        }
+        sendResolvedRequest(String(message.requestId));
+        if (
+          message.requestId === 'req-1'
+          || message.requestId === 'req-user-input'
+          || message.requestId === 'req-dynamic-tool'
+          || message.requestId === 'req-mcp-form'
+        ) {
+          queueNextFollowUpRequest();
+        }
       }
     });
   });

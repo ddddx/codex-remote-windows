@@ -2,8 +2,8 @@ import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
 import type { FastifyInstance } from 'fastify';
 import { broadcastMessage, ensureCodexReady } from '../../ws/bridge.js';
 import { flushPendingAgentDeltas } from './event-bridge.js';
-import { buildThreadSyncMessage, bootstrapTabs } from './thread-sync.js';
-import { upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
+import { buildThreadSyncMessage, bootstrapTabs, type RuntimeThread } from './thread-sync.js';
+import { toSessionTabPayload, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
 
 type CreateTabMessage = Extract<ClientMessage, { type: 'tab_create' }>;
 type ThreadOptionsUpdateMessage = Extract<ClientMessage, { type: 'thread_options_update' }>;
@@ -70,7 +70,7 @@ export function createSessionService(app: FastifyInstance) {
       });
       const attachedTab = await app.windowAttachments.openWindowForThread(tab.threadId) as RuntimeTab | null;
       const nextTab = attachedTab || tab;
-      broadcastMessage(app, { type: 'tab_updated', tab: nextTab });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(nextTab) });
       return nextTab;
     },
 
@@ -106,7 +106,7 @@ export function createSessionService(app: FastifyInstance) {
       const nextTab = refreshedTab || tab;
       return {
         tab: nextTab,
-        message: buildThreadSyncMessage(app, threadId, thread),
+        message: buildThreadSyncMessage(app, threadId, thread as RuntimeThread),
       };
     },
 
@@ -114,7 +114,7 @@ export function createSessionService(app: FastifyInstance) {
       await ensureCodexReady(app);
       const tab = await applyThreadOptions(message);
       if (tab) {
-        broadcastMessage(app, { type: 'tab_updated', tab });
+        broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
       }
       return tab;
     },

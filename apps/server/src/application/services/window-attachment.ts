@@ -1,6 +1,7 @@
 import { createWindowBindingRecord } from '@codex-remote/domain';
 import type { FastifyInstance } from 'fastify';
 import type { RuntimeTab } from './session-tabs.js';
+import { toSessionTabPayload } from './session-tabs.js';
 import type { CodexWindowManager, WindowDiscoverySnapshot } from '../../platform/window-manager.js';
 import { broadcastMessage } from '../../ws/bridge.js';
 
@@ -37,7 +38,7 @@ function applyWindowState(
     updatedAt: Date.now(),
   }));
   if (options.broadcastUpdate !== false && changed) {
-    broadcastMessage(app, { type: 'tab_updated', tab });
+    broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
   }
   return tab;
 }

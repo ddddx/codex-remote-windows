@@ -1,11 +1,19 @@
 import { create } from 'zustand';
 import type {
+  SessionTabPayload,
   CodexOptionsResponse,
+  GlobalSupplementalItemPayload,
   HealthResponse,
   FileChangePayload,
   ApprovalQuestionPayload,
   ServerMessage,
   ServerRequestPayload,
+  SupplementalItemPayload,
+  ThreadTurnPayload,
+  TimelineEventPayload,
+  TokenUsagePayload,
+  TurnDiffPayload,
+  TurnPlanPayload,
   UploadImageResponse,
   WorkspaceListResponse,
   WorkspaceShortcutsResponse,
@@ -24,7 +32,7 @@ export type SessionItem = {
   sandboxMode?: string;
   model?: string;
   reasoningEffort?: string;
-  tokenUsage?: unknown;
+  tokenUsage?: TokenUsagePayload;
   createdAt?: number;
   updatedAt?: number;
 };
@@ -79,6 +87,19 @@ export type FloatingNotice = {
   createdAt: number;
 };
 
+type ThreadTurnProjection = ThreadTurnPayload & {
+  createdAt?: number;
+  updatedAt?: number;
+  plan?: TurnPlanPayload['plan'];
+  explanation?: string;
+  diff?: string;
+};
+
+type ThreadItemRecord = Record<string, unknown> & {
+  type: string;
+  id?: string;
+};
+
 type AppStore = {
   health: {
     status: 'idle' | 'loading' | 'ready' | 'error';
@@ -117,7 +138,7 @@ type AppStore = {
     activeBySessionId: Record<string, ThreadRunState>;
   };
   tokenUsage: {
-    bySessionId: Record<string, unknown>;
+    bySessionId: Record<string, TokenUsagePayload>;
   };
   workspace: WorkspaceBrowserState;
   composer: {
@@ -147,8 +168,8 @@ type AppStore = {
     approvalPolicy: string;
     sandboxMode: string;
   }) => void;
-  replaceServerRequests: (items: unknown[]) => void;
-  upsertServerRequest: (request: unknown) => void;
+  replaceServerRequests: (items: ServerRequestPayload[]) => void;
+  upsertServerRequest: (request: ServerRequestPayload) => void;
   removeServerRequest: (requestId: string) => void;
   resetServerRequests: () => void;
   pushNotification: (notice: FloatingNotice) => void;
@@ -156,7 +177,7 @@ type AppStore = {
   setTurnStarted: (threadId: string, turnId?: string, startedAt?: number) => void;
   setTurnCompleted: (threadId: string, turnId?: string) => void;
   settleAssistantActivity: (threadId: string, turnId?: string) => void;
-  setTokenUsage: (threadId: string, usage: unknown) => void;
+  setTokenUsage: (threadId: string, usage: TokenUsagePayload) => void;
   setSessionModel: (threadId: string, model: string) => void;
   setThreadSync: (threadId: string, message: Extract<ServerMessage, { type: 'thread_sync' }>) => void;
   appendTimelineEntry: (threadId: string, entry: TimelineEntry) => void;
@@ -178,30 +199,32 @@ type AppStore = {
   promotePendingUserEntries: (threadId: string, turnId?: string, startedAt?: number) => void;
 };
 
-function normalizeTab(tab: any): SessionItem {
+function normalizeTab(tab: SessionTabPayload): SessionItem {
   const readOptionalString = (...keys: string[]): string | undefined => {
     for (const key of keys) {
-      if (typeof tab?.[key] === 'string') {
-        return tab[key];
+      const value = (tab as Record<string, unknown>)[key];
+      if (typeof value === 'string') {
+        return value;
       }
     }
     return undefined;
   };
-  const candidates = [tab?.name, tab?.threadName, tab?.thread_name, tab?.preview];
+  const legacySource = tab as Record<string, unknown>;
+  const candidates = [tab.name, legacySource.threadName, legacySource.thread_name, legacySource.preview];
   const resolvedName = candidates.find((value) => typeof value === 'string' && value.trim());
   return {
-    threadId: String(tab?.threadId || tab?.thread_id || tab?.id || ''),
+    threadId: String(tab.threadId || legacySource.thread_id || legacySource.id || ''),
     name: String(resolvedName || '').trim() || '未命名会话',
-    cwd: typeof tab?.cwd === 'string' ? tab.cwd : '',
-    status: typeof tab?.status === 'string' ? tab.status : '',
-    windowStatus: typeof tab?.windowStatus === 'string' ? tab.windowStatus : typeof tab?.window_status === 'string' ? tab.window_status : '',
+    cwd: typeof tab.cwd === 'string' ? tab.cwd : '',
+    status: typeof tab.status === 'string' ? tab.status : '',
+    windowStatus: typeof tab.windowStatus === 'string' ? tab.windowStatus : typeof legacySource.window_status === 'string' ? legacySource.window_status : '',
     approvalPolicy: readOptionalString('approvalPolicy', 'approval_policy'),
     sandboxMode: readOptionalString('sandboxMode', 'sandbox_mode'),
     model: readOptionalString('model'),
     reasoningEffort: readOptionalString('reasoningEffort', 'reasoning_effort'),
     tokenUsage: normalizeTokenUsage(tab),
-    createdAt: typeof tab?.createdAt === 'number' ? tab.createdAt : typeof tab?.created_at === 'number' ? tab.created_at : 0,
-    updatedAt: typeof tab?.updatedAt === 'number' ? tab.updatedAt : typeof tab?.updated_at === 'number' ? tab.updated_at : 0,
+    createdAt: typeof tab.createdAt === 'number' ? tab.createdAt : typeof legacySource.created_at === 'number' ? legacySource.created_at : 0,
+    updatedAt: typeof tab.updatedAt === 'number' ? tab.updatedAt : typeof legacySource.updated_at === 'number' ? legacySource.updated_at : 0,
   };
 }
 
@@ -269,7 +292,7 @@ function mergeSessionItem(current: SessionItem | undefined, incoming: SessionIte
   return merged;
 }
 
-function extractTokenUsageValue(value: unknown): unknown {
+function extractTokenUsageValue(value: unknown): TokenUsagePayload {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -288,7 +311,7 @@ function extractTokenUsageValue(value: unknown): unknown {
     source.completion_tokens,
   ].some((entry) => typeof entry === 'number');
   if (looksLikeUsageObject) {
-    return source;
+    return source as TokenUsagePayload;
   }
   const nestedTotal = source.total && typeof source.total === 'object'
     ? source.total as Record<string, unknown>
@@ -311,7 +334,7 @@ function extractTokenUsageValue(value: unknown): unknown {
     nestedLast?.output_tokens,
   ].some((entry) => typeof entry === 'number');
   if (looksLikeCodexUsageEnvelope) {
-    return source;
+    return source as TokenUsagePayload;
   }
   const direct = source.tokenUsage
     ?? source.token_usage
@@ -320,23 +343,23 @@ function extractTokenUsageValue(value: unknown): unknown {
     ?? source.token_stats
     ?? null;
   if (direct !== null && direct !== undefined) {
-    return direct;
+    return direct as TokenUsagePayload;
   }
   const nested = source.usage && typeof source.usage === 'object'
     ? source.usage as Record<string, unknown>
     : null;
-  return nested?.tokenUsage
+  return (nested?.tokenUsage
     ?? nested?.token_usage
     ?? nested?.usage
     ?? nested?.tokenStats
     ?? nested?.token_stats
-    ?? null;
+    ?? null) as TokenUsagePayload;
 }
 
-function normalizeTokenUsage(value: unknown): unknown {
+function normalizeTokenUsage(value: unknown): TokenUsagePayload {
   const extracted = extractTokenUsageValue(value);
   if (!extracted || typeof extracted !== 'object') {
-    return extracted;
+    return extracted as TokenUsagePayload;
   }
   const usage = extracted as Record<string, unknown>;
   const nested = usage.usage && typeof usage.usage === 'object' ? usage.usage as Record<string, unknown> : null;
@@ -429,13 +452,13 @@ function normalizeTokenUsage(value: unknown): unknown {
                                   : typeof last?.completion_tokens === 'number'
                                     ? last.completion_tokens
                     : undefined,
-  };
+  } as TokenUsagePayload;
 }
 
 function mergeTokenUsageFromSessions(
-  existing: Record<string, unknown>,
+  existing: Record<string, TokenUsagePayload>,
   sessions: SessionItem[],
-): Record<string, unknown> {
+): Record<string, TokenUsagePayload> {
   const next = { ...existing };
   for (const session of sessions) {
     if (!session.threadId) {
@@ -496,26 +519,82 @@ function extractStructuredText(value: unknown): string {
   return '';
 }
 
-function extractTurnUserText(turn: any): string {
+function toThreadItemRecord(item: unknown): ThreadItemRecord | null {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+  const record = item as Record<string, unknown>;
+  return typeof record.type === 'string' ? record as ThreadItemRecord : null;
+}
+
+function extractReasoningSummaryText(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return '';
+  }
+  return value
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return entry;
+      }
+      if (entry && typeof entry === 'object') {
+        const record = entry as Record<string, unknown>;
+        return typeof record.text === 'string' ? record.text : '';
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function normalizeFileChangePayloads(value: unknown): FileChangePayload[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const changes = value
+    .map((change) => {
+      const record = change && typeof change === 'object' ? change as Record<string, unknown> : null;
+      if (!record) {
+        return null;
+      }
+      return {
+        path: typeof record.path === 'string' ? record.path : '',
+        kind: typeof record.kind === 'string' ? record.kind : '',
+        addedLines: typeof record.addedLines === 'number' ? record.addedLines : undefined,
+        deletedLines: typeof record.deletedLines === 'number' ? record.deletedLines : undefined,
+        diff: typeof record.diff === 'string' ? record.diff : undefined,
+      };
+    })
+    .filter((change): change is NonNullable<typeof change> => Boolean(change));
+  return changes.length ? changes : undefined;
+}
+
+function buildTurnPlanMeta(plan: TurnPlanPayload['plan'] | Array<{ step?: string; status?: string }>): string[] {
+  return plan
+    .map((step) => [step?.status, step?.step].filter(Boolean).join(': '))
+    .filter(Boolean);
+}
+
+function extractTurnUserText(turn: ThreadTurnProjection): string {
   if (typeof turn?.text === 'string' && turn.text.trim()) {
     return turn.text;
   }
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
-  const itemTextParts = items.flatMap((item: any) => {
-    const itemType = typeof item?.type === 'string' ? item.type : '';
-    const itemRole = typeof item?.role === 'string' ? item.role : '';
+  const itemTextParts = items.flatMap((item) => {
+    const itemRecord = toThreadItemRecord(item);
+    const itemType = itemRecord?.type || '';
+    const itemRole = typeof itemRecord?.role === 'string' ? itemRecord.role : '';
     if (itemType !== 'userMessage' && !(itemType === 'message' && itemRole === 'user')) {
       return [];
     }
     return [
-      item.text,
-      item.content,
-      item.input,
-      item.message,
-      item.parts,
+      itemRecord?.text,
+      itemType === 'userMessage' ? (item as v2.ThreadItem & { content?: unknown }).content : itemRecord?.content,
+      itemRecord?.input,
+      itemRecord?.message,
+      itemRecord?.parts,
     ]
-      .map((part: any) => extractStructuredText(part))
+      .map((part) => extractStructuredText(part))
       .filter(Boolean);
   });
   if (itemTextParts.length) {
@@ -524,7 +603,7 @@ function extractTurnUserText(turn: any): string {
 
   const inputItems = Array.isArray(turn?.input) ? turn.input : [];
   const textParts = inputItems
-    .map((part: any) => extractStructuredText(part))
+    .map((part) => extractStructuredText(part))
     .filter(Boolean);
   if (textParts.length) {
     return textParts.join('\n');
@@ -537,7 +616,7 @@ function extractTurnUserText(turn: any): string {
   return '';
 }
 
-function extractTurnAssistantText(turn: any): string {
+function extractTurnAssistantText(turn: ThreadTurnProjection): string {
   if (typeof turn?.output === 'string' && turn.output.trim()) {
     return turn.output.trim();
   }
@@ -549,14 +628,15 @@ function extractTurnAssistantText(turn: any): string {
 
   const items = Array.isArray(turn?.items) ? turn.items : [];
   for (const item of items) {
-    const itemType = typeof item?.type === 'string' ? item.type : '';
-    const itemRole = typeof item?.role === 'string' ? item.role : '';
+    const itemRecord = toThreadItemRecord(item);
+    const itemType = itemRecord?.type || '';
+    const itemRole = typeof itemRecord?.role === 'string' ? itemRecord.role : '';
     if (itemType !== 'agentMessage' && !(itemType === 'message' && itemRole === 'assistant')) {
       continue;
     }
-    const text = extractStructuredText(item?.text)
-      || extractStructuredText(item?.content)
-      || extractStructuredText(item?.output);
+    const text = extractStructuredText(itemRecord?.text)
+      || extractStructuredText(itemRecord?.content)
+      || extractStructuredText(itemRecord?.output);
     if (text) {
       return text;
     }
@@ -565,30 +645,30 @@ function extractTurnAssistantText(turn: any): string {
   return '';
 }
 
-function normalizeServerRequest(request: any): ServerRequestItem | null {
-  const requestId = typeof request?.requestId === 'string' ? request.requestId : '';
+function normalizeServerRequest(request: ServerRequestPayload): ServerRequestItem | null {
+  const requestId = typeof request.requestId === 'string' ? request.requestId : '';
   if (!requestId) {
     return null;
   }
 
   return {
     requestId,
-    method: typeof request?.method === 'string' ? request.method as CodexServerRequest['method'] : undefined,
-    threadId: typeof request?.threadId === 'string' ? request.threadId : undefined,
-    turnId: typeof request?.turnId === 'string' ? request.turnId : undefined,
-    itemId: typeof request?.itemId === 'string' ? request.itemId : undefined,
-    kind: typeof request?.kind === 'string' ? request.kind : undefined,
-    status: request?.status === 'submitting' ? 'submitting' : 'pending',
-    reason: typeof request?.reason === 'string' ? request.reason : undefined,
-    message: typeof request?.message === 'string' ? request.message : undefined,
-    command: typeof request?.command === 'string' ? request.command : undefined,
-    cwd: typeof request?.cwd === 'string' ? request.cwd : undefined,
-    tool: typeof request?.tool === 'string' ? request.tool : undefined,
-    namespace: typeof request?.namespace === 'string' ? request.namespace : undefined,
-    serverName: typeof request?.serverName === 'string' ? request.serverName : undefined,
-    patch: typeof request?.patch === 'string' ? request.patch : undefined,
-    changes: Array.isArray(request?.changes)
-      ? request.changes.map((change: any) => ({
+    method: typeof request.method === 'string' ? request.method as CodexServerRequest['method'] : undefined,
+    threadId: typeof request.threadId === 'string' ? request.threadId : undefined,
+    turnId: typeof request.turnId === 'string' ? request.turnId : undefined,
+    itemId: typeof request.itemId === 'string' ? request.itemId : undefined,
+    kind: typeof request.kind === 'string' ? request.kind : undefined,
+    status: request.status === 'submitting' ? 'submitting' : 'pending',
+    reason: typeof request.reason === 'string' ? request.reason : undefined,
+    message: typeof request.message === 'string' ? request.message : undefined,
+    command: typeof request.command === 'string' ? request.command : undefined,
+    cwd: typeof request.cwd === 'string' ? request.cwd : undefined,
+    tool: typeof request.tool === 'string' ? request.tool : undefined,
+    namespace: typeof request.namespace === 'string' ? request.namespace : undefined,
+    serverName: typeof request.serverName === 'string' ? request.serverName : undefined,
+    patch: typeof request.patch === 'string' ? request.patch : undefined,
+    changes: Array.isArray(request.changes)
+      ? request.changes.map((change) => ({
         path: typeof change?.path === 'string' ? change.path : undefined,
         kind: typeof change?.kind === 'string' ? change.kind : undefined,
         addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
@@ -596,22 +676,20 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
         diff: typeof change?.diff === 'string' ? change.diff : undefined,
       }))
       : undefined,
-    questions: Array.isArray(request?.questions) ? request.questions : undefined,
-    permissions: request?.permissions ?? undefined,
-    availableDecisions: Array.isArray(request?.availableDecisions) ? request.availableDecisions : undefined,
-    createdAt: normalizeTimestamp(request?.createdAt),
-    responseSchema: request?.responseSchema ?? undefined,
-    requestedSchema: request?.requestedSchema ?? undefined,
-    arguments: request?.arguments && typeof request.arguments === 'object' ? request.arguments : undefined,
-    mode: typeof request?.mode === 'string' ? request.mode : undefined,
-    url: typeof request?.url === 'string' ? request.url : undefined,
-    elicitationId: typeof request?.elicitationId === 'string' ? request.elicitationId : undefined,
-    meta: request?.meta ?? undefined,
-    raw: request?.raw && typeof request.raw === 'object'
+    questions: Array.isArray(request.questions) ? request.questions : undefined,
+    permissions: request.permissions ?? undefined,
+    availableDecisions: Array.isArray(request.availableDecisions) ? request.availableDecisions : undefined,
+    createdAt: normalizeTimestamp(request.createdAt),
+    responseSchema: request.responseSchema ?? undefined,
+    requestedSchema: request.requestedSchema ?? undefined,
+    arguments: request.arguments && typeof request.arguments === 'object' ? request.arguments : undefined,
+    mode: typeof request.mode === 'string' ? request.mode : undefined,
+    url: typeof request.url === 'string' ? request.url : undefined,
+    elicitationId: typeof request.elicitationId === 'string' ? request.elicitationId : undefined,
+    meta: request.meta ?? undefined,
+    raw: request.raw && typeof request.raw === 'object'
       ? request.raw
-      : request && typeof request === 'object'
-        ? request
-        : undefined,
+      : request,
   };
 }
 
@@ -1126,33 +1204,34 @@ function extractReasoningDelta(message: Extract<ServerMessage, { type: 'item_del
 function createTimelineEntryFromItemEvent(
   kind: string,
   threadId: string,
-  item: Record<string, unknown> | undefined,
+  item: v2.ThreadItem | ThreadItemRecord | undefined,
   turnId?: string,
   fallbackStartedAt?: number,
 ): TimelineEntry | null {
-  if (!item) {
+  const itemRecord = toThreadItemRecord(item);
+  if (!itemRecord) {
     return null;
   }
 
-  const itemType = typeof item.type === 'string' ? item.type : '';
-  const itemId = typeof item.id === 'string'
-    ? item.id
+  const itemType = itemRecord.type;
+  const itemId = typeof itemRecord.id === 'string'
+    ? itemRecord.id
     : `${threadId}:${turnId || 'turn'}:${kind}:${itemType || 'item'}`;
   const startedAt = normalizeTimestamp(
-    typeof item.startedAt === 'number'
-      ? item.startedAt
-      : typeof item.createdAt === 'number'
-        ? item.createdAt
+    typeof itemRecord.startedAt === 'number'
+      ? itemRecord.startedAt
+      : typeof itemRecord.createdAt === 'number'
+        ? itemRecord.createdAt
         : fallbackStartedAt,
   );
-  const itemRole = typeof item.role === 'string' ? item.role : '';
+  const itemRole = typeof itemRecord.role === 'string' ? itemRecord.role : '';
 
   if (itemType === 'userMessage' || (itemType === 'message' && itemRole === 'user')) {
-    const text = extractStructuredText(item.text)
-      || extractStructuredText(item.content)
-      || extractStructuredText(item.input)
-      || extractStructuredText(item.message)
-      || extractStructuredText(item.parts);
+    const text = extractStructuredText(itemRecord.text)
+      || extractStructuredText(itemType === 'userMessage' ? (item as v2.ThreadItem & { content?: unknown }).content : itemRecord.content)
+      || extractStructuredText(itemRecord.input)
+      || extractStructuredText(itemRecord.message)
+      || extractStructuredText(itemRecord.parts);
     if (!text) {
       return null;
     }
@@ -1163,18 +1242,18 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       text,
-      status: typeof item.status === 'string' ? item.status : 'completed',
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : 'completed',
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'agentMessage' || (itemType === 'message' && itemRole === 'assistant')) {
-    const text = extractStructuredText(item.text)
-      || extractStructuredText(item.content)
-      || extractStructuredText(item.output)
-      || extractStructuredText(item.message)
-      || extractStructuredText(item.parts);
+    const text = extractStructuredText(itemRecord.text)
+      || extractStructuredText(itemRecord.content)
+      || extractStructuredText(itemRecord.output)
+      || extractStructuredText(itemRecord.message)
+      || extractStructuredText(itemRecord.parts);
     if (!text) {
       return null;
     }
@@ -1185,20 +1264,15 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       text,
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
       createdAt: startedAt,
       partial: kind === 'item_started',
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'reasoning') {
-    const summaryText = Array.isArray(item.summary)
-      ? item.summary
-        .map((entry) => typeof (entry as any)?.text === 'string' ? (entry as any).text : '')
-        .filter(Boolean)
-        .join('\n')
-      : '';
+    const summaryText = extractReasoningSummaryText(itemRecord.summary);
     return {
       id: itemId,
       type: 'reasoning',
@@ -1206,11 +1280,11 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: '推理',
-      text: compactText(item.text) || compactText(summaryText) || '思考中…',
+      text: compactText(itemRecord.text) || compactText(summaryText) || '思考中…',
       status: kind === 'item_started' ? 'running' : 'completed',
       meta: [kind === 'item_started' ? '流式输出中' : '已记录', new Date(startedAt).toLocaleTimeString()],
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1222,24 +1296,24 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: '计划草稿',
-      text: compactText(item.text) || '正在规划…',
+      text: compactText(itemRecord.text) || '正在规划…',
       status: kind === 'item_started' ? 'running' : 'completed',
       meta: [new Date(startedAt).toLocaleTimeString()],
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'commandExecution') {
-    const command = typeof item.command === 'string'
-      ? item.command
-      : typeof item.input === 'string'
-        ? item.input
+    const command = typeof itemRecord.command === 'string'
+      ? itemRecord.command
+      : typeof itemRecord.input === 'string'
+        ? itemRecord.input
         : '';
-    const output = typeof item.output === 'string'
-      ? item.output
-      : typeof item.aggregatedOutput === 'string'
-        ? item.aggregatedOutput
+    const output = typeof itemRecord.output === 'string'
+      ? itemRecord.output
+      : typeof itemRecord.aggregatedOutput === 'string'
+        ? itemRecord.aggregatedOutput
         : '';
     return {
       id: itemId,
@@ -1249,35 +1323,27 @@ function createTimelineEntryFromItemEvent(
       itemId,
       title: '命令',
       text: compactText(command) || '执行命令',
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
       meta: [
-        typeof item.cwd === 'string' && item.cwd ? item.cwd : '',
+        typeof itemRecord.cwd === 'string' && itemRecord.cwd ? itemRecord.cwd : '',
         output ? `输出 ${output.length} 字符` : '',
       ].filter(Boolean),
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'fileChange') {
-    const status = typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed');
-    const changes = Array.isArray(item.changes)
-      ? item.changes.map((change) => ({
-        path: typeof (change as any)?.path === 'string' ? (change as any).path : '',
-        kind: typeof (change as any)?.kind === 'string' ? (change as any).kind : '',
-        addedLines: typeof (change as any)?.addedLines === 'number' ? (change as any).addedLines : undefined,
-        deletedLines: typeof (change as any)?.deletedLines === 'number' ? (change as any).deletedLines : undefined,
-        diff: typeof (change as any)?.diff === 'string' ? (change as any).diff : undefined,
-      }))
-      : undefined;
-    const patch = extractPatchText(item.patch)
-      ?? extractPatchText(item.diff)
-      ?? extractPatchText(item.output)
-      ?? extractPatchText(item.aggregatedOutput);
-    const output = typeof item.output === 'string'
-      ? item.output
-      : typeof item.aggregatedOutput === 'string'
-        ? item.aggregatedOutput
+    const status = typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed');
+    const changes = normalizeFileChangePayloads(itemRecord.changes);
+    const patch = extractPatchText(itemRecord.patch)
+      ?? extractPatchText(itemRecord.diff)
+      ?? extractPatchText(itemRecord.output)
+      ?? extractPatchText(itemRecord.aggregatedOutput);
+    const output = typeof itemRecord.output === 'string'
+      ? itemRecord.output
+      : typeof itemRecord.aggregatedOutput === 'string'
+        ? itemRecord.aggregatedOutput
         : patch || '';
     return {
       id: itemId,
@@ -1291,15 +1357,15 @@ function createTimelineEntryFromItemEvent(
       patch,
       changes,
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'contextCompaction') {
     const summary = [
-      compactText(item.summary),
-      compactText(item.text),
-      summarizeUnknownObject(item, 4),
+      compactText(itemRecord.summary),
+      compactText(itemRecord.text),
+      summarizeUnknownObject(itemRecord, 4),
     ].filter(Boolean)[0] || '上下文已压缩';
     return {
       id: itemId,
@@ -1309,14 +1375,14 @@ function createTimelineEntryFromItemEvent(
       itemId,
       title: '上下文压缩',
       text: summary,
-      status: typeof item.status === 'string' ? item.status : 'completed',
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : 'completed',
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'hookPrompt') {
-    const fragments = Array.isArray(item.fragments) ? item.fragments : [];
+    const fragments = Array.isArray(itemRecord.fragments) ? itemRecord.fragments : [];
     return {
       id: itemId,
       type: 'hook',
@@ -1328,7 +1394,7 @@ function createTimelineEntryFromItemEvent(
       status: kind === 'item_started' ? 'running' : 'completed',
       meta: [`片段 ${fragments.length}`],
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1340,11 +1406,11 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: 'MCP 工具',
-      text: [item.server, item.tool].filter((value) => typeof value === 'string' && value).join('.'),
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
-      meta: Array.isArray(item.progressMessages) ? item.progressMessages.filter((value): value is string => typeof value === 'string') : [],
+      text: [itemRecord.server, itemRecord.tool].filter((value) => typeof value === 'string' && value).join('.'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
+      meta: Array.isArray(itemRecord.progressMessages) ? itemRecord.progressMessages.filter((value): value is string => typeof value === 'string') : [],
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1356,16 +1422,16 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: '动态工具',
-      text: [item.namespace, item.tool].filter((value) => typeof value === 'string' && value).join('.'),
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      text: [itemRecord.namespace, itemRecord.tool].filter((value) => typeof value === 'string' && value).join('.'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'collabAgentToolCall') {
-    const receivers = Array.isArray(item.receiverThreadIds)
-      ? item.receiverThreadIds.filter((value): value is string => typeof value === 'string')
+    const receivers = Array.isArray(itemRecord.receiverThreadIds)
+      ? itemRecord.receiverThreadIds.filter((value): value is string => typeof value === 'string')
       : [];
     return {
       id: itemId,
@@ -1375,26 +1441,26 @@ function createTimelineEntryFromItemEvent(
       itemId,
       title: '协作代理',
       text: [
-        typeof item.tool === 'string' ? item.tool : '',
-        compactText(item.prompt, 160),
+        typeof itemRecord.tool === 'string' ? itemRecord.tool : '',
+        compactText(itemRecord.prompt, 160),
       ].filter(Boolean).join(' · ') || '协作代理调用',
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
       meta: receivers.length ? [`目标 ${receivers.length} 个线程`] : [],
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
   if (itemType === 'webSearch') {
-    const action = item.action && typeof item.action === 'object' ? item.action as Record<string, unknown> : undefined;
+    const action = itemRecord.action && typeof itemRecord.action === 'object' ? itemRecord.action as Record<string, unknown> : undefined;
     const actionType = typeof action?.type === 'string' ? action.type : '';
-    const query = typeof item.query === 'string'
-      ? item.query
+    const query = typeof itemRecord.query === 'string'
+      ? itemRecord.query
       : typeof action?.query === 'string'
         ? action.query
         : '';
-    const url = typeof item.url === 'string'
-      ? item.url
+    const url = typeof itemRecord.url === 'string'
+      ? itemRecord.url
       : typeof action?.url === 'string'
         ? action.url
         : '';
@@ -1406,10 +1472,10 @@ function createTimelineEntryFromItemEvent(
       itemId,
       title: actionType === 'openPage' ? '打开网页' : '网页搜索',
       text: query || url || '网页搜索',
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
       meta: [actionType, url].filter(Boolean),
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1421,10 +1487,10 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: '查看图片',
-      text: compactText(item.path) || '查看图片',
+      text: compactText(itemRecord.path) || '查看图片',
       status: kind === 'item_started' ? 'running' : 'completed',
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1436,11 +1502,11 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: '图片生成',
-      text: compactText(item.savedPath) || compactText(item.result) || compactText(item.revisedPrompt) || '图片生成',
-      status: typeof item.status === 'string' ? item.status : (kind === 'item_started' ? 'running' : 'completed'),
-      meta: [compactText(item.revisedPrompt, 160)].filter(Boolean),
+      text: compactText(itemRecord.savedPath) || compactText(itemRecord.result) || compactText(itemRecord.revisedPrompt) || '图片生成',
+      status: typeof itemRecord.status === 'string' ? itemRecord.status : (kind === 'item_started' ? 'running' : 'completed'),
+      meta: [compactText(itemRecord.revisedPrompt, 160)].filter(Boolean),
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1452,10 +1518,10 @@ function createTimelineEntryFromItemEvent(
       turnId,
       itemId,
       title: itemType === 'enteredReviewMode' ? '进入 Review 模式' : '退出 Review 模式',
-      text: compactText(item.review) || 'Review 模式变更',
+      text: compactText(itemRecord.review) || 'Review 模式变更',
       status: 'completed',
       createdAt: startedAt,
-      details: item,
+      details: itemRecord,
     };
   }
 
@@ -1500,8 +1566,8 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
   const entries: TimelineEntry[] = [];
 
   for (const planEntry of Array.isArray(message.turnPlans) ? message.turnPlans : []) {
-    const turnId = typeof (planEntry as any)?.turnId === 'string' ? (planEntry as any).turnId : '';
-    const plan = Array.isArray((planEntry as any)?.plan) ? (planEntry as any).plan : [];
+    const turnId = typeof planEntry.turnId === 'string' ? planEntry.turnId : '';
+    const plan = Array.isArray(planEntry.plan) ? planEntry.plan : [];
     if (!turnId || !plan.length) {
       continue;
     }
@@ -1511,16 +1577,16 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
       role: 'assistant',
       turnId,
       title: '执行计划',
-      text: typeof (planEntry as any)?.explanation === 'string' ? (planEntry as any).explanation : '',
-      meta: plan.map((step: any) => [step?.status, step?.step].filter(Boolean).join(': ')),
-      createdAt: typeof (planEntry as any)?.updatedAt === 'number' ? (planEntry as any).updatedAt : Date.now(),
+      text: typeof planEntry.explanation === 'string' ? planEntry.explanation : '',
+      meta: buildTurnPlanMeta(plan),
+      createdAt: typeof planEntry.updatedAt === 'number' ? planEntry.updatedAt : Date.now(),
       details: planEntry,
     });
   }
 
   for (const diffEntry of Array.isArray(message.turnDiffs) ? message.turnDiffs : []) {
-    const turnId = typeof (diffEntry as any)?.turnId === 'string' ? (diffEntry as any).turnId : '';
-    const diff = typeof (diffEntry as any)?.diff === 'string' ? (diffEntry as any).diff : '';
+    const turnId = typeof diffEntry.turnId === 'string' ? diffEntry.turnId : '';
+    const diff = typeof diffEntry.diff === 'string' ? diffEntry.diff : '';
     if (!turnId || !diff.trim()) {
       continue;
     }
@@ -1547,35 +1613,34 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
       title: '轮次 Diff',
       text: '已恢复的差异快照',
       patch: diff,
-      createdAt: typeof (diffEntry as any)?.updatedAt === 'number' ? (diffEntry as any).updatedAt : Date.now(),
+      createdAt: typeof diffEntry.updatedAt === 'number' ? diffEntry.updatedAt : Date.now(),
       details: diffEntry,
     });
   }
 
   for (const supplemental of Array.isArray(message.supplementalItems) ? message.supplementalItems : []) {
-    const item = supplemental as Record<string, unknown>;
-    const itemId = typeof item.id === 'string' ? item.id : '';
-    const itemType = typeof item.type === 'string' ? item.type : '';
-    if (!itemId || !itemType) {
+    const itemId = typeof supplemental.id === 'string' ? supplemental.id : '';
+    if (!itemId || typeof supplemental.type !== 'string') {
       continue;
     }
-    const turnId = typeof item._turnId === 'string' ? item._turnId : undefined;
+    const turnId = typeof supplemental._turnId === 'string' ? supplemental._turnId : undefined;
     const createdAt = normalizeTimestamp(
-      typeof item.completedAt === 'number'
-        ? item.completedAt
-        : typeof item.startedAt === 'number'
-          ? item.startedAt
-          : typeof item.createdAt === 'number'
-            ? item.createdAt
-            : typeof item.updatedAt === 'number'
-              ? item.updatedAt
+      typeof supplemental.completedAt === 'number'
+        ? supplemental.completedAt
+        : typeof supplemental.startedAt === 'number'
+          ? supplemental.startedAt
+          : typeof supplemental.createdAt === 'number'
+            ? supplemental.createdAt
+            : typeof supplemental.updatedAt === 'number'
+              ? supplemental.updatedAt
               : Date.now(),
     );
 
-    if (itemType === 'hookEvent') {
-      const run = item.run && typeof item.run === 'object' ? item.run as Record<string, unknown> : null;
+    if (supplemental.type === 'hookEvent') {
+      const hookItem = supplemental;
+      const run = hookItem.run;
       const command = typeof run?.command === 'string' ? run.command : '';
-      const status = typeof item.status === 'string' ? item.status : 'completed';
+      const status = typeof hookItem.status === 'string' ? hookItem.status : 'completed';
       entries.push({
         id: itemId,
         type: 'hook',
@@ -1583,22 +1648,23 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
         turnId,
         itemId,
         title: 'Hook',
-        text: command || `Hook ${typeof item.phase === 'string' ? item.phase : 'event'}`,
+        text: command || `Hook ${typeof hookItem.phase === 'string' ? hookItem.phase : 'event'}`,
         status,
         meta: [
-          typeof item.phase === 'string' ? item.phase : '',
+          typeof hookItem.phase === 'string' ? hookItem.phase : '',
           typeof run?.exitCode === 'number' ? `退出码 ${run.exitCode}` : '',
         ].filter(Boolean),
         createdAt,
-        details: item,
+        details: hookItem,
       });
       continue;
     }
 
-    if (itemType === 'guardianReview') {
-      const review = item.review && typeof item.review === 'object' ? item.review as Record<string, unknown> : null;
-      const action = item.action && typeof item.action === 'object' ? item.action as Record<string, unknown> : null;
-      const status = typeof item.status === 'string' ? item.status : 'completed';
+    if (supplemental.type === 'guardianReview') {
+      const reviewItem = supplemental;
+      const review = reviewItem.review;
+      const action = reviewItem.action;
+      const status = typeof reviewItem.status === 'string' ? reviewItem.status : 'completed';
       entries.push({
         id: itemId,
         type: 'guardian_review',
@@ -1609,25 +1675,27 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
         text: summarizeUnknownObject(review) || summarizeUnknownObject(action) || 'Guardian 审查',
         status,
         meta: [
-          typeof item.phase === 'string' ? item.phase : '',
-          typeof item.decisionSource === 'string' ? item.decisionSource : '',
+          typeof reviewItem.phase === 'string' ? reviewItem.phase : '',
+          typeof reviewItem.decisionSource === 'string' ? reviewItem.decisionSource : '',
         ].filter(Boolean),
         createdAt,
-        details: item,
+        details: reviewItem,
       });
+      continue;
     }
 
-    if (itemType === 'pendingUserMessage') {
-      const text = extractStructuredText(item.text)
-        || extractStructuredText(item.content)
-        || extractStructuredText(item.input)
-        || extractStructuredText(item.message);
+    if (supplemental.type === 'pendingUserMessage') {
+      const pendingItem = supplemental;
+      const text = extractStructuredText(pendingItem.text)
+        || extractStructuredText(pendingItem.content)
+        || extractStructuredText(pendingItem.input)
+        || extractStructuredText(pendingItem.message);
       if (!text) {
         continue;
       }
       entries.push({
-        id: typeof item.entryId === 'string'
-          ? item.entryId
+        id: typeof pendingItem.entryId === 'string'
+          ? pendingItem.entryId
           : turnId
             ? `pending-user:${turnId}`
             : `pending-user:${itemId}`,
@@ -1636,10 +1704,11 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
         turnId,
         itemId,
         text,
-        status: typeof item.status === 'string' ? item.status : 'completed',
+        status: typeof pendingItem.status === 'string' ? pendingItem.status : 'completed',
         createdAt,
-        details: item,
+        details: pendingItem,
       });
+      continue;
     }
   }
 
@@ -1650,16 +1719,16 @@ function mergeThreadSyncEntries(
   currentEntries: TimelineEntry[],
   message: Extract<ServerMessage, { type: 'thread_sync' }>,
 ): TimelineEntry[] {
-  const restoredTurns = Array.isArray(message.turns) ? message.turns as Array<Record<string, unknown>> : [];
-  const restoredEntries = restoredTurns.flatMap((turn: any, index) => createEntriesFromThreadTurn(message.threadId, turn, index));
+  const restoredTurns = Array.isArray(message.turns) ? message.turns as ThreadTurnProjection[] : [];
+  const restoredEntries = restoredTurns.flatMap((turn, index) => createEntriesFromThreadTurn(message.threadId, turn, index));
   let entries = mergeTimelineEntryLists(currentEntries, [
     ...restoredEntries,
     ...createTimelineEntriesFromThreadSync(message),
   ]);
 
   for (const diffEntry of Array.isArray(message.turnDiffs) ? message.turnDiffs : []) {
-    const turnId = typeof (diffEntry as any)?.turnId === 'string' ? (diffEntry as any).turnId : '';
-    const diff = typeof (diffEntry as any)?.diff === 'string' ? (diffEntry as any).diff : '';
+    const turnId = typeof diffEntry.turnId === 'string' ? diffEntry.turnId : '';
+    const diff = typeof diffEntry.diff === 'string' ? diffEntry.diff : '';
     if (!turnId || !diff.trim()) {
       continue;
     }
@@ -1671,17 +1740,17 @@ function mergeThreadSyncEntries(
 
 function extractTokenUsageFromThreadSync(
   message: Extract<ServerMessage, { type: 'thread_sync' }>,
-): unknown {
+): TokenUsagePayload {
   return normalizeTokenUsage(message.tokenUsage ?? message);
 }
 
-function createEntriesFromThreadTurn(threadId: string, turn: any, index: number): TimelineEntry[] {
-  const turnId = String(turn?.id || `${threadId}-${index}`);
+function createEntriesFromThreadTurn(threadId: string, turn: ThreadTurnProjection, index: number): TimelineEntry[] {
+  const turnId = String(turn.id || `${threadId}-${index}`);
   const syntheticTurnTime = 1_700_000_000_000 + ((index + 1) * 1000);
   const createdAt = normalizeTimestamp(
-    typeof turn?.createdAt === 'number'
+    typeof turn.createdAt === 'number'
       ? turn.createdAt
-      : typeof turn?.updatedAt === 'number'
+      : typeof turn.updatedAt === 'number'
         ? turn.updatedAt
         : syntheticTurnTime,
   );
@@ -1689,33 +1758,34 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
   let hasUserMessage = false;
   let hasAssistantMessage = false;
 
-  const items = Array.isArray(turn?.items) ? turn.items : [];
+  const items = Array.isArray(turn.items) ? turn.items : [];
   if (items.length) {
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const item = items[itemIndex];
       const fallbackItemTime = createdAt + itemIndex;
-      const itemType = typeof item?.type === 'string' ? item.type : '';
-      const itemRole = typeof item?.role === 'string' ? item.role : '';
+      const itemRecord = toThreadItemRecord(item);
+      const itemType = itemRecord?.type || '';
+      const itemRole = typeof itemRecord?.role === 'string' ? itemRecord.role : '';
       if (itemType === 'userMessage' || (itemType === 'message' && itemRole === 'user')) {
         const text = [
-          item?.text,
-          item?.content,
-          item?.input,
-          item?.message,
-          item?.parts,
+          itemRecord?.text,
+          itemType === 'userMessage' ? (item as v2.ThreadItem & { content?: unknown }).content : itemRecord?.content,
+          itemRecord?.input,
+          itemRecord?.message,
+          itemRecord?.parts,
         ]
-          .map((part: any) => extractStructuredText(part))
+          .map((part) => extractStructuredText(part))
           .filter(Boolean)
           .join('\n');
         if (text) {
           entries.push({
-            id: typeof item?.id === 'string' ? item.id : `${turnId}:user`,
+            id: typeof itemRecord?.id === 'string' ? itemRecord.id : `${turnId}:user`,
             type: 'message',
             role: 'user',
             turnId,
-            itemId: typeof item?.id === 'string' ? item.id : undefined,
+            itemId: typeof itemRecord?.id === 'string' ? itemRecord.id : undefined,
             text,
-            createdAt: normalizeTimestamp(item?.createdAt, fallbackItemTime),
+            createdAt: normalizeTimestamp(itemRecord?.createdAt, fallbackItemTime),
           });
           hasUserMessage = true;
         }
@@ -1723,40 +1793,40 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
       }
 
       if (itemType === 'agentMessage' || (itemType === 'message' && itemRole === 'assistant')) {
-        const text = extractStructuredText(item?.text)
-          || extractStructuredText(item?.content)
-          || extractStructuredText(item?.output);
+        const text = extractStructuredText(itemRecord?.text)
+          || extractStructuredText(itemRecord?.content)
+          || extractStructuredText(itemRecord?.output);
         if (!text) {
           continue;
         }
         entries.push({
-          id: typeof item?.id === 'string' ? item.id : `${turnId}:assistant`,
+          id: typeof itemRecord?.id === 'string' ? itemRecord.id : `${turnId}:assistant`,
           type: 'message',
           role: 'assistant',
           turnId,
-          itemId: typeof item?.id === 'string' ? item.id : undefined,
+          itemId: typeof itemRecord?.id === 'string' ? itemRecord.id : undefined,
           text,
-          createdAt: normalizeTimestamp(item?.createdAt, fallbackItemTime),
+          createdAt: normalizeTimestamp(itemRecord?.createdAt, fallbackItemTime),
         });
         hasAssistantMessage = true;
         continue;
       }
 
-      if (item?.type === 'commandExecution') {
+      if (itemRecord?.type === 'commandExecution') {
         entries.push({
-          id: typeof item?.id === 'string' ? item.id : `${turnId}:command`,
+          id: typeof itemRecord.id === 'string' ? itemRecord.id : `${turnId}:command`,
           type: 'command',
           role: 'system',
           turnId,
-          itemId: typeof item?.id === 'string' ? item.id : undefined,
+          itemId: typeof itemRecord.id === 'string' ? itemRecord.id : undefined,
           title: '命令',
-          text: typeof item?.command === 'string' ? item.command : '执行命令',
-          status: typeof item?.status === 'string' ? item.status : 'completed',
+          text: typeof itemRecord.command === 'string' ? itemRecord.command : '执行命令',
+          status: typeof itemRecord.status === 'string' ? itemRecord.status : 'completed',
           meta: [
-            typeof item?.cwd === 'string' ? item.cwd : '',
-            typeof item?.exitCode === 'number' ? `退出码 ${item.exitCode}` : '',
+            typeof itemRecord.cwd === 'string' ? itemRecord.cwd : '',
+            typeof itemRecord.exitCode === 'number' ? `退出码 ${itemRecord.exitCode}` : '',
           ].filter(Boolean),
-          createdAt: normalizeTimestamp(typeof item?.createdAt === 'number' ? item.createdAt : fallbackItemTime, fallbackItemTime),
+          createdAt: normalizeTimestamp(typeof itemRecord.createdAt === 'number' ? itemRecord.createdAt : fallbackItemTime, fallbackItemTime),
         });
         continue;
       }
@@ -1791,7 +1861,7 @@ function createEntriesFromThreadTurn(threadId: string, turn: any, index: number)
       role: 'assistant',
       turnId,
       text: assistantText,
-      createdAt: normalizeTimestamp(turn?.updatedAt, createdAt + items.length),
+      createdAt: normalizeTimestamp(turn.updatedAt, createdAt + items.length),
     });
   }
 
@@ -2465,7 +2535,7 @@ export const useAppStore = create<AppStore>((set) => ({
       }
     }
 
-    const nextUsage = extractTokenUsageFromThreadSync(message) ?? state.tokenUsage.bySessionId[threadId] ?? null;
+    const nextUsage: TokenUsagePayload = extractTokenUsageFromThreadSync(message) ?? state.tokenUsage.bySessionId[threadId] ?? null;
     const entriesUnchanged = mergedEntries === currentEntries || areTimelineEntryListsEqual(currentEntries, mergedEntries);
     const turnsUnchanged = nextTurns === state.turns.activeBySessionId;
     const usageUnchanged = isEqualUnknown(state.tokenUsage.bySessionId[threadId], nextUsage);
@@ -2663,9 +2733,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
       title: '执行计划',
       text: typeof message.explanation === 'string' ? message.explanation : '',
       status: 'completed',
-      meta: Array.isArray(message.plan)
-        ? message.plan.map((step: any) => [step?.status, step?.step].filter(Boolean).join(': ')).filter(Boolean)
-        : [],
+      meta: Array.isArray(message.plan) ? buildTurnPlanMeta(message.plan) : [],
     }));
     return;
   }
@@ -2742,7 +2810,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'item_started') {
-    const item = message.item as Record<string, unknown> | undefined;
+    const item = message.item;
     const entry = createTimelineEntryFromItemEvent('item_started', message.threadId, item, message.turnId, message.startedAt);
     if (entry) {
       store.upsertTimelineEntry(message.threadId, entry);
@@ -2751,16 +2819,14 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'item_completed') {
-    const item = message.item as Record<string, unknown> | undefined;
+    const item = message.item;
     if (item?.type === 'agentMessage') {
       const itemId = typeof item.id === 'string'
         ? item.id
         : `${message.threadId}-assistant-final`;
       const text = typeof item.text === 'string'
         ? item.text
-        : typeof item.output === 'string'
-          ? item.output
-          : '';
+        : '';
       const streamText = useAppStore.getState().assistantStreams.bySessionId[message.threadId]?.[itemId];
       const finalText = text.trim() || streamText || '';
       if (finalText.trim()) {
@@ -2772,7 +2838,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
           text: finalText,
           status: 'completed',
           partial: false,
-          createdAt: typeof item.createdAt === 'number' ? item.createdAt : message.completedAt,
+          createdAt: message.completedAt,
         }));
         useAppStore.setState((prev) => {
           const currentStreams = prev.assistantStreams.bySessionId[message.threadId] || {};
@@ -2882,12 +2948,12 @@ export function mapServerMessageToStore(message: ServerMessage) {
         status: 'running',
         patch: nextPatch,
         changes: Array.isArray(message.changes)
-          ? message.changes.map((change: any) => ({
-            path: typeof change?.path === 'string' ? change.path : '',
-            kind: typeof change?.kind === 'string' ? change.kind : '',
-            addedLines: typeof change?.addedLines === 'number' ? change.addedLines : undefined,
-            deletedLines: typeof change?.deletedLines === 'number' ? change.deletedLines : undefined,
-            diff: typeof change?.diff === 'string' ? change.diff : undefined,
+          ? message.changes.map((change) => ({
+            path: typeof change.path === 'string' ? change.path : '',
+            kind: typeof change.kind === 'string' ? change.kind : '',
+            addedLines: typeof change.addedLines === 'number' ? change.addedLines : undefined,
+            deletedLines: typeof change.deletedLines === 'number' ? change.deletedLines : undefined,
+            diff: typeof change.diff === 'string' ? change.diff : undefined,
           }))
           : current?.changes,
         meta: message.delta ? [...(current?.meta || []), message.delta].slice(-8) : current?.meta,

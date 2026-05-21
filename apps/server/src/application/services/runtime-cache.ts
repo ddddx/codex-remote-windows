@@ -6,6 +6,7 @@ import type {
   TurnDiffSnapshot,
   TurnPlanSnapshot,
 } from '../../state/runtime-state.js';
+import type { ThreadTurnPayload, TurnPlanPayload } from '@codex-remote/protocol';
 
 function ensureTurnPlanMap(runtimeState: RuntimeState, threadId?: string): Map<string, TurnPlanSnapshot> | null {
   if (!threadId) {
@@ -41,7 +42,7 @@ export function setCachedTurnPlan(
   runtimeState: RuntimeState,
   threadId?: string,
   turnId?: string,
-  payload?: Record<string, unknown>,
+  payload?: Pick<TurnPlanPayload, 'explanation' | 'plan'>,
 ): void {
   const plans = ensureTurnPlanMap(runtimeState, threadId);
   if (!plans || !turnId) {
@@ -109,13 +110,17 @@ export function removeSupplementalItem(
 export function listTurnPlans(
   runtimeState: RuntimeState,
   threadId: string,
-  turns: Array<Record<string, unknown>>,
+  turns: ThreadTurnPayload[],
 ): TurnPlanSnapshot[] {
   const merged = new Map<string, TurnPlanSnapshot>();
   for (const turn of turns) {
-    const turnId = typeof turn?.id === 'string' ? turn.id : '';
-    const plan = Array.isArray(turn?.plan) ? turn.plan : [];
-    const explanation = typeof turn?.explanation === 'string' ? turn.explanation : '';
+    const turnId = typeof turn.id === 'string' ? turn.id : '';
+    const turnRecord = turn as ThreadTurnPayload & {
+      plan?: Array<{ step?: string; status?: string }>;
+      explanation?: string;
+    };
+    const plan = Array.isArray(turnRecord.plan) ? turnRecord.plan : [];
+    const explanation = typeof turnRecord.explanation === 'string' ? turnRecord.explanation : '';
     if (!turnId || !plan.length) {
       continue;
     }
@@ -135,12 +140,13 @@ export function listTurnPlans(
 export function listTurnDiffs(
   runtimeState: RuntimeState,
   threadId: string,
-  turns: Array<Record<string, unknown>>,
+  turns: ThreadTurnPayload[],
 ): TurnDiffSnapshot[] {
   const merged = new Map<string, TurnDiffSnapshot>();
   for (const turn of turns) {
-    const turnId = typeof turn?.id === 'string' ? turn.id : '';
-    const diff = typeof turn?.diff === 'string' ? turn.diff : '';
+    const turnId = typeof turn.id === 'string' ? turn.id : '';
+    const turnRecord = turn as ThreadTurnPayload & { diff?: string };
+    const diff = typeof turnRecord.diff === 'string' ? turnRecord.diff : '';
     if (!turnId || !diff.trim()) {
       continue;
     }
