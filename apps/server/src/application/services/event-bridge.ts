@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ServerNotification, v2 } from '@codex-remote/codex-app-server-types';
 import { persistServerRequest } from './server-requests.js';
 import { upsertRuntimeTab } from './session-tabs.js';
 import {
@@ -164,13 +165,14 @@ function queueAgentDelta(
 
 export function handleCodexNotification(
   app: FastifyInstance,
-  msg: { method?: string; params?: Record<string, unknown> },
+  msg: ServerNotification,
 ): void {
-  const method = msg.method || '';
-  const params = msg.params || {};
+  const { method } = msg;
+  const params = msg.params as Record<string, unknown>;
 
-  if (method === 'thread/started' && params.thread && typeof params.thread === 'object') {
-    const tab = upsertRuntimeTab(app, params.thread as Record<string, unknown>);
+  if (method === 'thread/started') {
+    const notification = msg.params as v2.ThreadStartedNotification;
+    const tab = upsertRuntimeTab(app, notification.thread as unknown as Record<string, unknown>);
     broadcastMessage(app, { type: 'tab_updated', tab });
     return;
   }
@@ -221,8 +223,9 @@ export function handleCodexNotification(
     return;
   }
 
-  if (method === 'turn/started' && typeof params.threadId === 'string') {
-    const current = app.runtimeState.tabsById.get(params.threadId);
+  if (method === 'turn/started') {
+    const notification = msg.params as v2.TurnStartedNotification;
+    const current = app.runtimeState.tabsById.get(notification.threadId);
     if (current) {
       const tab = upsertRuntimeTab(app, {
         ...current,
@@ -231,26 +234,27 @@ export function handleCodexNotification(
       });
       broadcastMessage(app, { type: 'tab_updated', tab });
     }
-    const turn = params.turn as Record<string, unknown> | undefined;
     broadcastThreadTimelineMessage(app, {
       type: 'turn_started',
-      threadId: params.threadId,
-      turnId: typeof turn?.id === 'string' ? turn.id : undefined,
-      startedAt: typeof turn?.startedAt === 'number' ? turn.startedAt : Date.now(),
+      threadId: notification.threadId,
+      turnId: notification.turn.id,
+      startedAt: typeof notification.turn.startedAt === 'number'
+        ? notification.turn.startedAt
+        : Date.now(),
     });
     return;
   }
 
-  if (method === 'turn/completed' && typeof params.threadId === 'string') {
-    flushPendingAgentDeltas(app, params.threadId);
-    const current = app.runtimeState.tabsById.get(params.threadId);
-    const turn = params.turn as Record<string, unknown> | undefined;
-    const turnId = typeof turn?.id === 'string' ? turn.id : undefined;
+  if (method === 'turn/completed') {
+    const notification = msg.params as v2.TurnCompletedNotification;
+    flushPendingAgentDeltas(app, notification.threadId);
+    const current = app.runtimeState.tabsById.get(notification.threadId);
+    const turnId = notification.turn.id;
     if (turnId) {
-      removeSupplementalItem(app.runtimeState, params.threadId, `pending-user:${turnId}`);
+      removeSupplementalItem(app.runtimeState, notification.threadId, `pending-user:${turnId}`);
     }
     if (current) {
-      const rawStatus = typeof turn?.status === 'string' ? turn.status : 'idle';
+      const rawStatus = notification.turn.status || 'idle';
       const nextStatus = ['completed', 'succeeded', 'cancelled', 'aborted'].includes(rawStatus) ? 'idle' : rawStatus;
       const tab = upsertRuntimeTab(app, {
         ...current,
@@ -261,7 +265,7 @@ export function handleCodexNotification(
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_completed',
-      threadId: params.threadId,
+      threadId: notification.threadId,
       turnId,
     });
     return;
@@ -280,30 +284,32 @@ export function handleCodexNotification(
     return;
   }
 
-  if (method === 'item/agentMessage/delta' && typeof params.threadId === 'string') {
+  if (method === 'item/agentMessage/delta') {
+    const notification = msg.params as v2.AgentMessageDeltaNotification;
     queueAgentDelta(app, {
       type: 'agent_delta',
-      threadId: params.threadId,
-      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      itemId: typeof params.itemId === 'string' ? params.itemId : undefined,
-      delta: typeof params.delta === 'string' ? params.delta : '',
-      startedAt: typeof params.startedAt === 'number' ? params.startedAt : Date.now(),
+      threadId: notification.threadId,
+      turnId: notification.turnId,
+      itemId: notification.itemId,
+      delta: notification.delta,
+      startedAt: Date.now(),
     });
     return;
   }
 
-  if (method === 'item/plan/delta' && typeof params.threadId === 'string') {
-    setCachedTurnPlan(app.runtimeState, params.threadId, typeof params.turnId === 'string' ? params.turnId : undefined, {
+  if (method === 'item/plan/delta') {
+    const notification = msg.params as v2.PlanDeltaNotification;
+    setCachedTurnPlan(app.runtimeState, notification.threadId, notification.turnId, {
       explanation: '',
       plan: [],
     });
     broadcastThreadTimelineMessage(app, {
       type: 'plan_delta',
-      threadId: params.threadId,
-      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      itemId: typeof params.itemId === 'string' ? params.itemId : undefined,
-      delta: typeof params.delta === 'string' ? params.delta : '',
-      startedAt: typeof params.startedAt === 'number' ? params.startedAt : Date.now(),
+      threadId: notification.threadId,
+      turnId: notification.turnId,
+      itemId: notification.itemId,
+      delta: notification.delta,
+      startedAt: Date.now(),
     });
     return;
   }
@@ -427,58 +433,58 @@ export function handleCodexNotification(
     return;
   }
 
-  if (method === 'item/completed' && typeof params.threadId === 'string') {
-    const item = params.item && typeof params.item === 'object' ? params.item as Record<string, unknown> : null;
-    if (item?.type === 'agentMessage') {
-      flushPendingAgentDeltas(app, params.threadId);
+  if (method === 'item/completed') {
+    const notification = msg.params as v2.ItemCompletedNotification;
+    const item = notification.item;
+    if (item.type === 'agentMessage') {
+      flushPendingAgentDeltas(app, notification.threadId);
     }
     broadcastThreadTimelineMessage(app, {
       type: 'item_completed',
-      threadId: params.threadId,
-      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      item: params.item,
-      completedAt: typeof params.completedAt === 'number'
-        ? params.completedAt
-        : typeof params.completedAtMs === 'number'
-          ? params.completedAtMs
-          : Date.now(),
+      threadId: notification.threadId,
+      turnId: notification.turnId,
+      item,
+      completedAt: notification.completedAtMs,
     });
     return;
   }
 
-  if (method === 'turn/diff/updated' && typeof params.threadId === 'string') {
-    const turnId = typeof params.turnId === 'string' ? params.turnId : undefined;
-    const diff = typeof params.diff === 'string' ? params.diff : '';
+  if (method === 'turn/diff/updated') {
+    const notification = msg.params as v2.TurnDiffUpdatedNotification;
+    const turnId = notification.turnId;
+    const diff = notification.diff;
     if (turnId) {
-      setCachedTurnDiff(app.runtimeState, params.threadId, turnId, diff);
+      setCachedTurnDiff(app.runtimeState, notification.threadId, turnId, diff);
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_diff_updated',
-      threadId: params.threadId,
+      threadId: notification.threadId,
       turnId,
       diff,
     });
     return;
   }
 
-  if (method === 'turn/plan/updated' && typeof params.threadId === 'string') {
-    const turnId = typeof params.turnId === 'string' ? params.turnId : undefined;
+  if (method === 'turn/plan/updated') {
+    const notification = msg.params as v2.TurnPlanUpdatedNotification;
+    const turnId = notification.turnId;
     if (turnId) {
-      setCachedTurnPlan(app.runtimeState, params.threadId, turnId, params);
+      setCachedTurnPlan(app.runtimeState, notification.threadId, turnId, notification as unknown as Record<string, unknown>);
     }
     broadcastThreadTimelineMessage(app, {
       type: 'turn_plan_updated',
-      threadId: params.threadId,
+      threadId: notification.threadId,
       turnId,
-      explanation: typeof params.explanation === 'string' ? params.explanation : '',
-      plan: Array.isArray(params.plan) ? params.plan : [],
+      explanation: notification.explanation || '',
+      plan: notification.plan,
     });
     return;
   }
 
-  if (method === 'model/rerouted' && typeof params.threadId === 'string') {
-    const current = app.runtimeState.tabsById.get(params.threadId);
-    const toModel = typeof params.toModel === 'string' ? params.toModel : '';
+  if (method === 'model/rerouted') {
+    const notification = msg.params as v2.ModelReroutedNotification;
+    const current = app.runtimeState.tabsById.get(notification.threadId);
+    const toModel = notification.toModel;
     if (current && toModel) {
       const tab = upsertRuntimeTab(app, {
         ...current,
@@ -489,11 +495,11 @@ export function handleCodexNotification(
     }
     broadcastThreadTimelineMessage(app, {
       type: 'model_rerouted',
-      threadId: params.threadId,
-      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
-      fromModel: typeof params.fromModel === 'string' ? params.fromModel : '',
+      threadId: notification.threadId,
+      turnId: notification.turnId,
+      fromModel: notification.fromModel,
       toModel,
-      reason: params.reason,
+      reason: notification.reason,
     });
     return;
   }
@@ -585,9 +591,8 @@ export function handleCodexNotification(
   }
 
   if (method === 'serverRequest/resolved') {
-    const requestId = typeof params.requestId === 'string' || typeof params.requestId === 'number'
-      ? String(params.requestId)
-      : '';
+    const notification = msg.params as v2.ServerRequestResolvedNotification;
+    const requestId = String(notification.requestId);
     if (!requestId) {
       return;
     }
@@ -597,27 +602,27 @@ export function handleCodexNotification(
     broadcastMessage(app, {
       type: 'server_request_resolved',
       requestId,
-      threadId: existing?.threadId || (typeof params.threadId === 'string' ? params.threadId : undefined),
+      threadId: existing?.threadId || notification.threadId || undefined,
     });
     return;
   }
 
   if (method === 'warning') {
+    const notification = msg.params as v2.WarningNotification;
     pushGlobalNotice(app.runtimeState, {
-      id: typeof params.noticeId === 'string' ? params.noticeId : `warning:${Date.now()}`,
+      id: `warning:${Date.now()}`,
       type: '_warning',
-      text: typeof params.message === 'string' ? params.message : 'Warning',
-      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'warning',
-      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
-      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
+      text: notification.message,
+      noticeKind: 'warning',
+      createdAt: Date.now(),
+      threadId: notification.threadId || undefined,
     });
     broadcastThreadTimelineMessage(app, {
       type: 'warning',
-      message: typeof params.message === 'string' ? params.message : 'Warning',
-      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
-      noticeId: typeof params.noticeId === 'string' ? params.noticeId : undefined,
-      createdAt: typeof params.createdAt === 'number' ? params.createdAt : Date.now(),
-      noticeKind: typeof params.noticeKind === 'string' ? params.noticeKind : 'warning',
+      message: notification.message,
+      threadId: notification.threadId || undefined,
+      createdAt: Date.now(),
+      noticeKind: 'warning',
     });
     return;
   }
