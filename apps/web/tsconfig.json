@@ -9,7 +9,8 @@
     "jsx": "react-jsx"
   },
   "references": [
-    { "path": "../../packages/protocol" }
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/codex-app-server-types" }
   ],
   "include": [
     "src/**/*.ts",

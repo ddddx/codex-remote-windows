@@ -1,3 +1,8 @@
+import type {
+  PersistedServerRequestRecord,
+  RuntimeServerRequest,
+} from '../application/services/server-requests.js';
+
 type RuntimeTab = {
   threadId: string;
   name: string;
@@ -21,28 +26,6 @@ export type AuthSessionRecord = {
   lastSeenAt: number;
   expiresAt: number;
   revokedAt?: number | null;
-};
-
-type ServerRequestRecord = {
-  requestId: string;
-  rawRequestId: string | number;
-  method: string;
-  kind: string;
-  status: 'pending' | 'submitting';
-  createdAt: number;
-  submittedAt?: number | null;
-  threadId?: string | null;
-  turnId?: string | null;
-  itemId?: string | null;
-  reason?: string;
-  command?: string;
-  cwd?: string;
-  patch?: string;
-  changes?: unknown[];
-  permissions?: unknown;
-  questions?: unknown[];
-  responseSchema?: unknown;
-  raw?: Record<string, unknown>;
 };
 
 export type TurnPlanSnapshot = {
@@ -95,9 +78,9 @@ type RuntimeRepositories = {
     removeSession: (threadId: string) => void;
   };
   pendingRequests: {
-    listPendingRequests: () => ServerRequestRecord[];
-    getPendingRequest: (requestId: string) => ServerRequestRecord | null;
-    upsertPendingRequest: (record: ServerRequestRecord & { payloadJson?: string }) => void;
+    listPendingRequests: () => PersistedServerRequestRecord[];
+    getPendingRequest: (requestId: string) => PersistedServerRequestRecord | null;
+    upsertPendingRequest: (record: PersistedServerRequestRecord & { payloadJson?: string }) => void;
     removePendingRequest: (requestId: string) => void;
   };
   threadPreferences: {
@@ -181,7 +164,7 @@ export type RuntimeState = {
   clients: Set<RuntimeAuthedWsClient>;
   tabsById: Map<string, RuntimeTab>;
   authSessionsById: Map<string, AuthSessionRecord>;
-  serverRequestsById: Map<string, ServerRequestRecord>;
+  serverRequestsById: Map<string, RuntimeServerRequest>;
   turnPlansByThread: Map<string, Map<string, TurnPlanSnapshot>>;
   turnDiffsByThread: Map<string, Map<string, TurnDiffSnapshot>>;
   supplementalItemsByThread: Map<string, Map<string, SupplementalItemSnapshot>>;

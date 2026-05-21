@@ -195,6 +195,34 @@ export function formatApprovalKind(kind: string | undefined): string {
   return kind;
 }
 
+export function formatApprovalMethodLabel(method: string | undefined, fallbackKind?: string): string {
+  if (!method) {
+    return formatApprovalKind(fallbackKind);
+  }
+  if (method === 'item/tool/requestUserInput') {
+    return '用户输入';
+  }
+  if (method === 'item/tool/call') {
+    return '动态工具';
+  }
+  if (method === 'mcpServer/elicitation/request') {
+    return 'MCP 请求';
+  }
+  if (method === 'item/commandExecution/requestApproval' || method === 'execCommandApproval') {
+    return '命令审批';
+  }
+  if (method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval') {
+    return '文件变更审批';
+  }
+  if (method === 'item/permissions/requestApproval') {
+    return '权限审批';
+  }
+  if (method === 'account/chatgptAuthTokens/refresh') {
+    return '账户刷新';
+  }
+  return fallbackKind || method;
+}
+
 export function formatSessionStatus(status: string | undefined): string {
   if (!status) {
     return '空闲';
@@ -297,6 +325,7 @@ export function describeTimelineType(entry: TimelineEntry): string {
 }
 
 export function buildApprovalSummary(request: {
+  method?: string;
   kind?: string;
   reason?: string;
   command?: string;
@@ -335,7 +364,7 @@ export function buildApprovalSummary(request: {
   if (request.patch) {
     return request.patch.slice(0, 240);
   }
-  return request.kind || '待处理审批';
+  return formatApprovalMethodLabel(request.method, request.kind) || '待处理审批';
 }
 
 export function getDecisionLabel(decision: string | Record<string, unknown>): string {
@@ -375,6 +404,32 @@ export function buildApprovalDecisionResponse(decision: string | Record<string, 
     return { decision };
   }
   return { decision };
+}
+
+export function getMcpSchemaProperties(
+  request: Pick<ServerRequestItem, 'requestedSchema' | 'responseSchema'>,
+): Record<string, Record<string, unknown>> {
+  const schema = request.requestedSchema ?? request.responseSchema;
+  if (!schema || typeof schema !== 'object') {
+    return {};
+  }
+  const properties = (schema as { properties?: unknown }).properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+    return {};
+  }
+  return properties as Record<string, Record<string, unknown>>;
+}
+
+export function isUserInputApproval(request: { method?: string; kind?: string }): boolean {
+  return request.method === 'item/tool/requestUserInput' || request.kind === 'user_input';
+}
+
+export function isDynamicToolApproval(request: { method?: string; kind?: string }): boolean {
+  return request.method === 'item/tool/call' || request.kind === 'dynamic_tool_call';
+}
+
+export function isMcpElicitationApproval(request: { method?: string; kind?: string }): boolean {
+  return request.method === 'mcpServer/elicitation/request' || request.kind === 'mcp_server_elicitation';
 }
 
 export function summarizeTimelineEntry(entry: TimelineEntry): string {

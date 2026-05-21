@@ -3,7 +3,12 @@ import {
   buildApprovalDecisionResponse,
   buildApprovalSummary,
   buildUserInputResponse,
+  formatApprovalMethodLabel,
   getDecisionLabel,
+  getMcpSchemaProperties,
+  isDynamicToolApproval,
+  isMcpElicitationApproval,
+  isUserInputApproval,
   normalizeSchemaFieldValue,
 } from '../../app/view-helpers.js';
 import { useAppStore, type ServerRequestItem } from '../../store/appStore.js';
@@ -47,7 +52,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
               {visibleApprovals.map((request) => (
                 <article key={request.requestId} className="approval-item">
                   <div className="approval-item-row">
-                    <strong>{request.kind || '请求'}</strong>
+                    <strong>{formatApprovalMethodLabel(request.method, request.kind)}</strong>
                     <span className={`badge${request.status === 'submitting' ? '' : ' warning'}`}>
                       {request.status === 'submitting' ? '提交中' : '待处理'}
                     </span>
@@ -57,7 +62,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                     <span>{request.threadId || '全局'}</span>
                     <span>{request.requestId}</span>
                   </div>
-                  {request.kind === 'user_input' && request.questions?.length ? (
+                  {isUserInputApproval(request) && request.questions?.length ? (
                     <div className="approval-question-list">
                       {request.questions.map((question) => {
                         const questionId = question.id || '';
@@ -123,7 +128,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                       })}
                     </div>
                   ) : null}
-                  {request.kind === 'dynamic_tool_call' ? (
+                  {isDynamicToolApproval(request) ? (
                     <div className="approval-question-list">
                       <div className="approval-question-card">
                         <strong>{request.namespace ? `${request.namespace}.${request.tool || ''}` : request.tool || '动态工具'}</strong>
@@ -153,7 +158,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                       </div>
                     </div>
                   ) : null}
-                  {request.kind === 'mcp_server_elicitation' ? (
+                  {isMcpElicitationApproval(request) ? (
                     <div className="approval-question-list">
                       <div className="approval-question-card">
                         {request.serverName ? <strong>MCP: {request.serverName}</strong> : null}
@@ -163,14 +168,16 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                             {request.url}
                           </a>
                         ) : null}
-                        {request.mode !== 'url' && request.responseSchema && typeof request.responseSchema === 'object' ? (
+                        {request.mode !== 'url' && Object.keys(getMcpSchemaProperties(request)).length ? (
                           <div className="approval-question-list">
-                            {Object.entries(((request.responseSchema as any)?.properties || {}) as Record<string, any>).map(([fieldKey, fieldSpec]) => {
+                            {Object.entries(getMcpSchemaProperties(request)).map(([fieldKey, fieldSpec]) => {
                               const stateKey = `${request.requestId}:${fieldKey}`;
+                              const fieldTitle = typeof fieldSpec?.title === 'string' ? fieldSpec.title : fieldKey;
+                              const fieldDescription = typeof fieldSpec?.description === 'string' ? fieldSpec.description : '';
                               return (
                                 <label key={stateKey} className="approval-question-card">
-                                  <strong>{fieldSpec?.title || fieldKey}</strong>
-                                  {fieldSpec?.description ? <span className="muted">{fieldSpec.description}</span> : null}
+                                  <strong>{fieldTitle}</strong>
+                                  {fieldDescription ? <span className="muted">{fieldDescription}</span> : null}
                                   <input
                                     className="token-input"
                                     value={mcpFormValues[stateKey] || ''}
@@ -189,7 +196,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                     </div>
                   ) : null}
                   <div className="approval-actions">
-                    {request.kind === 'user_input' && request.questions?.length ? (
+                    {isUserInputApproval(request) && request.questions?.length ? (
                       <button
                         type="button"
                         className="primary-button small"
@@ -206,7 +213,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                         提交回答
                       </button>
                     ) : null}
-                    {request.kind === 'dynamic_tool_call' ? (
+                    {isDynamicToolApproval(request) ? (
                       <button
                         type="button"
                         className="primary-button small"
@@ -235,7 +242,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                         提交结果
                       </button>
                     ) : null}
-                    {request.kind === 'mcp_server_elicitation' ? (
+                    {isMcpElicitationApproval(request) ? (
                       request.mode === 'url' ? (
                         <>
                           <button
@@ -270,7 +277,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                             className="primary-button small"
                             disabled={request.status === 'submitting'}
                             onClick={() => {
-                              const properties = (((request.responseSchema as any)?.properties || {}) as Record<string, Record<string, unknown>>);
+                              const properties = getMcpSchemaProperties(request);
                               const content = Object.fromEntries(
                                 Object.entries(properties).map(([fieldKey, fieldSpec]) => {
                                   const stateKey = `${request.requestId}:${fieldKey}`;
@@ -301,7 +308,7 @@ export function InspectorPanel({ onRespond }: InspectorPanelProps) {
                         </>
                       )
                     ) : null}
-                    {request.kind !== 'user_input' && request.kind !== 'dynamic_tool_call' && request.kind !== 'mcp_server_elicitation' ? (request.availableDecisions?.length
+                    {!isUserInputApproval(request) && !isDynamicToolApproval(request) && !isMcpElicitationApproval(request) ? (request.availableDecisions?.length
                       ? request.availableDecisions
                       : ['accept', 'decline']).map((decision, index) => {
                         const key = typeof decision === 'string' ? decision : JSON.stringify(decision);

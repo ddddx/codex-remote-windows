@@ -5,6 +5,64 @@ const attachmentSchema = z.object({
   name: z.string().optional(),
 });
 
+const serverRequestDecisionSchema = z.union([
+  z.string(),
+  z.record(z.string(), z.unknown()),
+]);
+
+const fileChangeSchema = z.object({
+  path: z.string().optional(),
+  kind: z.string().optional(),
+  addedLines: z.number().optional(),
+  deletedLines: z.number().optional(),
+  diff: z.string().optional(),
+});
+
+const approvalQuestionOptionSchema = z.object({
+  label: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const approvalQuestionSchema = z.object({
+  id: z.string().optional(),
+  question: z.string().optional(),
+  header: z.string().optional(),
+  isOther: z.boolean().optional(),
+  isSecret: z.boolean().optional(),
+  options: z.array(approvalQuestionOptionSchema).optional(),
+});
+
+const serverRequestSchema = z.object({
+  requestId: z.string(),
+  method: z.string().optional(),
+  threadId: z.string().optional(),
+  turnId: z.string().optional(),
+  itemId: z.string().optional(),
+  kind: z.string().optional(),
+  status: z.enum(['pending', 'submitting']).optional(),
+  reason: z.string().optional(),
+  message: z.string().optional(),
+  command: z.string().optional(),
+  cwd: z.string().optional(),
+  tool: z.string().optional(),
+  namespace: z.string().optional(),
+  serverName: z.string().optional(),
+  patch: z.string().optional(),
+  changes: z.array(fileChangeSchema).optional(),
+  questions: z.array(approvalQuestionSchema).optional(),
+  permissions: z.unknown().optional(),
+  availableDecisions: z.array(serverRequestDecisionSchema).optional(),
+  createdAt: z.number().optional(),
+  responseSchema: z.unknown().optional(),
+  requestedSchema: z.unknown().optional(),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+  mode: z.string().optional(),
+  url: z.string().optional(),
+  elicitationId: z.string().optional(),
+  meta: z.unknown().optional(),
+  raw: z.record(z.string(), z.unknown()).optional(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tab_create'),
@@ -59,16 +117,16 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('state'),
     tabs: z.array(z.unknown()),
-    serverRequests: z.array(z.unknown()),
+    serverRequests: z.array(serverRequestSchema),
     globalSupplementalItems: z.array(z.unknown()),
   }),
   z.object({
     type: z.literal('server_request_required'),
-    request: z.unknown(),
+    request: serverRequestSchema,
   }),
   z.object({
     type: z.literal('server_request_updated'),
-    request: z.unknown(),
+    request: serverRequestSchema,
   }),
   z.object({
     type: z.literal('server_request_resolved'),
@@ -196,7 +254,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     method: z.string().optional(),
     delta: z.string().optional(),
     patch: z.string().optional(),
-    changes: z.array(z.unknown()).optional(),
+    changes: z.array(fileChangeSchema).optional(),
     part: z.unknown().optional(),
     startedAt: z.number().optional(),
   }),

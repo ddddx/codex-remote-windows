@@ -54,6 +54,40 @@ test('request_user_input requests are normalized and retained in approvals store
   assert.equal(state.approvals.items[0]?.questions?.[0]?.id, 'color');
 });
 
+test('official method-driven approval requests retain method and requested schema fields', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'server_request_required',
+    request: {
+      requestId: 'req-official-1',
+      method: 'mcpServer/elicitation/request',
+      threadId: 'thread-1',
+      kind: 'mcp_server_elicitation',
+      mode: 'form',
+      requestedSchema: {
+        properties: {
+          projectId: { title: 'Project ID', type: 'string' },
+        },
+      },
+      raw: {
+        serverName: 'docs',
+      },
+      status: 'pending',
+      createdAt: 2,
+    },
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.approvals.items[0]?.method, 'mcpServer/elicitation/request');
+  assert.deepEqual(state.approvals.items[0]?.requestedSchema, {
+    properties: {
+      projectId: { title: 'Project ID', type: 'string' },
+    },
+  });
+  assert.equal((state.approvals.items[0]?.raw as any)?.serverName, 'docs');
+});
+
 test('file change approval requests retain structured changes for diff rendering', () => {
   resetStore();
 

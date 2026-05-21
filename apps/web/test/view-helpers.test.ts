@@ -3,8 +3,13 @@ import assert from 'node:assert/strict';
 import {
   buildApprovalDecisionResponse,
   buildTokenUsageDisplay,
+  formatApprovalMethodLabel,
   formatTokenUsageValue,
   formatWorkspaceLabel,
+  getMcpSchemaProperties,
+  isDynamicToolApproval,
+  isMcpElicitationApproval,
+  isUserInputApproval,
 } from '../src/app/view-helpers.js';
 
 test('buildApprovalDecisionResponse preserves structured approval decisions', () => {
@@ -19,6 +24,32 @@ test('buildApprovalDecisionResponse preserves structured approval decisions', ()
 
 test('buildApprovalDecisionResponse wraps string decisions for codex requests', () => {
   assert.deepEqual(buildApprovalDecisionResponse('accept'), { decision: 'accept' });
+});
+
+test('approval method helpers prefer official server request methods', () => {
+  assert.equal(formatApprovalMethodLabel('item/tool/requestUserInput'), '用户输入');
+  assert.equal(formatApprovalMethodLabel('item/tool/call'), '动态工具');
+  assert.equal(formatApprovalMethodLabel('mcpServer/elicitation/request'), 'MCP 请求');
+  assert.equal(isUserInputApproval({ method: 'item/tool/requestUserInput' }), true);
+  assert.equal(isDynamicToolApproval({ method: 'item/tool/call' }), true);
+  assert.equal(isMcpElicitationApproval({ method: 'mcpServer/elicitation/request' }), true);
+});
+
+test('getMcpSchemaProperties prefers requestedSchema over legacy responseSchema', () => {
+  assert.deepEqual(getMcpSchemaProperties({
+    requestedSchema: {
+      properties: {
+        apiKey: { title: 'API Key', type: 'string' },
+      },
+    },
+    responseSchema: {
+      properties: {
+        ignored: { title: 'Ignored', type: 'string' },
+      },
+    },
+  } as any), {
+    apiKey: { title: 'API Key', type: 'string' },
+  });
 });
 
 test('formatTokenUsageValue renders context percentage when context window is available', () => {

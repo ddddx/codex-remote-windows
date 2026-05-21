@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerMessage } from '@codex-remote/protocol';
-import { listServerRequests } from './server-requests.js';
+import { listServerRequests, restoreServerRequestRecord } from './server-requests.js';
 import { listSupplementalItems, listTimelineEvents, listTurnDiffs, listTurnPlans } from './runtime-cache.js';
 import { listRuntimeTabs, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
 
@@ -21,7 +21,14 @@ export function hydratePersistedRuntimeState(app: FastifyInstance): void {
   }
   if (!app.runtimeState.serverRequestsById.size) {
     for (const request of app.repositories.pendingRequests.listPendingRequests()) {
-      app.runtimeState.serverRequestsById.set(request.requestId, request as any);
+      if (request.status === 'resolved') {
+        continue;
+      }
+      const restored = restoreServerRequestRecord(request);
+      if (!restored) {
+        continue;
+      }
+      app.runtimeState.serverRequestsById.set(restored.requestId, restored);
     }
   }
 }

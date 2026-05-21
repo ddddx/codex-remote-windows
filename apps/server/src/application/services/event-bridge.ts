@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerNotification, v2 } from '@codex-remote/codex-app-server-types';
-import { persistServerRequest } from './server-requests.js';
+import { persistServerRequest, toServerRequestPayload } from './server-requests.js';
 import { upsertRuntimeTab } from './session-tabs.js';
 import {
   appendTimelineEvent,
@@ -551,7 +551,7 @@ export function handleCodexNotification(
       persistServerRequest(app, existing);
       broadcastMessage(app, {
         type: 'server_request_updated',
-        request: existing,
+        request: toServerRequestPayload(existing),
       });
     }
   }

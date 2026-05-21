@@ -2,11 +2,15 @@ import { create } from 'zustand';
 import type {
   CodexOptionsResponse,
   HealthResponse,
+  FileChangePayload,
+  ApprovalQuestionPayload,
   ServerMessage,
+  ServerRequestPayload,
   UploadImageResponse,
   WorkspaceListResponse,
   WorkspaceShortcutsResponse,
 } from '@codex-remote/protocol';
+import type { ServerRequest as CodexServerRequest, v2 } from '@codex-remote/codex-app-server-types';
 import type { ConnectionStatus } from '../transport/ws/createSocketClient.js';
 import { summarizeUnknownObject } from '../app/view-helpers.js';
 
@@ -42,39 +46,10 @@ export type TimelineEntry = {
   details?: unknown;
 };
 
-export type ServerRequestItem = {
-  requestId: string;
-  threadId?: string;
-  turnId?: string;
-  itemId?: string;
-  kind?: string;
-  status?: 'pending' | 'submitting';
-  reason?: string;
-  message?: string;
-  command?: string;
-  cwd?: string;
-  tool?: string;
-  namespace?: string;
-  serverName?: string;
-  patch?: string;
-  changes?: Array<{ path?: string; kind?: string; addedLines?: number; deletedLines?: number; diff?: string }>;
-  questions?: Array<{
-    id?: string;
-    question?: string;
-    header?: string;
-    isOther?: boolean;
-    isSecret?: boolean;
-    options?: Array<{ label?: string; description?: string }>;
-  }>;
-  permissions?: unknown;
-  availableDecisions?: Array<string | Record<string, unknown>>;
-  createdAt?: number;
-  responseSchema?: unknown;
-  arguments?: Record<string, unknown>;
-  mode?: string;
-  url?: string;
-  elicitationId?: string;
-  meta?: unknown;
+export type ServerRequestItem = ServerRequestPayload & {
+  method?: CodexServerRequest['method'];
+  changes?: FileChangePayload[];
+  questions?: ApprovalQuestionPayload[];
 };
 
 export type ThreadRunState = {
@@ -598,6 +573,7 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
 
   return {
     requestId,
+    method: typeof request?.method === 'string' ? request.method as CodexServerRequest['method'] : undefined,
     threadId: typeof request?.threadId === 'string' ? request.threadId : undefined,
     turnId: typeof request?.turnId === 'string' ? request.turnId : undefined,
     itemId: typeof request?.itemId === 'string' ? request.itemId : undefined,
@@ -625,11 +601,17 @@ function normalizeServerRequest(request: any): ServerRequestItem | null {
     availableDecisions: Array.isArray(request?.availableDecisions) ? request.availableDecisions : undefined,
     createdAt: normalizeTimestamp(request?.createdAt),
     responseSchema: request?.responseSchema ?? undefined,
+    requestedSchema: request?.requestedSchema ?? undefined,
     arguments: request?.arguments && typeof request.arguments === 'object' ? request.arguments : undefined,
     mode: typeof request?.mode === 'string' ? request.mode : undefined,
     url: typeof request?.url === 'string' ? request.url : undefined,
     elicitationId: typeof request?.elicitationId === 'string' ? request.elicitationId : undefined,
     meta: request?.meta ?? undefined,
+    raw: request?.raw && typeof request.raw === 'object'
+      ? request.raw
+      : request && typeof request === 'object'
+        ? request
+        : undefined,
   };
 }
 
@@ -881,6 +863,7 @@ function areSessionListsEqual(left: SessionItem[], right: SessionItem[]): boolea
 
 function areServerRequestsEqual(left: ServerRequestItem, right: ServerRequestItem): boolean {
   return left.requestId === right.requestId
+    && left.method === right.method
     && left.threadId === right.threadId
     && left.turnId === right.turnId
     && left.itemId === right.itemId
@@ -903,8 +886,10 @@ function areServerRequestsEqual(left: ServerRequestItem, right: ServerRequestIte
     && isEqualUnknown(left.permissions, right.permissions)
     && isEqualUnknown(left.availableDecisions, right.availableDecisions)
     && isEqualUnknown(left.responseSchema, right.responseSchema)
+    && isEqualUnknown(left.requestedSchema, right.requestedSchema)
     && isEqualUnknown(left.arguments, right.arguments)
-    && isEqualUnknown(left.meta, right.meta);
+    && isEqualUnknown(left.meta, right.meta)
+    && isEqualUnknown(left.raw, right.raw);
 }
 
 function areServerRequestListsEqual(left: ServerRequestItem[], right: ServerRequestItem[]): boolean {

@@ -1,4 +1,5 @@
 import { createPendingRequestRecord } from '@codex-remote/domain';
+import type { ServerRequestPayload } from '@codex-remote/protocol';
 import type {
   ApplyPatchApprovalParams,
   ExecCommandApprovalParams,
@@ -37,6 +38,41 @@ export type RuntimeServerRequest = {
   requestedSchema?: Record<string, unknown> | null;
   meta?: unknown;
   raw?: Record<string, unknown>;
+  payloadJson?: string;
+};
+
+export type PersistedServerRequestRecord = {
+  requestId: string;
+  rawRequestId?: string | number;
+  method: string;
+  kind: string;
+  status: 'pending' | 'submitting' | 'resolved';
+  createdAt: number;
+  submittedAt?: number | null;
+  threadId?: string | null;
+  turnId?: string | null;
+  itemId?: string | null;
+  reason?: string;
+  message?: string;
+  command?: string;
+  cwd?: string;
+  tool?: string;
+  namespace?: string;
+  serverName?: string;
+  patch?: string;
+  changes?: unknown[];
+  questions?: unknown[];
+  permissions?: unknown;
+  availableDecisions?: unknown[];
+  responseSchema?: unknown;
+  requestedSchema?: Record<string, unknown> | null;
+  arguments?: Record<string, unknown>;
+  mode?: string;
+  url?: string;
+  elicitationId?: string;
+  meta?: unknown;
+  raw?: Record<string, unknown>;
+  payloadJson?: string;
 };
 
 export function createServerRequestRecord(msg: ServerRequest): RuntimeServerRequest {
@@ -158,23 +194,15 @@ export function createServerRequestRecord(msg: ServerRequest): RuntimeServerRequ
   }
 }
 
-export function listServerRequests(app: FastifyInstance): unknown[] {
-  return Array.from(app.runtimeState.serverRequestsById.values()).sort((left, right) => left.createdAt - right.createdAt);
+export function listServerRequests(app: FastifyInstance): ServerRequestPayload[] {
+  return Array.from(app.runtimeState.serverRequestsById.values())
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .map((request) => toServerRequestPayload(request));
 }
 
 export function persistServerRequest(
   app: FastifyInstance,
-  request: {
-    requestId: string;
-    threadId?: string | null;
-    turnId?: string | null;
-    itemId?: string | null;
-    kind: string;
-    method: string;
-    status: 'pending' | 'submitting';
-    createdAt: number;
-    submittedAt?: number | null;
-  },
+  request: RuntimeServerRequest,
 ): void {
   app.repositories.pendingRequests.upsertPendingRequest(createPendingRequestRecord({
     requestId: request.requestId,
@@ -188,6 +216,85 @@ export function persistServerRequest(
     createdAt: request.createdAt,
     submittedAt: request.submittedAt ?? null,
   }));
+}
+
+export function toServerRequestPayload(request: RuntimeServerRequest): ServerRequestPayload {
+  return {
+    requestId: request.requestId,
+    method: request.method,
+    threadId: request.threadId ?? undefined,
+    turnId: request.turnId ?? undefined,
+    itemId: request.itemId ?? undefined,
+    kind: request.kind,
+    status: request.status,
+    reason: request.reason,
+    message: request.message,
+    command: request.command,
+    cwd: request.cwd,
+    tool: request.tool,
+    namespace: request.namespace,
+    serverName: request.serverName,
+    patch: request.patch,
+    changes: Array.isArray(request.changes) ? request.changes as ServerRequestPayload['changes'] : undefined,
+    questions: Array.isArray(request.questions) ? request.questions as ServerRequestPayload['questions'] : undefined,
+    permissions: request.permissions,
+    availableDecisions: Array.isArray(request.availableDecisions)
+      ? request.availableDecisions as ServerRequestPayload['availableDecisions']
+      : undefined,
+    createdAt: request.createdAt,
+    responseSchema: undefined,
+    requestedSchema: request.requestedSchema ?? undefined,
+    arguments: request.arguments,
+    mode: request.mode,
+    url: request.url,
+    elicitationId: request.elicitationId,
+    meta: request.meta,
+    raw: request.raw,
+  };
+}
+
+export function restoreServerRequestRecord(record: PersistedServerRequestRecord): RuntimeServerRequest | null {
+  const payload = readPersistedPayload(record);
+  const requestId = typeof payload?.requestId === 'string' ? payload.requestId : record.requestId;
+  const method = resolveServerRequestMethod(payload?.method, record.method);
+  if (!requestId || !method) {
+    return null;
+  }
+
+  return {
+    requestId,
+    rawRequestId: readRawRequestId(payload?.rawRequestId, record.rawRequestId, requestId),
+    method,
+    kind: readRequiredString(payload?.kind, record.kind, 'unknown'),
+    status: payload?.status === 'submitting' ? 'submitting' : 'pending',
+    createdAt: typeof payload?.createdAt === 'number' ? payload.createdAt : record.createdAt,
+    submittedAt: readNullableNumber(payload?.submittedAt, record.submittedAt),
+    threadId: readNullableString(payload?.threadId, record.threadId),
+    turnId: readNullableString(payload?.turnId, record.turnId),
+    itemId: readNullableString(payload?.itemId, record.itemId),
+    reason: readOptionalString(payload?.reason, record.reason),
+    message: readOptionalString(payload?.message, record.message),
+    command: readOptionalString(payload?.command, record.command),
+    cwd: readOptionalString(payload?.cwd, record.cwd),
+    patch: readOptionalString(payload?.patch, record.patch),
+    changes: Array.isArray(payload?.changes) ? payload.changes : record.changes,
+    permissions: payload?.permissions ?? record.permissions,
+    availableDecisions: Array.isArray(payload?.availableDecisions) ? payload.availableDecisions : record.availableDecisions,
+    questions: Array.isArray(payload?.questions) ? payload.questions : record.questions,
+    tool: readOptionalString(payload?.tool, record.tool),
+    namespace: readOptionalString(payload?.namespace, record.namespace),
+    arguments: isPlainObject(payload?.arguments) ? payload.arguments : record.arguments,
+    serverName: readOptionalString(payload?.serverName, record.serverName),
+    mode: readOptionalString(payload?.mode, record.mode),
+    url: readOptionalString(payload?.url, record.url),
+    elicitationId: readOptionalString(payload?.elicitationId, record.elicitationId),
+    requestedSchema: isPlainObject(payload?.requestedSchema)
+      ? payload.requestedSchema as Record<string, unknown>
+      : record.requestedSchema ?? null,
+    meta: payload?.meta ?? record.meta,
+    raw: isPlainObject(payload?.raw) ? payload.raw : record.raw,
+    payloadJson: record.payloadJson,
+  };
 }
 
 function mapCommandExecutionApproval(
@@ -276,6 +383,93 @@ function summarizeCommandActions(actions: v2.CommandAction[] | null | undefined)
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readPersistedPayload(record: PersistedServerRequestRecord): Record<string, unknown> | null {
+  if (typeof record.payloadJson !== 'string' || !record.payloadJson.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(record.payloadJson);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveServerRequestMethod(
+  payloadMethod: unknown,
+  fallbackMethod: string,
+): ServerRequest['method'] | null {
+  const method = typeof payloadMethod === 'string'
+    ? payloadMethod
+    : fallbackMethod;
+  if (!method) {
+    return null;
+  }
+  return method as ServerRequest['method'];
+}
+
+function readOptionalString(primary: unknown, fallback: unknown): string | undefined {
+  if (typeof primary === 'string') {
+    return primary;
+  }
+  if (typeof fallback === 'string') {
+    return fallback;
+  }
+  return undefined;
+}
+
+function readNullableString(primary: unknown, fallback: unknown): string | null {
+  if (typeof primary === 'string') {
+    return primary;
+  }
+  if (primary === null) {
+    return null;
+  }
+  if (typeof fallback === 'string') {
+    return fallback;
+  }
+  if (fallback === null) {
+    return null;
+  }
+  return null;
+}
+
+function readRequiredString(primary: unknown, fallback: unknown, defaultValue: string): string {
+  if (typeof primary === 'string' && primary) {
+    return primary;
+  }
+  if (typeof fallback === 'string' && fallback) {
+    return fallback;
+  }
+  return defaultValue;
+}
+
+function readNullableNumber(primary: unknown, fallback: unknown): number | null {
+  if (typeof primary === 'number' && Number.isFinite(primary)) {
+    return primary;
+  }
+  if (primary === null) {
+    return null;
+  }
+  if (typeof fallback === 'number' && Number.isFinite(fallback)) {
+    return fallback;
+  }
+  if (fallback === null) {
+    return null;
+  }
+  return null;
+}
+
+function readRawRequestId(primary: unknown, fallback: unknown, requestId: string): string | number {
+  if (typeof primary === 'string' || typeof primary === 'number') {
+    return primary;
+  }
+  if (typeof fallback === 'string' || typeof fallback === 'number') {
+    return fallback;
+  }
+  return requestId;
 }
 
 function toRecord<T extends object>(value: T): Record<string, unknown> {

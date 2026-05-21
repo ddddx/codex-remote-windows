@@ -684,6 +684,9 @@ test('file change patch updates refresh pending request snapshot', async () => {
   assert.deepEqual(updatedRequest?.changes, [{ path: 'apps/web/src/app/App.tsx', kind: 'update' }]);
   const messages = socket.sent as Array<any>;
   assert.equal(messages[0]?.type, 'server_request_updated');
+  assert.equal(messages[0]?.request?.method, 'item/fileChange/requestApproval');
+  assert.equal(messages[0]?.request?.threadId, 'thread-2');
+  assert.equal(messages[0]?.request?.itemId, undefined);
   assert.equal(messages[1]?.type, 'item_delta');
 });
 

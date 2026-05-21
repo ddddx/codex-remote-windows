@@ -7,9 +7,13 @@ import {
   buildApprovalSummary,
   describeTimelineType,
   formatApprovalKind,
+  formatApprovalMethodLabel,
   formatHealthStatus,
   formatTimelineLabel,
   getDecisionLabel,
+  isDynamicToolApproval,
+  isMcpElicitationApproval,
+  isUserInputApproval,
   normalizeSchemaFieldValue,
   summarizeTimelineEntry,
   buildUserInputResponse,
@@ -1191,7 +1195,7 @@ const ApprovalCard = memo(function ApprovalCard({
       <div className="timeline-marker"><span className="timeline-marker-state" aria-hidden="true">!</span></div>
       <div className="timeline-content">
         <article className="approval-banner">
-          <div className="item-label">{formatApprovalKind(request.kind)}</div>
+          <div className="item-label">{formatApprovalMethodLabel(request.method, request.kind || formatApprovalKind(request.kind))}</div>
           <div className="timeline-inline-title">{buildApprovalSummary(request)}</div>
           <div className="approval-meta">
             {[request.threadId || '全局', request.requestId, request.command || '', request.cwd || ''].filter(Boolean).join(' · ')}
@@ -1199,7 +1203,7 @@ const ApprovalCard = memo(function ApprovalCard({
           {renderFileChangeList(renderableChanges, request.requestId)}
           {diffText ? renderDiffBlock(diffText) : null}
 
-          {request.kind === 'user_input' && request.questions?.length ? (
+          {isUserInputApproval(request) && request.questions?.length ? (
             <div className="approval-form">
               {request.questions.map((question) => {
                 const questionId = question.id || '';
@@ -1259,7 +1263,7 @@ const ApprovalCard = memo(function ApprovalCard({
             </div>
           ) : null}
 
-          {request.kind === 'dynamic_tool_call' ? (
+          {isDynamicToolApproval(request) ? (
             <div className="approval-form">
               <textarea
                 className="approval-text-input"
@@ -1299,14 +1303,14 @@ const ApprovalCard = memo(function ApprovalCard({
             </div>
           ) : null}
 
-          {request.kind === 'mcp_server_elicitation' ? (
+          {isMcpElicitationApproval(request) ? (
             <div className="approval-form">
               {request.mode === 'url' && request.url ? (
                 <a className="approval-link" href={request.url} target="_blank" rel="noreferrer">{request.url}</a>
               ) : null}
-              {request.mode !== 'url' && request.responseSchema && typeof request.responseSchema === 'object' ? (
+              {request.mode !== 'url' && (request.requestedSchema || request.responseSchema) && typeof (request.requestedSchema || request.responseSchema) === 'object' ? (
                 <div className="approval-question">
-                  {Object.entries((((request.responseSchema as any)?.properties || {}) as Record<string, Record<string, unknown>>)).map(([fieldKey, fieldSpec]) => (
+                  {Object.entries(((((request.requestedSchema || request.responseSchema) as any)?.properties || {}) as Record<string, Record<string, unknown>>)).map(([fieldKey, fieldSpec]) => (
                     <label key={fieldKey} className="modal-label">
                       <span>{typeof fieldSpec?.title === 'string' ? fieldSpec.title : fieldKey}</span>
                       <input
@@ -1347,7 +1351,7 @@ const ApprovalCard = memo(function ApprovalCard({
             </div>
           ) : null}
 
-          {request.kind !== 'user_input' && request.kind !== 'dynamic_tool_call' && request.kind !== 'mcp_server_elicitation' ? (
+          {!isUserInputApproval(request) && !isDynamicToolApproval(request) && !isMcpElicitationApproval(request) ? (
             <div className="approval-actions">
               {(request.availableDecisions?.length ? request.availableDecisions : ['accept', 'decline']).map((decision, index) => {
                 const key = typeof decision === 'string' ? decision : JSON.stringify(decision);

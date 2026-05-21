@@ -12,6 +12,7 @@
     "test": "node --test --import tsx test/**/*.test.ts"
   },
   "dependencies": {
+    "@codex-remote/codex-app-server-types": "file:../codex-app-server-types",
     "zod": "^4.4.3"
   }
 }

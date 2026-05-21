@@ -75,3 +75,29 @@ test('server message schema accepts generic thread event payloads', () => {
 
   assert.equal(result.success, true);
 });
+
+test('server message schema accepts official method-backed approval payloads', () => {
+  const result = serverMessageSchema.safeParse({
+    type: 'server_request_required',
+    request: {
+      requestId: 'req-1',
+      method: 'mcpServer/elicitation/request',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      kind: 'mcp_server_elicitation',
+      status: 'pending',
+      mode: 'form',
+      requestedSchema: {
+        properties: {
+          apiKey: { title: 'API Key', type: 'string' },
+        },
+      },
+      raw: {
+        serverName: 'docs',
+      },
+      createdAt: 1,
+    },
+  });
+
+  assert.equal(result.success, true);
+});

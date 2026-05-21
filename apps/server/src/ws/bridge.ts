@@ -5,7 +5,7 @@ import {
   createServerRequestRecord,
   listServerRequests,
   persistServerRequest,
-  type RuntimeServerRequest,
+  toServerRequestPayload,
 } from '../application/services/server-requests.js';
 import {
   listRuntimeTabs,
@@ -51,7 +51,7 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
     persistServerRequest(app, request);
     broadcastMessage(app, {
       type: 'server_request_required',
-      request,
+      request: toServerRequestPayload(request),
     });
   });
 
@@ -80,7 +80,7 @@ export function setServerRequestSubmitting(app: FastifyInstance, requestId: stri
   persistServerRequest(app, existing);
   broadcastMessage(app, {
     type: 'server_request_updated',
-    request: existing,
+    request: toServerRequestPayload(existing),
   });
 }
 
@@ -94,6 +94,6 @@ export function resetServerRequestPending(app: FastifyInstance, requestId: strin
   persistServerRequest(app, existing);
   broadcastMessage(app, {
     type: 'server_request_updated',
-    request: existing,
+    request: toServerRequestPayload(existing),
   });
 }

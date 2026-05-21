@@ -232,6 +232,7 @@ export async function startMockBackend(): Promise<MockBackend> {
       }],
       serverRequests: [{
         requestId: 'req-1',
+        method: 'item/commandExecution/requestApproval',
         threadId: 'thread-1',
         turnId: 'turn-1',
         kind: 'command_approval',
@@ -420,6 +421,7 @@ export async function startMockBackend(): Promise<MockBackend> {
           type: 'server_request_updated',
           request: {
             requestId: 'req-1',
+            method: 'item/commandExecution/requestApproval',
             threadId: message.threadId,
             turnId: 'turn-2',
             kind: 'command_approval',

@@ -11,6 +11,8 @@
     "test": "node --test --import tsx test/**/*.test.ts"
   },
   "dependencies": {
+    "@codex-remote/codex-app-server-types": "file:../../packages/codex-app-server-types",
+    "@codex-remote/protocol": "file:../../packages/protocol",
     "@vitejs/plugin-react": "^6.0.1",
     "clsx": "^2.1.1",
     "highlight.js": "^11.11.1",

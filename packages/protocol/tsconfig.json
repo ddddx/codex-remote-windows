@@ -3,6 +3,9 @@
   "compilerOptions": {
     "outDir": "dist"
   },
+  "references": [
+    { "path": "../codex-app-server-types" }
+  ],
   "include": [
     "src/**/*.ts"
   ]
