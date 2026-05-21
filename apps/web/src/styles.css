@@ -500,14 +500,6 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.topbar-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
 .btn-icon,
 .btn,
 .btn-secondary {
@@ -571,7 +563,6 @@ textarea {
   padding: 8px 12px;
 }
 
-.theme-select-group,
 .context-usage {
   display: inline-flex;
   align-items: center;
@@ -614,7 +605,6 @@ textarea {
   font-weight: 700;
 }
 
-.theme-select-group select,
 .composer-select-group select,
 .modal-input,
 .approval-text-input {
@@ -624,18 +614,6 @@ textarea {
   padding: 9px 12px;
   background: var(--input-bg);
   color: var(--ink);
-}
-
-.theme-select-group select {
-  min-height: 34px;
-  width: auto;
-  padding: 0 32px 0 12px;
-  border-radius: 999px;
-  appearance: none;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 16px) 50% / 6px 6px no-repeat,
-    linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 11px) 50% / 6px 6px no-repeat,
-    color-mix(in srgb, var(--card-strong) 92%, transparent);
 }
 
 .context-usage.is-empty strong {
@@ -1811,6 +1789,26 @@ textarea {
   min-width: 0;
 }
 
+.composer-select-group-theme select {
+  min-height: 36px;
+}
+
+.composer-select-group-status {
+  flex: 0 0 auto;
+}
+
+.composer-connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 12px;
+  background: var(--input-bg);
+}
+
 .composer-input-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1996,7 +1994,6 @@ textarea {
 #promptInput:focus,
 .modal-input:focus,
 .approval-text-input:focus,
-.theme-select-group select:focus,
 .composer-select-group select:focus {
   outline: none;
   border-color: var(--accent);
@@ -2551,11 +2548,6 @@ textarea {
   .topbar h1 {
     flex-basis: calc(100% - 44px);
     font-size: 15px;
-  }
-
-  .topbar-tools {
-    width: 100%;
-    justify-content: space-between;
   }
 
   .toast-stack {

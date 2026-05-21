@@ -990,22 +990,6 @@ export function App() {
               ☰
             </button>
             <h1 id="activeTitle">{activeTitle}</h1>
-            <div className="topbar-tools">
-              <label className="theme-select-group" htmlFor="themeSelect">
-                <span className="sr-only">主题</span>
-                <select id="themeSelect" aria-label="主题" value={theme} onChange={(event) => handleThemeChange(event.target.value)}>
-                  {THEME_OPTIONS.map((item) => (
-                    <option key={item.value} value={item.value}>{item.label}</option>
-                  ))}
-                </select>
-              </label>
-              <span
-                id="activeStatus"
-                className={`status-badge status-badge-dot ${connectionTone === 'connected' ? '' : connectionTone === 'error' ? ' error' : ' waiting'}`}
-                aria-label={connectionStatus}
-                title={connectionStatus}
-              />
-            </div>
           </header>
 
           <section className="panel">
@@ -1114,6 +1098,11 @@ export function App() {
               defaults={buildDefaultComposerPrefs(codexOptions)}
               optionsStatus={codexOptionsStatus}
               tokenUsage={tokenUsageDisplay}
+              theme={theme}
+              themeOptions={THEME_OPTIONS}
+              onThemeChange={handleThemeChange}
+              connectionStatus={connectionStatus}
+              connectionTone={connectionTone}
             />
           </section>
         </div>

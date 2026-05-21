@@ -48,14 +48,12 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.goto('http://127.0.0.1:4173');
 
     await expect(page.locator('#activeTitle')).toHaveText('codex-remote-windows');
-    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'idle');
     await expect(page.locator('.sidebar')).toBeVisible();
 
     await page.locator('#tokenBtn').click();
     await page.locator('#tokenInput').fill('secret-token');
     await page.getByRole('button', { name: '保存并登录' }).click();
 
-    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#tabList')).toContainText('Mock Session');
     await expect(page.locator('#tabList > .tab-item')).toContainText('Mock Session');
     await expect(page.locator('#tabList')).not.toContainText('Closed Session');
@@ -70,9 +68,13 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.sidebar')).not.toHaveClass(/hidden/);
     await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#themeSelect')).toHaveValue('paper');
     await expect(page.locator('.composer-controls-usage .context-usage-ring')).toHaveAttribute('aria-label', /上下文余量/);
     await expect(page.locator('.composer-controls-usage .context-usage-popover')).toContainText('余量 78%');
     await expect(page.locator('.composer-controls-usage .context-usage-popover')).toContainText('剩余 78% · 78 / 100 tokens');
+    await page.locator('#themeSelect').selectOption('night');
+    await expect(page.locator('#themeSelect')).toHaveValue('night');
     await page.locator('#modelSelect').selectOption('gpt-5.5');
     await expect(page.locator('#modelSelect')).toHaveValue('gpt-5.5');
     await page.locator('#reasoningEffortSelect').selectOption('high');
@@ -139,6 +141,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.reload();
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('#themeSelect')).toHaveValue('night');
     await expect.poll(async () => page.locator('.thinking-indicator-text').textContent()).toMatch(/Working · \d+s/);
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
@@ -169,6 +172,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.reload();
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('#themeSelect')).toHaveValue('night');
     await expect(page.locator('.messages')).toContainText('Recovered warning');
     await expect(page.locator('.toast-stack')).toContainText('Recovered warning');
     await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
@@ -180,6 +184,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.reload();
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('#themeSelect')).toHaveValue('night');
     await expect(page.locator('.toast-stack')).not.toContainText('Recovered warning');
     await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
 
@@ -191,6 +196,8 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#composerMobileUsagePopover')).toContainText('剩余 78% · 78 / 100 tokens');
     await page.locator('#composerControlsToggle').click();
     await expect(page.locator('#modelSelect')).toBeVisible();
+    await expect(page.locator('#themeSelect')).toBeVisible();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#composerMobileUsagePopover')).toBeHidden();
     await expect(page.locator('.composer-controls-usage')).toBeHidden();
 
@@ -253,8 +260,9 @@ test('web app does not render duplicate assistant completion after thread sync r
     await page.locator('#tokenInput').fill('secret-token');
     await page.getByRole('button', { name: '保存并登录' }).click();
 
-    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#themeSelect')).toHaveValue('paper');
 
     await page.locator('#promptInput').fill('Ship the refactor');
     await page.locator('#promptInput').press('Enter');
@@ -266,6 +274,7 @@ test('web app does not render duplicate assistant completion after thread sync r
     await page.reload();
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('#themeSelect')).toHaveValue('paper');
     await expect(page.locator('.messages')).toContainText('Final shipped answer');
 
     const assistantMessages = page.locator('.transcript-row-assistant .message-body');

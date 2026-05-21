@@ -32,6 +32,11 @@ type ComposerDockProps = {
   defaults: ComposerPrefs;
   optionsStatus: 'idle' | 'loading' | 'ready' | 'error';
   tokenUsage: TokenUsageDisplay;
+  theme: string;
+  themeOptions: Array<{ value: string; label: string }>;
+  onThemeChange: (value: string) => void;
+  connectionStatus: string;
+  connectionTone: 'connected' | 'waiting' | 'error';
 };
 
 const REASONING_OPTIONS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -251,6 +256,11 @@ export function ComposerDock(props: ComposerDockProps) {
     defaults,
     optionsStatus,
     tokenUsage,
+    theme,
+    themeOptions,
+    onThemeChange,
+    connectionStatus,
+    connectionTone,
   } = props;
 
   const effectiveModel = prefs.model || defaults.model;
@@ -436,6 +446,32 @@ export function ComposerDock(props: ComposerDockProps) {
             ))}
           </select>
         </label>
+
+        <label className="composer-select-group composer-select-group-theme" htmlFor="themeSelect">
+          <span>主题</span>
+          <select
+            id="themeSelect"
+            aria-label="主题"
+            value={theme}
+            onChange={(event) => onThemeChange(event.target.value)}
+          >
+            {themeOptions.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="composer-select-group composer-select-group-status">
+          <span>连接</span>
+          <div className="composer-connection-indicator">
+            <span
+              id="activeStatus"
+              className={`status-badge status-badge-dot ${connectionTone === 'connected' ? '' : connectionTone === 'error' ? ' error' : ' waiting'}`}
+              aria-label={connectionStatus}
+              title={connectionStatus}
+            />
+          </div>
+        </div>
 
         <div className="composer-controls-usage">
           <div className="context-usage-anchor">
