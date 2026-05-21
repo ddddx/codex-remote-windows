@@ -1,5 +1,6 @@
 const TOKEN_STORAGE_KEY = 'codex-remote-ws-token';
 const DEVICE_ID_STORAGE_KEY = 'codex-remote-device-id';
+const ACTIVE_SESSION_STORAGE_KEY = 'codex-remote-active-session-id';
 
 function readTokenFromUrl(): string {
   try {
@@ -41,6 +42,28 @@ export function writeStoredToken(token: string): string {
       window.localStorage.setItem(TOKEN_STORAGE_KEY, normalized);
     } else {
       window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+  return normalized;
+}
+
+export function readStoredActiveSessionId(): string {
+  try {
+    return (window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function writeStoredActiveSessionId(threadId: string): string {
+  const normalized = typeof threadId === 'string' ? threadId.trim() : '';
+  try {
+    if (normalized) {
+      window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, normalized);
+    } else {
+      window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
     }
   } catch {
     // Ignore storage failures.

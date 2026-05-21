@@ -1205,7 +1205,21 @@ const ApprovalCard = memo(function ApprovalCard({
           {diffText ? renderDiffBlock(diffText) : null}
 
           {isUserInputApproval(request) && request.questions?.length ? (
-            <div className="approval-form">
+            <form
+              className="approval-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onRespond(request, buildUserInputResponse(request, questionAnswers));
+              }}
+            >
+              <input
+                type="text"
+                name={`${request.requestId}:username`}
+                autoComplete="username"
+                tabIndex={-1}
+                aria-hidden="true"
+                style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
+              />
               {request.questions.map((question) => {
                 const questionId = question.id || '';
                 const options = Array.isArray(question.options) ? question.options : [];
@@ -1237,6 +1251,8 @@ const ApprovalCard = memo(function ApprovalCard({
                         <input
                           className="approval-text-input"
                           type="password"
+                          name={`${request.requestId}:${questionId}:secret`}
+                          autoComplete="new-password"
                           value={currentValue}
                           onChange={(event) => setQuestionAnswers((state) => ({ ...state, [questionId]: event.target.value }))}
                         />
@@ -1254,14 +1270,13 @@ const ApprovalCard = memo(function ApprovalCard({
                 <div className="approval-actions">
                   <button
                     className="btn"
-                    type="button"
+                    type="submit"
                     disabled={request.status === 'submitting'}
-                    onClick={() => onRespond(request, buildUserInputResponse(request, questionAnswers))}
                   >
                     提交回答
-                </button>
+                  </button>
               </div>
-            </div>
+            </form>
           ) : null}
 
           {isDynamicToolApproval(request) ? (

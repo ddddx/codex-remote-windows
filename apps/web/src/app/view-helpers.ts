@@ -512,6 +512,185 @@ export function summarizeUnknownObject(value: unknown, max = 3): string {
   return parts.join(' · ');
 }
 
+export function formatNotificationTitle(method: string, params: Record<string, unknown>): string {
+  if (method === 'mcpServer/startupStatus/updated') {
+    return 'MCP 服务状态';
+  }
+  if (method === 'mcpServer/oauthLogin/completed') {
+    return 'MCP OAuth';
+  }
+  if (method === 'account/rateLimits/updated') {
+    return '额度更新';
+  }
+  if (method === 'account/updated') {
+    return '账户更新';
+  }
+  if (method === 'account/login/completed') {
+    return '账户登录';
+  }
+  if (method === 'guardianWarning') {
+    return 'Guardian 警告';
+  }
+  if (method === 'deprecationNotice') {
+    return '弃用通知';
+  }
+  if (method === 'configWarning') {
+    return '配置警告';
+  }
+  if (method === 'windows/worldWritableWarning') {
+    return 'Windows 安全警告';
+  }
+  if (method === 'windowsSandbox/setupCompleted') {
+    return 'Windows Sandbox';
+  }
+  if (method === 'remoteControl/status/changed') {
+    return '远程控制状态';
+  }
+  if (method === 'skills/changed') {
+    return '技能已更新';
+  }
+  if (method === 'app/list/updated') {
+    return '应用列表更新';
+  }
+  if (method === 'externalAgentConfig/import/completed') {
+    return '外部代理配置导入完成';
+  }
+  if (method === 'fs/changed') {
+    return '文件系统更新';
+  }
+  if (method === 'fuzzyFileSearch/sessionUpdated') {
+    return '模糊搜索更新';
+  }
+  if (method === 'fuzzyFileSearch/sessionCompleted') {
+    return '模糊搜索完成';
+  }
+  return typeof params.summary === 'string' && params.summary.trim()
+    ? params.summary
+    : method;
+}
+
+export function formatNotificationMessage(method: string, params: Record<string, unknown>): string {
+  if (method === 'mcpServer/startupStatus/updated') {
+    const name = typeof params.name === 'string' ? params.name : 'MCP';
+    const status = typeof params.status === 'string' ? params.status : 'unknown';
+    const error = typeof params.error === 'string' && params.error.trim() ? ` · ${params.error}` : '';
+    return `${name} · ${status}${error}`;
+  }
+  if (method === 'mcpServer/oauthLogin/completed') {
+    const name = typeof params.name === 'string' ? params.name : 'MCP';
+    const success = params.success === true;
+    const error = typeof params.error === 'string' && params.error.trim() ? ` · ${params.error}` : '';
+    return `${name} · ${success ? '登录成功' : '登录失败'}${error}`;
+  }
+  if (method === 'account/rateLimits/updated') {
+    const rateLimits = params.rateLimits && typeof params.rateLimits === 'object'
+      ? params.rateLimits as Record<string, unknown>
+      : null;
+    const limitName = typeof rateLimits?.limitName === 'string' ? rateLimits.limitName : '';
+    const planType = typeof rateLimits?.planType === 'string' ? rateLimits.planType : '';
+    const reachedType = typeof rateLimits?.rateLimitReachedType === 'string' ? rateLimits.rateLimitReachedType : '';
+    return [limitName, planType, reachedType].filter(Boolean).join(' · ') || '账户额度状态已更新';
+  }
+  if (method === 'account/updated') {
+    const authMode = typeof params.authMode === 'string' ? params.authMode : '';
+    const planType = typeof params.planType === 'string' ? params.planType : '';
+    return [authMode, planType].filter(Boolean).join(' · ') || '账户信息已更新';
+  }
+  if (method === 'account/login/completed') {
+    const success = params.success === true;
+    const error = typeof params.error === 'string' && params.error.trim() ? ` · ${params.error}` : '';
+    return `${success ? '登录成功' : '登录失败'}${error}`;
+  }
+  if (method === 'guardianWarning') {
+    return typeof params.message === 'string' ? params.message : 'Guardian 发出警告';
+  }
+  if (method === 'deprecationNotice') {
+    const summary = typeof params.summary === 'string' ? params.summary : '';
+    const details = typeof params.details === 'string' ? params.details : '';
+    return [summary, details].filter(Boolean).join(' · ') || '存在即将弃用的能力';
+  }
+  if (method === 'configWarning') {
+    const summary = typeof params.summary === 'string' ? params.summary : '';
+    const details = typeof params.details === 'string' ? params.details : '';
+    const path = typeof params.path === 'string' ? params.path : '';
+    return [summary, details, path].filter(Boolean).join(' · ') || '配置存在警告';
+  }
+  if (method === 'windows/worldWritableWarning') {
+    const samplePaths = Array.isArray(params.samplePaths)
+      ? params.samplePaths.filter((value): value is string => typeof value === 'string')
+      : [];
+    const extraCount = typeof params.extraCount === 'number' ? params.extraCount : 0;
+    const failedScan = params.failedScan === true ? ' · 扫描未完成' : '';
+    const extraLabel = extraCount > 0 ? ` · 另有 ${extraCount} 项` : '';
+    return `${samplePaths.slice(0, 2).join(' · ') || '检测到 world-writable 路径'}${extraLabel}${failedScan}`;
+  }
+  if (method === 'windowsSandbox/setupCompleted') {
+    const mode = typeof params.mode === 'string' ? params.mode : '';
+    const success = params.success === true;
+    const error = typeof params.error === 'string' && params.error.trim() ? ` · ${params.error}` : '';
+    return `${mode || 'sandbox'} · ${success ? '设置完成' : '设置失败'}${error}`;
+  }
+  if (method === 'remoteControl/status/changed') {
+    const status = typeof params.status === 'string' ? params.status : '';
+    const environmentId = typeof params.environmentId === 'string' ? params.environmentId : '';
+    return [status, environmentId].filter(Boolean).join(' · ') || '远程控制状态已更新';
+  }
+  if (method === 'skills/changed') {
+    return '可用技能列表已刷新';
+  }
+  if (method === 'app/list/updated') {
+    const data = Array.isArray(params.data) ? params.data : [];
+    return `共 ${data.length} 个应用`;
+  }
+  if (method === 'externalAgentConfig/import/completed') {
+    return '外部代理配置已导入';
+  }
+  if (method === 'fs/changed') {
+    const watchId = typeof params.watchId === 'string' ? params.watchId : '';
+    const changedPaths = Array.isArray(params.changedPaths)
+      ? params.changedPaths.filter((value): value is string => typeof value === 'string')
+      : [];
+    return [watchId, ...changedPaths.slice(0, 2)].filter(Boolean).join(' · ') || '文件系统事件';
+  }
+  if (method === 'fuzzyFileSearch/sessionUpdated') {
+    const query = typeof params.query === 'string' ? params.query : '';
+    const files = Array.isArray(params.files) ? params.files : [];
+    return [query, `${files.length} 个结果`].filter(Boolean).join(' · ') || '模糊搜索结果已更新';
+  }
+  if (method === 'fuzzyFileSearch/sessionCompleted') {
+    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+    return sessionId ? `${sessionId} 已完成` : '模糊搜索已完成';
+  }
+  return summarizeUnknownObject(params, 4) || '收到系统通知';
+}
+
+export function getNotificationLevel(method: string, params: Record<string, unknown>): 'info' | 'warning' | 'error' {
+  if (
+    method === 'guardianWarning'
+    || method === 'configWarning'
+    || method === 'deprecationNotice'
+    || method === 'windows/worldWritableWarning'
+  ) {
+    return 'warning';
+  }
+  if (
+    method === 'mcpServer/startupStatus/updated'
+    || method === 'mcpServer/oauthLogin/completed'
+    || method === 'windowsSandbox/setupCompleted'
+  ) {
+    if (params.success === false || params.status === 'failed' || typeof params.error === 'string') {
+      return 'error';
+    }
+  }
+  if (method === 'account/login/completed' && params.success === false) {
+    return 'error';
+  }
+  if (method === 'remoteControl/status/changed' && params.status === 'errored') {
+    return 'error';
+  }
+  return 'info';
+}
+
 export function buildUserInputResponse(
   request: ServerRequestItem,
   formState: Record<string, string>,

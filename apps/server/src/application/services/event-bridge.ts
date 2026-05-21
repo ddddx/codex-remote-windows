@@ -48,6 +48,30 @@ function broadcastThreadTimelineMessage(app: FastifyInstance, message: TimelineE
   broadcastMessage(app, message);
 }
 
+function cacheAndBroadcastGenericNotification(
+  app: FastifyInstance,
+  method: string,
+  params: Record<string, unknown>,
+): void {
+  const threadId = typeof params.threadId === 'string' ? params.threadId : undefined;
+  if (threadId) {
+    appendTimelineEvent(app.runtimeState, threadId, {
+      type: 'thread_event',
+      threadId,
+      turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
+      itemId: getItemId(params),
+      method,
+      params,
+      createdAt: Date.now(),
+    });
+  }
+  broadcastMessage(app, {
+    type: 'notification',
+    method,
+    params,
+  });
+}
+
 function getThreadId(params: Record<string, unknown>): string | undefined {
   return typeof params.threadId === 'string' ? params.threadId : undefined;
 }
@@ -719,10 +743,6 @@ export function handleCodexNotification(
   }
 
   if (method) {
-    broadcastMessage(app, {
-      type: 'notification',
-      method,
-      params,
-    });
+    cacheAndBroadcastGenericNotification(app, method, params);
   }
 }

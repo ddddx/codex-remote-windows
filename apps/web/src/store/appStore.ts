@@ -20,7 +20,12 @@ import type {
 } from '@codex-remote/protocol';
 import type { ServerRequest as CodexServerRequest, v2 } from '@codex-remote/codex-app-server-types';
 import type { ConnectionStatus } from '../transport/ws/createSocketClient.js';
-import { summarizeUnknownObject } from '../app/view-helpers.js';
+import {
+  formatNotificationMessage,
+  formatNotificationTitle,
+  getNotificationLevel,
+  summarizeUnknownObject,
+} from '../app/view-helpers.js';
 
 export type SessionItem = {
   threadId: string;
@@ -1712,7 +1717,78 @@ function createTimelineEntriesFromThreadSync(message: Extract<ServerMessage, { t
     }
   }
 
+  for (const notice of Array.isArray(message.globalSupplementalItems) ? message.globalSupplementalItems : []) {
+    const noticeId = typeof notice.id === 'string' ? notice.id : '';
+    const noticeText = typeof notice.text === 'string' ? notice.text : '';
+    if (!noticeId || !noticeText.trim()) {
+      continue;
+    }
+    entries.push({
+      id: `global-notice:${noticeId}`,
+      type: 'notice',
+      role: 'system',
+      title: typeof notice.noticeKind === 'string' && notice.noticeKind.trim() ? notice.noticeKind : '通知',
+      text: noticeText,
+      status: notice.noticeKind === 'warning'
+        ? 'warning'
+        : notice.noticeKind === 'error'
+          ? 'error'
+          : 'completed',
+      createdAt: normalizeTimestamp(notice.createdAt),
+      details: notice,
+    });
+  }
+
   return entries;
+}
+
+function shouldRenderNotificationInTimeline(method: string, params: Record<string, unknown>): boolean {
+  if (typeof params.threadId === 'string' && params.threadId.trim()) {
+    return true;
+  }
+  return method === 'guardianWarning';
+}
+
+function buildTimelineEntryFromNotification(method: string, params: Record<string, unknown>): TimelineEntry | null {
+  const threadId = typeof params.threadId === 'string' ? params.threadId : '';
+  if (!threadId) {
+    return null;
+  }
+  const level = getNotificationLevel(method, params);
+  const title = formatNotificationTitle(method, params);
+  const text = formatNotificationMessage(method, params);
+  return buildSystemTimelineEntry(threadId, 'notice', {
+    id: `notification:${threadId}:${method}:${typeof params.sessionId === 'string' ? params.sessionId : typeof params.name === 'string' ? params.name : Date.now()}`,
+    role: 'system',
+    title,
+    text,
+    status: level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'completed',
+    meta: [method].filter(Boolean),
+    createdAt: Date.now(),
+    details: params,
+  });
+}
+
+function pushGlobalSupplementalNotifications(
+  store: ReturnType<typeof useAppStore.getState>,
+  notices: GlobalSupplementalItemPayload[] | undefined,
+): void {
+  for (const notice of Array.isArray(notices) ? notices : []) {
+    const id = typeof notice.id === 'string' ? notice.id : '';
+    const text = typeof notice.text === 'string' ? notice.text : '';
+    if (!id || !text.trim()) {
+      continue;
+    }
+    const noticeKind = typeof notice.noticeKind === 'string' ? notice.noticeKind : '';
+    store.pushNotification({
+      id: `notice:${id}`,
+      level: noticeKind === 'error' ? 'error' : noticeKind === 'warning' ? 'warning' : 'info',
+      title: noticeKind || '通知',
+      message: text,
+      threadId: typeof notice.threadId === 'string' ? notice.threadId : undefined,
+      createdAt: normalizeTimestamp(notice.createdAt),
+    });
+  }
 }
 
 function mergeThreadSyncEntries(
@@ -2593,6 +2669,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
   if (message.type === 'state') {
     store.setSessions(Array.isArray(message.tabs) ? message.tabs.map(normalizeTab) : []);
     store.replaceServerRequests(Array.isArray(message.serverRequests) ? message.serverRequests : []);
+    pushGlobalSupplementalNotifications(store, message.globalSupplementalItems);
     return;
   }
 
@@ -2635,6 +2712,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
         .filter(Boolean),
     );
     store.setThreadSync(message.threadId, message);
+    pushGlobalSupplementalNotifications(store, message.globalSupplementalItems);
     const entriesAfterSync = currentThreadEntries(message.threadId);
     const settledSyncItemIds = new Set(
       entriesAfterSync
@@ -3090,6 +3168,27 @@ export function mapServerMessageToStore(message: ServerMessage) {
   }
 
   if (message.type === 'notification') {
+    const params = message.params && typeof message.params === 'object'
+      ? message.params as Record<string, unknown>
+      : {};
+    const title = formatNotificationTitle(message.method, params);
+    const detail = formatNotificationMessage(message.method, params);
+    const level = getNotificationLevel(message.method, params);
+    store.pushNotification({
+      id: `notification:${message.method}:${typeof params.threadId === 'string' ? params.threadId : typeof params.sessionId === 'string' ? params.sessionId : Date.now()}`,
+      level,
+      title,
+      message: detail,
+      threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
+      createdAt: Date.now(),
+    });
+    if (shouldRenderNotificationInTimeline(message.method, params)) {
+      const entry = buildTimelineEntryFromNotification(message.method, params);
+      const threadId = typeof params.threadId === 'string' ? params.threadId : '';
+      if (entry && threadId) {
+        store.upsertTimelineEntry(threadId, entry);
+      }
+    }
     return;
   }
 }

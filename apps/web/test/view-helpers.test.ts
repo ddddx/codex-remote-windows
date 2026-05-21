@@ -4,8 +4,11 @@ import {
   buildApprovalDecisionResponse,
   buildTokenUsageDisplay,
   formatApprovalMethodLabel,
+  formatNotificationMessage,
+  formatNotificationTitle,
   formatTokenUsageValue,
   formatWorkspaceLabel,
+  getNotificationLevel,
   getMcpSchemaProperties,
   isDynamicToolApproval,
   isMcpElicitationApproval,
@@ -97,4 +100,41 @@ test('formatWorkspaceLabel keeps only the folder name for sidebar display', () =
   assert.equal(formatWorkspaceLabel('/srv/projects/avatar/'), 'avatar');
   assert.equal(formatWorkspaceLabel('C:'), 'C:');
   assert.equal(formatWorkspaceLabel(''), '未设置工作区');
+});
+
+test('notification helpers format key official notifications', () => {
+  assert.equal(
+    formatNotificationTitle('mcpServer/startupStatus/updated', { name: 'docs', status: 'ready', error: null }),
+    'MCP 服务状态',
+  );
+  assert.equal(
+    formatNotificationMessage('mcpServer/startupStatus/updated', { name: 'docs', status: 'ready', error: null }),
+    'docs · ready',
+  );
+  assert.equal(
+    getNotificationLevel('mcpServer/startupStatus/updated', { name: 'docs', status: 'failed', error: 'boom' }),
+    'error',
+  );
+  assert.equal(
+    formatNotificationTitle('guardianWarning', { threadId: 'thread-1', message: 'Need review' }),
+    'Guardian 警告',
+  );
+  assert.equal(
+    formatNotificationMessage('guardianWarning', { threadId: 'thread-1', message: 'Need review' }),
+    'Need review',
+  );
+  assert.equal(
+    getNotificationLevel('guardianWarning', { threadId: 'thread-1', message: 'Need review' }),
+    'warning',
+  );
+  assert.equal(
+    formatNotificationMessage('account/rateLimits/updated', {
+      rateLimits: {
+        limitName: 'GPT-5',
+        planType: 'plus',
+        rateLimitReachedType: 'soft',
+      },
+    }),
+    'GPT-5 · plus · soft',
+  );
 });

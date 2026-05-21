@@ -25,9 +25,6 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
 test('web app matches current shell and conversation flow', async ({ page }) => {
   const backend = await startMockBackend();
   await page.setViewportSize({ width: 1400, height: 1000 });
-  await page.addInitScript(() => {
-    window.localStorage.clear();
-  });
 
   const web = spawn(process.execPath, [
     path.resolve('node_modules/vite/bin/vite.js'),
@@ -124,6 +121,16 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(fileDetails.locator('.timeline-diff-line').filter({ hasText: 'oldCall();' }).locator('.timeline-diff-line-number').first()).toHaveText('3');
     await expect(fileDetails.locator('.timeline-diff-line').filter({ hasText: 'newCall();' }).locator('.timeline-diff-line-number').nth(1)).toHaveText('3');
 
+    await expect(page.locator('.toast-stack')).toContainText('MCP 服务状态');
+    await expect(page.locator('.toast-stack')).toContainText('mock-mcp · ready');
+    await expect(page.locator('.toast-stack')).toContainText('Guardian 警告');
+    await expect(page.locator('.toast-stack')).toContainText('Manual review recommended');
+    await expect(page.locator('.toast-stack')).toContainText('配置警告');
+    await expect(page.locator('.toast-stack')).toContainText('Replace legacySandbox with sandboxMode');
+    await expect(page.locator('.toast-stack')).toContainText('额度更新');
+    await expect(page.locator('.toast-stack')).toContainText('GPT-5 · plus · soft');
+    await expect(page.locator('.messages')).toContainText('Manual review recommended');
+
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();
     const userInputApproval = page.locator('.approval-banner').filter({ hasText: 'Environment' });
@@ -148,6 +155,12 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(mcpUrlApproval).toContainText('https://example.com/authorize');
     await mcpUrlApproval.getByRole('button', { name: '允许' }).click();
     await expect(page.locator('.approval-banner')).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('.messages')).toContainText('Recovered warning');
+    await expect(page.locator('.toast-stack')).toContainText('Recovered warning');
 
     await page.locator('#imageInput').setInputFiles({
       name: 'demo.png',

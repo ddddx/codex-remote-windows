@@ -639,6 +639,47 @@ export async function startMockBackend(): Promise<MockBackend> {
             createdAt: 4,
           },
         })));
+        later(170, () => socket.send(JSON.stringify({
+          type: 'notification',
+          method: 'mcpServer/startupStatus/updated',
+          params: {
+            name: 'mock-mcp',
+            status: 'ready',
+            error: null,
+          },
+        })));
+        later(180, () => socket.send(JSON.stringify({
+          type: 'notification',
+          method: 'guardianWarning',
+          params: {
+            threadId: message.threadId,
+            message: 'Manual review recommended',
+          },
+        })));
+        later(190, () => socket.send(JSON.stringify({
+          type: 'notification',
+          method: 'configWarning',
+          params: {
+            summary: 'config.toml contains deprecated field',
+            details: 'Replace legacySandbox with sandboxMode',
+            path: 'C:\\workspace\\config.toml',
+          },
+        })));
+        later(200, () => socket.send(JSON.stringify({
+          type: 'notification',
+          method: 'account/rateLimits/updated',
+          params: {
+            rateLimits: {
+              limitId: 'limit-1',
+              limitName: 'GPT-5',
+              primary: null,
+              secondary: null,
+              credits: null,
+              planType: 'plus',
+              rateLimitReachedType: 'soft',
+            },
+          },
+        })));
         later(225, () => socket.send(JSON.stringify({
           type: 'turn_completed',
           threadId: message.threadId,

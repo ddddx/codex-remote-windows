@@ -5,7 +5,13 @@ import { SessionRail } from '../features/sessions/SessionRail.js';
 import { TimelineWorkspace } from '../features/timeline/TimelineWorkspace.js';
 import { WorkspaceBrowser } from '../features/workspace/WorkspaceBrowser.js';
 import { buildSessionNameFromPrompt, buildTokenUsageDisplay } from './view-helpers.js';
-import { readOrCreateDeviceId, readStoredToken, writeStoredToken } from '../lib/storage.js';
+import {
+  readOrCreateDeviceId,
+  readStoredActiveSessionId,
+  readStoredToken,
+  writeStoredActiveSessionId,
+  writeStoredToken,
+} from '../lib/storage.js';
 import { useAppStore, mapServerMessageToStore, type ServerRequestItem } from '../store/appStore.js';
 import { createAuthSession, listAuthSessions, revokeAuthSession } from '../transport/http/auth.js';
 import { getHealth } from '../transport/http/health.js';
@@ -305,6 +311,7 @@ export function App() {
   const setCodexOptionsReady = useAppStore((state) => state.setCodexOptionsReady);
   const setCodexOptionsError = useAppStore((state) => state.setCodexOptionsError);
   const setComposerPrefs = useAppStore((state) => state.setComposerPrefs);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const upsertServerRequest = useAppStore((state) => state.upsertServerRequest);
   const health = useAppStore((state) => state.health.data);
   const healthError = useAppStore((state) => state.health.error);
@@ -312,6 +319,7 @@ export function App() {
   const codexOptions = useAppStore((state) => state.codexOptions.data);
   const codexOptionsStatus = useAppStore((state) => state.codexOptions.status);
   const activeSessionId = useAppStore((state) => state.sessions.activeSessionId);
+  const sessionItems = useAppStore((state) => state.sessions.items);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const connectionError = useAppStore((state) => state.connection.error);
   const appendTimelineEntry = useAppStore((state) => state.appendTimelineEntry);
@@ -348,6 +356,7 @@ export function App() {
   const sessionNameInputRef = useRef<HTMLInputElement | null>(null);
   const tokenInputRef = useRef<HTMLInputElement | null>(null);
   const deviceIdRef = useRef(readOrCreateDeviceId());
+  const storedActiveSessionIdRef = useRef(readStoredActiveSessionId());
 
   const resolvedActiveSessionId = activeSessionId;
   const activeSession = useAppStore((state) => (
@@ -414,6 +423,25 @@ export function App() {
   useEffect(() => {
     setToken(readStoredToken());
   }, [setToken]);
+
+  useEffect(() => {
+    if (activeSessionId) {
+      storedActiveSessionIdRef.current = writeStoredActiveSessionId(activeSessionId);
+      return;
+    }
+    if (!sessionItems.length) {
+      return;
+    }
+    const storedThreadId = storedActiveSessionIdRef.current || readStoredActiveSessionId();
+    if (!storedThreadId) {
+      return;
+    }
+    if (sessionItems.some((item) => item.threadId === storedThreadId)) {
+      setActiveSession(storedThreadId);
+      return;
+    }
+    storedActiveSessionIdRef.current = writeStoredActiveSessionId('');
+  }, [activeSessionId, sessionItems, setActiveSession]);
 
   useEffect(() => {
     if (!token) {
@@ -1094,28 +1122,38 @@ export function App() {
       <div className={`modal${tokenPromptOpen ? ' open' : ''}`} aria-hidden={tokenPromptOpen ? 'false' : 'true'}>
         <div className="modal-backdrop" onClick={() => setTokenPromptOpen(false)}></div>
         <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="tokenModalTitle">
-          <h2 id="tokenModalTitle" className="modal-title">设置 WebSocket Token</h2>
-          <label className="modal-label" htmlFor="tokenInput">访问 Token</label>
-          <input
-            ref={tokenInputRef}
-            id="tokenInput"
-            className="modal-input"
-            type="password"
-            placeholder="请输入服务端配置的主 Token"
-            value={tokenDraft}
-            onChange={(event) => setTokenDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                handleTokenSave();
-              }
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleTokenSave();
             }}
-          />
-          {authSessionsError ? <div className="status error">{authSessionsError}</div> : null}
-          <div className="modal-actions">
-            <button className="btn btn-secondary" type="button" onClick={() => setTokenPromptOpen(false)}>取消</button>
-            <button className="btn" type="button" onClick={handleTokenSave} disabled={authPending}>{authPending ? '登录中…' : '保存并登录'}</button>
-          </div>
+          >
+            <input
+              type="text"
+              name="username"
+              autoComplete="username"
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0 }}
+            />
+            <h2 id="tokenModalTitle" className="modal-title">设置 WebSocket Token</h2>
+            <label className="modal-label" htmlFor="tokenInput">访问 Token</label>
+            <input
+              ref={tokenInputRef}
+              id="tokenInput"
+              className="modal-input"
+              type="password"
+              autoComplete="new-password"
+              placeholder="请输入服务端配置的主 Token"
+              value={tokenDraft}
+              onChange={(event) => setTokenDraft(event.target.value)}
+            />
+            {authSessionsError ? <div className="status error">{authSessionsError}</div> : null}
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setTokenPromptOpen(false)}>取消</button>
+              <button className="btn" type="submit" disabled={authPending}>{authPending ? '登录中…' : '保存并登录'}</button>
+            </div>
+          </form>
         </div>
       </div>
 

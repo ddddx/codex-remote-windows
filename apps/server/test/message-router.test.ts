@@ -814,3 +814,25 @@ test('bridge preserves thread-scoped errors and generic codex notifications in t
   assert.equal(cachedEvents[0]?.type, 'error_notice');
   assert.equal(cachedEvents[1]?.type, 'thread_event');
 });
+
+test('bridge caches fallback generic notifications for thread-scoped official events', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  handleCodexNotification(app, {
+    method: 'guardianWarning',
+    params: {
+      threadId: 'thread-generic',
+      message: 'review needed',
+    },
+  });
+
+  const messages = socket.sent as Array<any>;
+  assert.equal(messages[0]?.type, 'notification');
+  assert.equal(messages[0]?.method, 'guardianWarning');
+  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-generic') || [];
+  assert.equal(cachedEvents.length, 1);
+  assert.equal(cachedEvents[0]?.type, 'thread_event');
+  assert.equal(cachedEvents[0]?.method, 'guardianWarning');
+});

@@ -271,10 +271,11 @@ test('thread sync restores plan diff supplemental and notice entries', () => {
   } as any);
 
   const entries = useAppStore.getState().timeline.entriesBySessionId['thread-restore'] || [];
-  assert.equal(entries.length, 3);
+  assert.equal(entries.length, 4);
   assert.ok(entries.some((entry) => entry.type === 'turn_plan'));
   assert.ok(entries.some((entry) => entry.type === 'turn_diff'));
   assert.ok(entries.some((entry) => entry.type === 'hook'));
+  assert.ok(entries.some((entry) => entry.type === 'notice' && entry.text === 'Recovered warning'));
 });
 
 test('thread sync replays missing live timeline events and preserves pending user message', () => {
@@ -1342,6 +1343,48 @@ test('nested token usage payloads are normalized for header display', () => {
   assert.equal(usage?.totalTokens, 33);
   assert.equal(usage?.inputTokens, 21);
   assert.equal(usage?.outputTokens, 12);
+});
+
+test('thread sync restores global supplemental notices into visible timeline entries', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-global-notice',
+    turns: [],
+    globalSupplementalItems: [{
+      id: 'notice-global-1',
+      type: '_warning',
+      noticeKind: 'warning',
+      text: 'Recovered warning from reload',
+      createdAt: 5,
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-global-notice'] || [];
+  assert.ok(entries.some((entry) => entry.id === 'global-notice:notice-global-1'));
+  assert.ok(entries.some((entry) => entry.text === 'Recovered warning from reload'));
+});
+
+test('generic notifications become toasts and thread-scoped timeline notices', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'notification',
+    method: 'guardianWarning',
+    params: {
+      threadId: 'thread-guardian',
+      message: 'Manual review recommended',
+    },
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.notifications.items.length, 1);
+  assert.equal(state.notifications.items[0]?.title, 'Guardian 警告');
+  assert.equal(state.notifications.items[0]?.level, 'warning');
+
+  const entries = state.timeline.entriesBySessionId['thread-guardian'] || [];
+  assert.ok(entries.some((entry) => entry.type === 'notice' && entry.text === 'Manual review recommended'));
 });
 
 test('pending local user message is promoted when real turn output arrives after turn_started', () => {
