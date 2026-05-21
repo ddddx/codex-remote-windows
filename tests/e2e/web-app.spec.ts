@@ -70,9 +70,9 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.sidebar')).not.toHaveClass(/hidden/);
     await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
-    await expect(page.locator('.context-usage-ring')).toHaveAttribute('aria-label', /上下文余量/);
-    await expect(page.locator('.context-usage-popover')).toContainText('余量 78%');
-    await expect(page.locator('.context-usage-popover')).toContainText('剩余 78% · 78 / 100 tokens');
+    await expect(page.locator('.composer-controls-usage .context-usage-ring')).toHaveAttribute('aria-label', /上下文余量/);
+    await expect(page.locator('.composer-controls-usage .context-usage-popover')).toContainText('余量 78%');
+    await expect(page.locator('.composer-controls-usage .context-usage-popover')).toContainText('剩余 78% · 78 / 100 tokens');
     await page.locator('#modelSelect').selectOption('gpt-5.5');
     await expect(page.locator('#modelSelect')).toHaveValue('gpt-5.5');
     await page.locator('#reasoningEffortSelect').selectOption('high');
@@ -177,6 +177,17 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
     await expect(page.locator('.toast-stack')).not.toContainText('Recovered warning');
     await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('#composerControlsToggle')).toBeVisible();
+    await page.locator('#composerMobileUsageToggle').click();
+    await expect(page.locator('#composerMobileUsagePopover')).toBeVisible();
+    await expect(page.locator('#composerMobileUsagePopover')).toContainText('余量 78%');
+    await expect(page.locator('#composerMobileUsagePopover')).toContainText('剩余 78% · 78 / 100 tokens');
+    await page.locator('#composerControlsToggle').click();
+    await expect(page.locator('#modelSelect')).toBeVisible();
+    await expect(page.locator('#composerMobileUsagePopover')).toBeHidden();
+    await expect(page.locator('.composer-controls-usage')).toBeHidden();
 
     await page.locator('#imageInput').setInputFiles({
       name: 'demo.png',

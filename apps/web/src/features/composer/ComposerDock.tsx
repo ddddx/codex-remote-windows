@@ -1,5 +1,5 @@
 import type { CodexOptionModel } from '@codex-remote/protocol';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TokenUsageDisplay } from '../../app/view-helpers.js';
 import { useAppStore, type AttachmentItem } from '../../store/appStore.js';
 import { uploadImage } from '../../transport/http/uploads.js';
@@ -217,6 +217,18 @@ function formatPercentRemaining(value: number | null): string {
   return value === null ? '未统计' : `${value}%`;
 }
 
+function UsagePopoverContent({ tokenUsage }: { tokenUsage: TokenUsageDisplay }) {
+  return (
+    <>
+      <strong>{tokenUsage.label}</strong>
+      {tokenUsage.percentRemaining !== null ? (
+        <span className="context-usage-percent">余量 {formatPercentRemaining(tokenUsage.percentRemaining)}</span>
+      ) : null}
+      <span>{tokenUsage.detail}</span>
+    </>
+  );
+}
+
 export function ComposerDock(props: ComposerDockProps) {
   const {
     draft,
@@ -257,7 +269,9 @@ export function ComposerDock(props: ComposerDockProps) {
   const addAttachment = useAppStore((state) => state.addAttachment);
   const removeAttachment = useAppStore((state) => state.removeAttachment);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mobileUsageAnchorRef = useRef<HTMLDivElement | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [mobileUsageOpen, setMobileUsageOpen] = useState(false);
   const slashQuery = getSlashQuery(draft);
   const slashMatches = useMemo(() => slashQuery === null ? [] : getSlashMatches(slashQuery), [slashQuery]);
   const slashMenuOpen = slashQuery !== null && slashMatches.length > 0;
@@ -282,6 +296,39 @@ export function ComposerDock(props: ComposerDockProps) {
   useLayoutEffect(() => {
     setSlashIndex(0);
   }, [slashQuery]);
+
+  useEffect(() => {
+    setMobileUsageOpen(false);
+  }, [activeSessionId, controlsOpen]);
+
+  useEffect(() => {
+    if (!mobileUsageOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (!mobileUsageAnchorRef.current?.contains(target)) {
+        setMobileUsageOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileUsageOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mobileUsageOpen]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -311,23 +358,38 @@ export function ComposerDock(props: ComposerDockProps) {
         submit();
       }}
     >
-      <button
-        id="composerControlsToggle"
-        className="btn btn-secondary composer-mobile-toggle"
-        type="button"
-        aria-expanded={controlsOpen ? 'true' : 'false'}
-        onClick={() => setControlsOpen(!controlsOpen)}
-      >
-        <span className="composer-mobile-toggle-title">会话参数</span>
-        <span id="composerControlsSummary" className="composer-mobile-toggle-summary">{composerControlsSummary}</span>
-        <span
-          className={`composer-mobile-toggle-usage${tokenUsage.percentRemaining === null ? ' is-empty' : ''}`}
-          aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
-          title={`${tokenUsage.label}：${tokenUsage.detail}`}
+      <div className="composer-mobile-toggle-row">
+        <button
+          id="composerControlsToggle"
+          className="btn btn-secondary composer-mobile-toggle"
+          type="button"
+          aria-expanded={controlsOpen ? 'true' : 'false'}
+          onClick={() => {
+            setMobileUsageOpen(false);
+            setControlsOpen(!controlsOpen);
+          }}
         >
-          <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
-        </span>
-      </button>
+          <span className="composer-mobile-toggle-title">会话参数</span>
+          <span id="composerControlsSummary" className="composer-mobile-toggle-summary">{composerControlsSummary}</span>
+        </button>
+        <div ref={mobileUsageAnchorRef} className="context-usage-anchor composer-mobile-toggle-usage-anchor">
+          <button
+            id="composerMobileUsageToggle"
+            type="button"
+            className={`context-usage-ring composer-mobile-toggle-usage${tokenUsage.percentRemaining === null ? ' is-empty' : ''}`}
+            aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
+            aria-controls="composerMobileUsagePopover"
+            aria-expanded={mobileUsageOpen ? 'true' : 'false'}
+            title={`${tokenUsage.label}：${tokenUsage.detail}`}
+            onClick={() => setMobileUsageOpen((value) => !value)}
+          >
+            <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
+          </button>
+          <div id="composerMobileUsagePopover" className={`context-usage-popover${mobileUsageOpen ? ' is-open' : ''}`}>
+            <UsagePopoverContent tokenUsage={tokenUsage} />
+          </div>
+        </div>
+      </div>
 
       <div className="composer-controls">
         <label className="composer-select-group">
@@ -386,11 +448,7 @@ export function ComposerDock(props: ComposerDockProps) {
               <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
             </button>
             <div className="context-usage-popover">
-              <strong>{tokenUsage.label}</strong>
-              {tokenUsage.percentRemaining !== null ? (
-                <span className="context-usage-percent">余量 {formatPercentRemaining(tokenUsage.percentRemaining)}</span>
-              ) : null}
-              <span>{tokenUsage.detail}</span>
+              <UsagePopoverContent tokenUsage={tokenUsage} />
             </div>
           </div>
         </div>
