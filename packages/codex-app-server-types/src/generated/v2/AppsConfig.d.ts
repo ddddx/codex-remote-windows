@@ -1,0 +1,15 @@
+import type { AppToolApproval } from "./AppToolApproval.js";
+import type { AppToolsConfig } from "./AppToolsConfig.js";
+import type { AppsDefaultConfig } from "./AppsDefaultConfig.js";
+export type AppsConfig = {
+    _default: AppsDefaultConfig | null;
+} & ({
+    [key in string]?: {
+        enabled: boolean;
+        destructive_enabled: boolean | null;
+        open_world_enabled: boolean | null;
+        default_tools_approval_mode: AppToolApproval | null;
+        default_tools_enabled: boolean | null;
+        tools: AppToolsConfig | null;
+    };
+});

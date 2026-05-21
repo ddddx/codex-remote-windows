@@ -21,6 +21,9 @@
       ],
       "@codex-remote/adapters": [
         "packages/adapters/src/index.ts"
+      ],
+      "@codex-remote/codex-app-server-types": [
+        "packages/codex-app-server-types/src/index.ts"
       ]
     }
   }

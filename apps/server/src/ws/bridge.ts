@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ServerMessage } from '@codex-remote/protocol';
+import type { ServerNotification, ServerRequest } from '@codex-remote/codex-app-server-types';
 import {
   createServerRequestRecord,
   listServerRequests,
@@ -36,7 +37,7 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
     return;
   }
 
-  app.codexClient.on('notification', (msg: { method?: string; params?: Record<string, unknown> }) => {
+  app.codexClient.on('notification', (msg: ServerNotification) => {
     handleCodexNotification(app, msg);
   });
 
@@ -44,7 +45,7 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
     app.log.warn({ source: 'codex-client' }, message);
   });
 
-  app.codexClient.on('server_request', (msg: { id: string | number; method: string; params?: Record<string, unknown> }) => {
+  app.codexClient.on('server_request', (msg: ServerRequest) => {
     const request = createServerRequestRecord(msg);
     app.runtimeState.serverRequestsById.set(request.requestId, request);
     persistServerRequest(app, request);

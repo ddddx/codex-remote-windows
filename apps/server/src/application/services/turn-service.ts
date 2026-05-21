@@ -1,4 +1,5 @@
 import type { ClientMessage } from '@codex-remote/protocol';
+import type { v2 } from '@codex-remote/codex-app-server-types';
 import type { FastifyInstance } from 'fastify';
 import { broadcastMessage, ensureCodexReady } from '../../ws/bridge.js';
 import { upsertSupplementalItem } from './runtime-cache.js';
@@ -10,7 +11,7 @@ type TurnSendMessage = Extract<ClientMessage, { type: 'turn_send' }>;
 function buildSandboxPolicyOverride(
   sandboxMode: string | undefined,
   cwd: string | undefined,
-): Record<string, unknown> | null {
+): v2.SandboxPolicy | null {
   const normalized = (sandboxMode || '').trim().toLowerCase();
   if (!normalized) {
     return null;
@@ -19,13 +20,15 @@ function buildSandboxPolicyOverride(
     return { type: 'dangerFullAccess' };
   }
   if (normalized === 'read-only') {
-    return { type: 'readOnly' };
+    return { type: 'readOnly', networkAccess: false };
   }
   if (normalized === 'workspace-write') {
     return {
       type: 'workspaceWrite',
       networkAccess: false,
       writableRoots: cwd ? [cwd] : [],
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
     };
   }
   return null;

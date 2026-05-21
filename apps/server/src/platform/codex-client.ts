@@ -1,9 +1,89 @@
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import type {
+  ClientNotification,
+  ClientRequest,
+  InitializeCapabilities,
+  InitializeParams,
+  InitializeResponse,
+  ReasoningEffort,
+  RequestId,
+  ServerNotification,
+  ServerRequest,
+  v2,
+} from '@codex-remote/codex-app-server-types';
 import { terminateProcessTree } from './process-termination.js';
 
-type StartThreadOptions = {
+const REASONING_EFFORTS = new Set<ReasoningEffort>([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+
+const SANDBOX_MODES = new Set<v2.SandboxMode>([
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+]);
+
+const STRING_APPROVAL_POLICIES = new Set<Extract<v2.AskForApproval, string>>([
+  'untrusted',
+  'on-failure',
+  'on-request',
+  'never',
+]);
+
+type RequestResponseMap = {
+  initialize: InitializeResponse;
+  'thread/list': v2.ThreadListResponse;
+  'thread/start': v2.ThreadStartResponse;
+  'thread/resume': v2.ThreadResumeResponse;
+  'turn/start': v2.TurnStartResponse;
+  'thread/shellCommand': v2.ThreadShellCommandResponse;
+  'thread/compact/start': v2.ThreadCompactStartResponse;
+  'thread/backgroundTerminals/clean': v2.ThreadBackgroundTerminalsCleanResponse;
+  'thread/name/set': v2.ThreadSetNameResponse;
+  'thread/goal/set': v2.ThreadGoalSetResponse;
+  'thread/goal/get': v2.ThreadGoalGetResponse;
+  'thread/goal/clear': v2.ThreadGoalClearResponse;
+  'model/list': v2.ModelListResponse;
+  'config/read': v2.ConfigReadResponse;
+};
+
+type AskForApproval = v2.AskForApproval;
+type ConfigReadResponse = v2.ConfigReadResponse;
+type Model = v2.Model;
+type SandboxMode = v2.SandboxMode;
+type SandboxPolicy = v2.SandboxPolicy;
+type Thread = v2.Thread;
+type ThreadBackgroundTerminalsCleanResponse = v2.ThreadBackgroundTerminalsCleanResponse;
+type ThreadCompactStartResponse = v2.ThreadCompactStartResponse;
+type ThreadGoalClearResponse = v2.ThreadGoalClearResponse;
+type ThreadGoalGetResponse = v2.ThreadGoalGetResponse;
+type ThreadGoalSetResponse = v2.ThreadGoalSetResponse;
+type ThreadGoalStatus = v2.ThreadGoalStatus;
+type ThreadResumeResponse = v2.ThreadResumeResponse;
+type ThreadSetNameResponse = v2.ThreadSetNameResponse;
+type ThreadShellCommandResponse = v2.ThreadShellCommandResponse;
+type ThreadStartResponse = v2.ThreadStartResponse;
+type Turn = v2.Turn;
+type UserInput = v2.UserInput;
+
+type SupportedRequestMethod = keyof RequestResponseMap;
+type RequestParams<M extends SupportedRequestMethod> = Extract<ClientRequest, { method: M }>['params'];
+type RequestResult<M extends SupportedRequestMethod> = RequestResponseMap[M];
+type PendingRequest = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: NodeJS.Timeout;
+  method: SupportedRequestMethod;
+};
+
+export type StartThreadOptions = {
   name?: string | null;
   cwd?: string | null;
   model?: string | null;
@@ -12,20 +92,37 @@ type StartThreadOptions = {
   sandbox?: string | null;
 };
 
-type StartTurnOptions = {
+export type StartTurnOptions = {
   attachments?: Array<{ path: string; name?: string }>;
   model?: string | null;
   effort?: string | null;
   approvalPolicy?: string | null;
-  sandboxPolicy?: Record<string, unknown> | null;
+  sandboxPolicy?: SandboxPolicy | null;
 };
 
-type ThreadOptions = {
+export type ThreadOptions = {
   model?: string | null;
   effort?: string | null;
   approvalPolicy?: string | null;
   sandbox?: string | null;
   cwd?: string | null;
+};
+
+export type CodexClientNotification = ServerNotification;
+export type CodexClientServerRequest = ServerRequest;
+export type CodexClientExitEvent = {
+  code: number | null;
+  signal: string | null;
+};
+
+export type RuntimeThread = Thread & {
+  model?: string;
+  serviceTier?: string | null;
+  approvalPolicy?: string;
+  approvalPolicyRaw?: v2.AskForApproval | null;
+  reasoningEffort?: ReasoningEffort | null;
+  sandboxMode?: v2.SandboxMode;
+  sandboxPolicy?: v2.SandboxPolicy;
 };
 
 type CodexClientOptions = {
@@ -34,6 +131,12 @@ type CodexClientOptions = {
   wsUrl?: string | null;
   requestTimeoutMs?: number;
   connectTimeoutMs?: number;
+};
+
+type ResponseEnvelope = {
+  id: RequestId;
+  result?: unknown;
+  error?: unknown;
 };
 
 export class CodexAppServerClient extends EventEmitter {
@@ -45,12 +148,7 @@ export class CodexAppServerClient extends EventEmitter {
   proc: ReturnType<typeof spawn> | null;
   ws: WebSocket | null;
   nextId: number;
-  pending: Map<string, {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-    timeout: NodeJS.Timeout;
-    method: string;
-  }>;
+  pending: Map<string, PendingRequest>;
   buffer: string;
   started: boolean;
   lastTransportEvent: string;
@@ -77,7 +175,11 @@ export class CodexAppServerClient extends EventEmitter {
     this.startPromise = null;
   }
 
-  async start() {
+  override on(event: string, listener: (...args: any[]) => void): this {
+    return super.on(event, listener);
+  }
+
+  async start(): Promise<void> {
     if (this.started) {
       return;
     }
@@ -112,7 +214,7 @@ export class CodexAppServerClient extends EventEmitter {
     this.wsUrl = wsUrl;
   }
 
-  async stop() {
+  async stop(): Promise<void> {
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -127,106 +229,114 @@ export class CodexAppServerClient extends EventEmitter {
     this.startPromise = null;
   }
 
-  async request(method: string, params: Record<string, unknown> = {}) {
+  async request<M extends SupportedRequestMethod>(
+    method: M,
+    params: RequestParams<M>,
+  ): Promise<RequestResult<M>> {
     if (!this.proc && !this.ws) {
       throw new Error('codex app-server is not running');
     }
 
-    const id = String(this.nextId++);
+    const id: RequestId = String(this.nextId++);
     const payload = { id, method, params };
 
-    const promise = new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<RequestResult<M>>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.pending.delete(id);
+        this.pending.delete(String(id));
         reject(new Error(this.buildRequestTimeoutMessage(method)));
       }, this.requestTimeoutMs);
 
-      this.pending.set(id, { resolve, reject, timeout, method });
+      this.pending.set(String(id), {
+        resolve: (value) => resolve(value as RequestResult<M>),
+        reject,
+        timeout,
+        method,
+      });
     });
 
     this.send(payload);
     return promise;
   }
 
-  respond(id: string | number, result: unknown = {}) {
+  respond(id: RequestId, result: unknown = {}): void {
     if (!this.proc && !this.ws) {
       throw new Error('codex app-server is not running');
     }
     this.send({ id, result });
   }
 
-  respondError(id: string | number, error: unknown) {
+  respondError(id: RequestId, error: unknown): void {
     if (!this.proc && !this.ws) {
       throw new Error('codex app-server is not running');
     }
     this.send({ id, error });
   }
 
-  notify(method: string, params: Record<string, unknown> = {}) {
+  notify(method: ClientNotification['method']): void {
     if (!this.proc && !this.ws) {
       throw new Error('codex app-server is not running');
     }
-    this.send({ method, params });
+    this.send({ method });
   }
 
-  async listThreads(limit = 100) {
-    const result = await this.request('thread/list', { limit, archived: false }) as { data?: Array<Record<string, unknown>> };
-    return result.data || [];
+  async listThreads(limit = 100): Promise<Thread[]> {
+    const data: Thread[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const pageLimit = Math.max(1, Math.min(limit - data.length, 100));
+      const result: v2.ThreadListResponse = await this.request('thread/list', {
+        archived: false,
+        limit: pageLimit,
+        cursor,
+      });
+      data.push(...result.data);
+      cursor = result.nextCursor;
+    } while (cursor && data.length < limit);
+
+    return data.slice(0, limit);
   }
 
-  async startThread({ name, cwd, model, effort, approvalPolicy, sandbox }: StartThreadOptions = {}) {
-    const workingCwd = cwd || this.defaultCwd;
+  async startThread(options: StartThreadOptions = {}): Promise<RuntimeThread> {
+    const workingCwd = options.cwd || this.defaultCwd;
     const result = await this.request('thread/start', {
-      model: model || null,
-      approvalPolicy: approvalPolicy || null,
-      sandbox: sandbox || null,
-      config: effort ? { model_reasoning_effort: effort } : null,
+      model: options.model || null,
+      approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
+      sandbox: normalizeSandboxMode(options.sandbox),
+      config: buildReasoningConfig(options.effort),
       cwd: workingCwd,
       experimentalRawEvents: false,
       persistExtendedHistory: true,
-    }) as Record<string, unknown> & { thread: Record<string, unknown> };
+    });
 
-    const thread = result.thread;
+    const thread = projectRuntimeThread(result.thread, result);
     thread.cwd = thread.cwd || workingCwd;
-    this.applyThreadRuntimeOptions(thread, result);
-    if (name) {
-      await this.request('thread/name/set', { threadId: thread.id, name });
-      thread.name = name;
+    if (options.name) {
+      await this.request('thread/name/set', { threadId: thread.id, name: options.name });
+      thread.name = options.name;
     }
     return thread;
   }
 
-  async resumeThread(threadId: string, options: { excludeTurns?: boolean } & ThreadOptions = {}) {
-    const params: Record<string, unknown> = {
+  async resumeThread(
+    threadId: string,
+    options: { excludeTurns?: boolean } & ThreadOptions = {},
+  ): Promise<RuntimeThread> {
+    const result = await this.request('thread/resume', {
       threadId,
       excludeTurns: options.excludeTurns === true,
-    };
-    if (options.model) {
-      params.model = options.model;
-    }
-    if (options.approvalPolicy) {
-      params.approvalPolicy = options.approvalPolicy;
-    }
-    if (options.sandbox) {
-      params.sandbox = options.sandbox;
-    }
-    if (options.cwd) {
-      params.cwd = options.cwd;
-    }
-    if (options.effort) {
-      params.config = {
-        model_reasoning_effort: options.effort,
-      };
-    }
-
-    const result = await this.request('thread/resume', params) as Record<string, unknown> & { thread: Record<string, unknown> };
-    const thread = result.thread;
-    this.applyThreadRuntimeOptions(thread, result);
-    return result.thread;
+      model: options.model || null,
+      approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
+      sandbox: normalizeSandboxMode(options.sandbox),
+      cwd: options.cwd || null,
+      config: buildReasoningConfig(options.effort),
+      persistExtendedHistory: true,
+    });
+    return projectRuntimeThread(result.thread, result);
   }
 
-  async startTurn(threadId: string, text: string, options: StartTurnOptions = {}) {
-    const input: Array<Record<string, unknown>> = [];
+  async startTurn(threadId: string, text: string, options: StartTurnOptions = {}): Promise<Turn> {
+    const input: TurnStartParamsInput = [];
     if (typeof text === 'string' && text.trim()) {
       input.push({
         type: 'text',
@@ -234,6 +344,7 @@ export class CodexAppServerClient extends EventEmitter {
         text_elements: [],
       });
     }
+
     for (const attachment of Array.isArray(options.attachments) ? options.attachments : []) {
       if (!attachment?.path) {
         continue;
@@ -243,6 +354,7 @@ export class CodexAppServerClient extends EventEmitter {
         path: attachment.path,
       });
     }
+
     if (!input.length) {
       throw new Error('turn input required');
     }
@@ -250,85 +362,83 @@ export class CodexAppServerClient extends EventEmitter {
     const result = await this.request('turn/start', {
       threadId,
       model: options.model || null,
-      effort: options.effort || null,
-      approvalPolicy: options.approvalPolicy || null,
+      effort: normalizeReasoningEffort(options.effort),
+      approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
       sandboxPolicy: options.sandboxPolicy || null,
       input,
-    }) as { turn: Record<string, unknown> };
+    });
     return result.turn;
   }
 
-  async runThreadShellCommand(threadId: string, command: string) {
+  async runThreadShellCommand(threadId: string, command: string): Promise<ThreadShellCommandResponse> {
     return this.request('thread/shellCommand', {
       threadId,
       command,
     });
   }
 
-  async compactThread(threadId: string) {
+  async compactThread(threadId: string): Promise<ThreadCompactStartResponse> {
     return this.request('thread/compact/start', { threadId });
   }
 
-  async stopBackgroundTerminals(threadId: string) {
+  async stopBackgroundTerminals(threadId: string): Promise<ThreadBackgroundTerminalsCleanResponse> {
     return this.request('thread/backgroundTerminals/clean', { threadId });
   }
 
-  async setThreadName(threadId: string, name: string) {
+  async setThreadName(threadId: string, name: string): Promise<ThreadSetNameResponse> {
     return this.request('thread/name/set', { threadId, name });
   }
 
-  async setThreadGoal(threadId: string, params: {
-    objective?: string;
-    status?: 'active' | 'paused' | 'budgetLimited' | 'complete';
-    tokenBudget?: number | null;
-  }) {
-    const requestParams: Record<string, unknown> = { threadId };
-    if (params.objective !== undefined) {
-      requestParams.objective = params.objective;
-    }
-    if (params.status !== undefined) {
-      requestParams.status = params.status;
-    }
-    if (params.tokenBudget !== undefined) {
-      requestParams.tokenBudget = params.tokenBudget;
-    }
-    return this.request('thread/goal/set', requestParams);
+  async setThreadGoal(
+    threadId: string,
+    params: {
+      objective?: string;
+      status?: ThreadGoalStatus;
+      tokenBudget?: number | null;
+    },
+  ): Promise<ThreadGoalSetResponse> {
+    return this.request('thread/goal/set', {
+      threadId,
+      objective: params.objective ?? null,
+      status: params.status ?? null,
+      tokenBudget: params.tokenBudget ?? null,
+    });
   }
 
-  async getThreadGoal(threadId: string) {
+  async getThreadGoal(threadId: string): Promise<ThreadGoalGetResponse> {
     return this.request('thread/goal/get', { threadId });
   }
 
-  async clearThreadGoal(threadId: string) {
+  async clearThreadGoal(threadId: string): Promise<ThreadGoalClearResponse> {
     return this.request('thread/goal/clear', { threadId });
   }
 
-  async listModels({ includeHidden = false, limit = 200 } = {}) {
-    const data: Array<Record<string, unknown>> = [];
+  async listModels({ includeHidden = false, limit = 200 } = {}): Promise<Model[]> {
+    const data: Model[] = [];
     let cursor: string | null = null;
 
     do {
-      const result = await this.request('model/list', {
+      const pageLimit = Math.max(1, Math.min(limit - data.length, 200));
+      const result: v2.ModelListResponse = await this.request('model/list', {
         includeHidden,
-        limit,
+        limit: pageLimit,
         cursor,
-      }) as { data?: Array<Record<string, unknown>>; nextCursor?: string | null };
-      const page = Array.isArray(result.data) ? result.data : [];
-      data.push(...page);
-      cursor = result.nextCursor || null;
-    } while (cursor);
+      });
+      data.push(...result.data);
+      cursor = result.nextCursor;
+    } while (cursor && data.length < limit);
 
-    return data;
+    return data.slice(0, limit);
   }
 
-  async readConfig({ cwd }: { cwd?: string } = {}) {
+  async readConfig({ cwd }: { cwd?: string } = {}): Promise<ConfigReadResponse> {
     return this.request('config/read', {
       includeLayers: false,
       cwd: cwd || null,
-    }) as Promise<{ config?: Record<string, unknown> }>;
+    });
   }
 
-  private async startStdio() {
+  private async startStdio(): Promise<void> {
     this.proc = spawn(
       this.codexCmd,
       ['app-server', '--listen', 'stdio://'],
@@ -366,7 +476,7 @@ export class CodexAppServerClient extends EventEmitter {
     });
   }
 
-  private async startWebSocket() {
+  private async startWebSocket(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(this.wsUrl!);
       this.ws = ws;
@@ -385,8 +495,15 @@ export class CodexAppServerClient extends EventEmitter {
       });
 
       ws.on('message', (data: string | Buffer | ArrayBuffer | Buffer[]) => {
-        this.lastTransportEvent = `ws message ${data.toString('utf8').slice(0, 120)}`;
-        this.onTextData(data.toString('utf8'));
+        const text = Array.isArray(data)
+          ? Buffer.concat(data.map((part) => Buffer.isBuffer(part) ? part : Buffer.from(part as ArrayBuffer))).toString('utf8')
+          : Buffer.isBuffer(data)
+            ? data.toString('utf8')
+            : typeof data === 'string'
+              ? data
+              : Buffer.from(data).toString('utf8');
+        this.lastTransportEvent = `ws message ${text.slice(0, 120)}`;
+        this.onTextData(text);
       });
 
       ws.on('error', (err: Error) => {
@@ -408,48 +525,30 @@ export class CodexAppServerClient extends EventEmitter {
     });
   }
 
-  private async initialize() {
-    await this.request('initialize', {
+  private async initialize(): Promise<void> {
+    const capabilities: InitializeCapabilities = {
+      experimentalApi: true,
+    };
+    const params: InitializeParams = {
       clientInfo: {
         name: 'codex-remote-windows',
         title: 'codex-remote-windows',
         version: '0.1.0',
       },
-      capabilities: {
-        experimentalApi: true,
-      },
-      version: '0.1.0',
-    });
+      capabilities,
+    };
 
-    this.notify('initialized', {});
+    await this.request('initialize', params);
+    this.notify('initialized');
   }
 
-  private buildRequestTimeoutMessage(method: string) {
+  private buildRequestTimeoutMessage(method: SupportedRequestMethod): string {
     const wsState = this.ws ? formatWebSocketState(this.ws.readyState) : 'not-connected';
     const transport = this.ws ? `wsUrl=${this.wsUrl} wsState=${wsState}` : `stdio pid=${this.proc?.pid ?? 'none'}`;
     return `request timeout for ${method}; ${transport}; lastTransportEvent=${this.lastTransportEvent}`;
   }
 
-  private applyThreadRuntimeOptions(thread: Record<string, unknown>, result: Record<string, unknown>): void {
-    if (typeof result.model === 'string') {
-      thread.model = result.model;
-    }
-    if (typeof result.approvalPolicy === 'string') {
-      thread.approvalPolicy = result.approvalPolicy;
-    }
-    if (typeof result.reasoningEffort === 'string') {
-      thread.reasoningEffort = result.reasoningEffort;
-    }
-    if (typeof result.cwd === 'string') {
-      thread.cwd = result.cwd;
-    }
-    const sandboxMode = normalizeSandboxModeFromResult(result.sandbox);
-    if (sandboxMode) {
-      thread.sandboxMode = sandboxMode;
-    }
-  }
-
-  private send(payload: Record<string, unknown>) {
+  private send(payload: object): void {
     const line = JSON.stringify(payload);
     this.lastTransportEvent = `send ${line.slice(0, 160)}`;
 
@@ -461,22 +560,14 @@ export class CodexAppServerClient extends EventEmitter {
     this.proc?.stdin?.write(`${line}\n`);
   }
 
-  private onTextData(chunk: string) {
+  private onTextData(chunk: string): void {
     if (this.ws) {
       const rawMessages = chunk.includes('\n')
         ? chunk.split('\n').map((part) => part.trim()).filter(Boolean)
         : [chunk.trim()].filter(Boolean);
 
       for (const raw of rawMessages) {
-        let msg: Record<string, any>;
-        try {
-          msg = JSON.parse(raw);
-        } catch (error) {
-          this.emit('log', `ws parse error: ${(error as Error).message}; raw=${raw.slice(0, 240)}`);
-          continue;
-        }
-
-        this.handleMessage(msg);
+        this.handleRawMessage(raw, 'ws');
       }
       return;
     }
@@ -495,48 +586,76 @@ export class CodexAppServerClient extends EventEmitter {
         continue;
       }
 
-      let msg: Record<string, any>;
-      try {
-        msg = JSON.parse(raw);
-      } catch (error) {
-        this.emit('log', `stdio parse error: ${(error as Error).message}; raw=${raw.slice(0, 240)}`);
-        continue;
-      }
-
-      this.handleMessage(msg);
+      this.handleRawMessage(raw, 'stdio');
     }
   }
 
-  private handleMessage(msg: Record<string, any>) {
-    if (msg.method && Object.prototype.hasOwnProperty.call(msg, 'id')) {
-      this.emit('server_request', msg);
+  private handleRawMessage(raw: string, transport: 'ws' | 'stdio'): void {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      this.emit('log', `${transport} parse error: ${(error as Error).message}; raw=${raw.slice(0, 240)}`);
       return;
     }
 
-    if (Object.prototype.hasOwnProperty.call(msg, 'id')) {
-      const entry = this.pending.get(String(msg.id));
+    this.handleMessage(parsed);
+  }
+
+  private handleMessage(message: unknown): void {
+    if (isServerRequestMessage(message)) {
+      this.emit('server_request', message);
+      return;
+    }
+
+    if (isResponseEnvelope(message)) {
+      const entry = this.pending.get(String(message.id));
       if (!entry) {
         return;
       }
 
       clearTimeout(entry.timeout);
-      this.pending.delete(String(msg.id));
+      this.pending.delete(String(message.id));
 
-      if (msg.error) {
-        entry.reject(new Error(`${entry.method} failed: ${JSON.stringify(msg.error)}`));
+      if (Object.prototype.hasOwnProperty.call(message, 'error') && message.error !== undefined && message.error !== null) {
+        entry.reject(new Error(`${entry.method} failed: ${JSON.stringify(message.error)}`));
       } else {
-        entry.resolve(msg.result);
+        entry.resolve(message.result);
       }
       return;
     }
 
-    if (msg.method) {
-      this.emit('notification', msg);
+    if (isServerNotificationMessage(message)) {
+      this.emit('notification', message);
     }
   }
 }
 
-function formatWebSocketState(state: number | undefined) {
+type TurnStartParamsInput = Array<Extract<UserInput, { type: 'text' | 'localImage' }>>;
+
+function isResponseEnvelope(value: unknown): value is ResponseEnvelope {
+  return isObject(value)
+    && Object.prototype.hasOwnProperty.call(value, 'id')
+    && !Object.prototype.hasOwnProperty.call(value, 'method');
+}
+
+function isServerRequestMessage(value: unknown): value is ServerRequest {
+  return isObject(value)
+    && typeof value.method === 'string'
+    && Object.prototype.hasOwnProperty.call(value, 'id');
+}
+
+function isServerNotificationMessage(value: unknown): value is ServerNotification {
+  return isObject(value)
+    && typeof value.method === 'string'
+    && !Object.prototype.hasOwnProperty.call(value, 'id');
+}
+
+function isObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function formatWebSocketState(state: number | undefined): string {
   switch (state) {
     case WebSocket.CONNECTING:
       return 'CONNECTING';
@@ -551,33 +670,77 @@ function formatWebSocketState(state: number | undefined) {
   }
 }
 
-function parsePositiveInteger(value: unknown) {
+function parsePositiveInteger(value: unknown): number | null {
   const parsed = Number.parseInt(String(value || ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function normalizeSandboxModeFromResult(value: unknown): string {
+function normalizeReasoningEffort(value: string | null | undefined): ReasoningEffort | null {
+  return value && REASONING_EFFORTS.has(value as ReasoningEffort)
+    ? value as ReasoningEffort
+    : null;
+}
+
+function normalizeSandboxMode(value: string | null | undefined): SandboxMode | null {
+  return value && SANDBOX_MODES.has(value as SandboxMode)
+    ? value as SandboxMode
+    : null;
+}
+
+function normalizeApprovalPolicy(value: string | null | undefined): AskForApproval | null {
+  return value && STRING_APPROVAL_POLICIES.has(value as Extract<AskForApproval, string>)
+    ? value as Extract<AskForApproval, string>
+    : null;
+}
+
+function buildReasoningConfig(effort: string | null | undefined): Record<string, ReasoningEffort> | null {
+  const normalized = normalizeReasoningEffort(effort);
+  return normalized ? { model_reasoning_effort: normalized } : null;
+}
+
+function projectRuntimeThread(
+  thread: Thread,
+  response: Pick<ThreadStartResponse | ThreadResumeResponse, 'model' | 'serviceTier' | 'approvalPolicy' | 'reasoningEffort' | 'cwd' | 'sandbox'>,
+): RuntimeThread {
+  return {
+    ...thread,
+    model: response.model,
+    serviceTier: response.serviceTier,
+    approvalPolicy: stringifyApprovalPolicy(response.approvalPolicy),
+    approvalPolicyRaw: response.approvalPolicy,
+    reasoningEffort: response.reasoningEffort,
+    cwd: response.cwd || thread.cwd,
+    sandboxMode: normalizeSandboxModeFromPolicy(response.sandbox) || undefined,
+    sandboxPolicy: response.sandbox,
+  };
+}
+
+function stringifyApprovalPolicy(value: AskForApproval | null | undefined): string | undefined {
   if (typeof value === 'string') {
     return value;
   }
-  if (!value || typeof value !== 'object') {
+  if (value && typeof value === 'object' && 'granular' in value) {
+    return 'granular';
+  }
+  return undefined;
+}
+
+function normalizeSandboxModeFromPolicy(value: SandboxPolicy | SandboxMode | string | null | undefined): SandboxMode | '' {
+  if (typeof value === 'string' && SANDBOX_MODES.has(value as SandboxMode)) {
+    return value as SandboxMode;
+  }
+  if (!value || typeof value !== 'object' || !('type' in value)) {
     return '';
   }
-  const sandbox = value as Record<string, unknown>;
-  if (typeof sandbox.mode === 'string') {
-    return sandbox.mode;
+
+  switch (value.type) {
+    case 'dangerFullAccess':
+      return 'danger-full-access';
+    case 'readOnly':
+      return 'read-only';
+    case 'workspaceWrite':
+      return 'workspace-write';
+    default:
+      return '';
   }
-  if (typeof sandbox.type !== 'string') {
-    return '';
-  }
-  if (sandbox.type === 'dangerFullAccess') {
-    return 'danger-full-access';
-  }
-  if (sandbox.type === 'readOnly') {
-    return 'read-only';
-  }
-  if (sandbox.type === 'workspaceWrite') {
-    return 'workspace-write';
-  }
-  return sandbox.type;
 }

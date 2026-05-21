@@ -5,6 +5,7 @@ import type { CodexAppServerSupervisor } from '../platform/app-server-supervisor
 import type { CodexWindowManager } from '../platform/window-manager.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
+import type { v2 } from '@codex-remote/codex-app-server-types';
 import type {
   AppStateRepository,
   PendingRequestRepository,
@@ -57,7 +58,7 @@ type CodexClientLike = {
     model?: string | null;
     effort?: string | null;
     approvalPolicy?: string | null;
-    sandboxPolicy?: Record<string, unknown> | null;
+    sandboxPolicy?: v2.SandboxPolicy | null;
   }) => Promise<Record<string, unknown>>;
   runThreadShellCommand: (threadId: string, command: string) => Promise<unknown>;
   compactThread: (threadId: string) => Promise<unknown>;
@@ -74,7 +75,7 @@ type CodexClientLike = {
   readConfig: (options?: { cwd?: string }) => Promise<{ config?: Record<string, unknown> }>;
   respond: (id: string | number, result?: unknown) => void;
   respondError: (id: string | number, error: unknown) => void;
-  on: (event: string, listener: (...args: any[]) => void) => void;
+  on: (event: string, listener: (...args: any[]) => void) => unknown;
 };
 
 type WindowAttachmentServiceLike = {

@@ -1,0 +1,16 @@
+{
+  "name": "@codex-remote/codex-app-server-types",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generated/*": "./src/generated/*.ts",
+    "./version": "./src/version.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "sync": "node ../../scripts/sync-codex-app-server-types.mjs"
+  }
+}

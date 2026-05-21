@@ -5,6 +5,7 @@
   },
   "references": [
     { "path": "../../packages/protocol" },
+    { "path": "../../packages/codex-app-server-types" },
     { "path": "../../packages/domain" },
     { "path": "../../packages/adapters" }
   ],

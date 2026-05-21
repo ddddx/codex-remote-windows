@@ -13,6 +13,7 @@
     "test:integration": "node --test --import tsx tests/integration/**/*.test.ts test/migration-script.test.ts",
     "test:e2e": "playwright test",
     "build": "npm run build --workspaces --if-present",
+    "sync:codex-app-server-types": "node scripts/sync-codex-app-server-types.mjs",
     "migrate:legacy-state": "node --import tsx scripts/migrate-legacy-state.ts",
     "prestart": "node scripts/free-port.mjs 18637",
     "start": "npm run build --workspace @codex-remote/web && node --import tsx apps/server/src/index.ts",
