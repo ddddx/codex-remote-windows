@@ -368,39 +368,6 @@ export function ComposerDock(props: ComposerDockProps) {
         submit();
       }}
     >
-      <div className="composer-mobile-toggle-row">
-        <button
-          id="composerControlsToggle"
-          className="btn btn-secondary composer-mobile-toggle"
-          type="button"
-          aria-expanded={controlsOpen ? 'true' : 'false'}
-          onClick={() => {
-            setMobileUsageOpen(false);
-            setControlsOpen(!controlsOpen);
-          }}
-        >
-          <span className="composer-mobile-toggle-title">会话参数</span>
-          <span id="composerControlsSummary" className="composer-mobile-toggle-summary">{composerControlsSummary}</span>
-        </button>
-        <div ref={mobileUsageAnchorRef} className="context-usage-anchor composer-mobile-toggle-usage-anchor">
-          <button
-            id="composerMobileUsageToggle"
-            type="button"
-            className={`context-usage-ring composer-mobile-toggle-usage${tokenUsage.percentRemaining === null ? ' is-empty' : ''}`}
-            aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
-            aria-controls="composerMobileUsagePopover"
-            aria-expanded={mobileUsageOpen ? 'true' : 'false'}
-            title={`${tokenUsage.label}：${tokenUsage.detail}`}
-            onClick={() => setMobileUsageOpen((value) => !value)}
-          >
-            <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
-          </button>
-          <div id="composerMobileUsagePopover" className={`context-usage-popover${mobileUsageOpen ? ' is-open' : ''}`}>
-            <UsagePopoverContent tokenUsage={tokenUsage} />
-          </div>
-        </div>
-      </div>
-
       <div className="composer-controls">
         <label className="composer-select-group">
           <span>模型</span>
@@ -492,7 +459,7 @@ export function ComposerDock(props: ComposerDockProps) {
 
       <div className="composer-input-row">
         <label className="btn btn-secondary composer-attach-btn">
-          图片
+          +
           <input
             id="imageInput"
             type="file"
@@ -593,6 +560,37 @@ export function ComposerDock(props: ComposerDockProps) {
         <button type="submit" className="btn" disabled={busy || (!draft.trim() && !attachments.length) || !tokenReady}>
           {busy ? '发送中…' : '发送'}
         </button>
+      </div>
+      <div className="composer-mobile-toggle-row">
+        <button
+          id="composerControlsToggle"
+          className="btn btn-secondary composer-mobile-toggle"
+          type="button"
+          aria-expanded={controlsOpen ? 'true' : 'false'}
+          onClick={() => {
+            setMobileUsageOpen(false);
+            setControlsOpen(!controlsOpen);
+          }}
+        >
+          <span id="composerControlsSummary" className="composer-mobile-toggle-summary">{composerControlsSummary}</span>
+        </button>
+        <div ref={mobileUsageAnchorRef} className="context-usage-anchor composer-mobile-toggle-usage-anchor">
+          <button
+            id="composerMobileUsageToggle"
+            type="button"
+            className={`context-usage-ring composer-mobile-toggle-usage${tokenUsage.percentRemaining === null ? ' is-empty' : ''}`}
+            aria-label={`${tokenUsage.label}：${tokenUsage.detail}`}
+            aria-controls="composerMobileUsagePopover"
+            aria-expanded={mobileUsageOpen ? 'true' : 'false'}
+            title={`${tokenUsage.label}：${tokenUsage.detail}`}
+            onClick={() => setMobileUsageOpen((value) => !value)}
+          >
+            <UsageRingVisual percentRemaining={tokenUsage.percentRemaining} />
+          </button>
+          <div id="composerMobileUsagePopover" className={`context-usage-popover${mobileUsageOpen ? ' is-open' : ''}`}>
+            <UsagePopoverContent tokenUsage={tokenUsage} />
+          </div>
+        </div>
       </div>
       {composerError ? <div className="status error">{composerError}</div> : null}
     </form>

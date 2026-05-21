@@ -1724,7 +1724,8 @@ textarea {
   display: none;
   width: 100%;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  order: 3;
 }
 
 .composer-mobile-toggle {
@@ -1733,15 +1734,11 @@ textarea {
   flex: 1 1 auto;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 44px;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 38px;
+  padding: 7px 10px;
   text-align: left;
-}
-
-.composer-mobile-toggle-title {
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .composer-mobile-toggle-summary {
@@ -1750,7 +1747,7 @@ textarea {
   text-align: left;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.35;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1813,7 +1810,7 @@ textarea {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
-  align-items: end;
+  align-items: stretch;
 }
 
 .context-usage-anchor {
@@ -1912,8 +1909,8 @@ textarea {
 
 .composer-attach-btn,
 .composer-input-row > .btn[type="submit"] {
-  height: 45px;
-  min-height: 45px;
+  height: 42px;
+  min-height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1980,7 +1977,7 @@ textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   resize: none;
   font-size: 14px;
   line-height: 1.5;
@@ -2481,6 +2478,7 @@ textarea {
 @media (max-width: 720px) {
   .composer-mobile-toggle-row {
     display: flex;
+    margin-top: -2px;
   }
 
   .composer-controls {

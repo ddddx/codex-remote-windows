@@ -200,6 +200,24 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
     await expect(page.locator('#composerMobileUsagePopover')).toBeHidden();
     await expect(page.locator('.composer-controls-usage')).toBeHidden();
+    await expect(page.locator('#composerControlsToggle')).not.toContainText('会话参数');
+    await expect(page.locator('.composer-attach-btn')).toHaveText('+');
+    const mobileToggleBox = await page.locator('#composerControlsToggle').boundingBox();
+    const composerInputRowBox = await page.locator('.composer-input-row').boundingBox();
+    if (!mobileToggleBox || !composerInputRowBox) {
+      throw new Error('expected mobile composer controls to be measurable');
+    }
+    expect(mobileToggleBox.height).toBeLessThanOrEqual(40);
+    expect(mobileToggleBox.y).toBeGreaterThan(composerInputRowBox.y);
+    await page.setViewportSize({ width: 1400, height: 1000 });
+    const composerAttachBox = await page.locator('.composer-attach-btn').boundingBox();
+    const composerInputBox = await page.locator('#promptInput').boundingBox();
+    const composerSubmitBox = await page.locator('.composer-input-row > .btn[type="submit"]').boundingBox();
+    if (!composerAttachBox || !composerInputBox || !composerSubmitBox) {
+      throw new Error('expected composer controls to be measurable');
+    }
+    expect(composerAttachBox.height).toBe(composerInputBox.height);
+    expect(composerSubmitBox.height).toBe(composerInputBox.height);
 
     await page.locator('#imageInput').setInputFiles({
       name: 'demo.png',
