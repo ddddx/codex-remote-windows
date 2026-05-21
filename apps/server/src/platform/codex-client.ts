@@ -74,7 +74,12 @@ type Turn = v2.Turn;
 type UserInput = v2.UserInput;
 
 type SupportedRequestMethod = keyof RequestResponseMap;
-type RequestParams<M extends SupportedRequestMethod> = Extract<ClientRequest, { method: M }>['params'];
+type RequestParams<M extends SupportedRequestMethod> =
+  M extends 'thread/start'
+    ? Omit<Extract<ClientRequest, { method: M }>['params'], 'persistExtendedHistory'>
+    : M extends 'thread/resume'
+      ? Omit<Extract<ClientRequest, { method: M }>['params'], 'persistExtendedHistory'>
+      : Extract<ClientRequest, { method: M }>['params'];
 type RequestResult<M extends SupportedRequestMethod> = RequestResponseMap[M];
 type PendingRequest = {
   resolve: (value: unknown) => void;
@@ -306,7 +311,6 @@ export class CodexAppServerClient extends EventEmitter {
       config: buildReasoningConfig(options.effort),
       cwd: workingCwd,
       experimentalRawEvents: false,
-      persistExtendedHistory: true,
     });
 
     const thread = projectRuntimeThread(result.thread, result);
@@ -330,7 +334,6 @@ export class CodexAppServerClient extends EventEmitter {
       sandbox: normalizeSandboxMode(options.sandbox),
       cwd: options.cwd || null,
       config: buildReasoningConfig(options.effort),
-      persistExtendedHistory: true,
     });
     return projectRuntimeThread(result.thread, result);
   }
