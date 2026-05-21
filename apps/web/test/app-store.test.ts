@@ -1078,6 +1078,28 @@ test('thread sync clears stale active turn state when the turn has already settl
   assert.equal(turnState?.turnId, 'turn-stale');
 });
 
+test('thread sync restores active turn state from inProgress turn payload', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-active-sync',
+    turns: [{
+      id: 'turn-active-sync',
+      status: 'inProgress',
+      startedAt: 1_700_000_000,
+      completedAt: null,
+      durationMs: null,
+      items: [],
+    }],
+  } as any);
+
+  const turnState = useAppStore.getState().turns.activeBySessionId['thread-active-sync'];
+  assert.equal(turnState?.active, true);
+  assert.equal(turnState?.turnId, 'turn-active-sync');
+  assert.equal(turnState?.startedAt, 1_700_000_000_000);
+});
+
 test('state leaves active session empty when no session has been chosen', () => {
   resetStore();
 

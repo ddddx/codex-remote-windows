@@ -772,18 +772,22 @@ function FloatingPlanDock({ entry, sessionId }: { entry: TimelineEntry | null; s
 
 function buildTurnActivityStatus(
   entries: TimelineEntry[],
-  turnState: { active?: boolean; turnId?: string } | undefined,
+  turnState: { active?: boolean; turnId?: string; startedAt?: number } | undefined,
   approvals: ServerRequestItem[],
+  now: number,
 ): FooterStatus | null {
-  function withDetail(prefix: string, detail: string): string {
-    const compact = detail.replace(/\s+/g, ' ').trim();
-    if (!compact) {
-      return prefix;
+  function formatWorkingLabel(): string {
+    const startedAt = typeof turnState?.startedAt === 'number' ? turnState.startedAt : 0;
+    if (!startedAt) {
+      return 'Working';
     }
-    if (compact === prefix || compact.startsWith(`${prefix} ·`) || compact.startsWith(`${prefix}:`) || compact.startsWith(prefix)) {
-      return compact.slice(0, 42);
+    const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+    if (elapsedSeconds < 60) {
+      return `Working · ${elapsedSeconds}s`;
     }
-    return `${prefix} · ${compact.slice(0, 42)}`;
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    return `Working · ${minutes}m ${seconds.toString().padStart(2, '0')}s`;
   }
 
   const turnId = turnState?.turnId;
@@ -796,60 +800,8 @@ function buildTurnActivityStatus(
     return { tone: 'warning', label: '等待批准', active: false };
   }
 
-  let reasoningEntry: TimelineEntry | null = null;
-  let commandEntry: TimelineEntry | null = null;
-  let fileChangeEntry: TimelineEntry | null = null;
-  let toolEntry: TimelineEntry | null = null;
-  let planEntry: TimelineEntry | null = null;
-
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry.turnId !== turnId || (!entry.partial && entry.status !== 'running')) {
-      continue;
-    }
-    if (!reasoningEntry && entry.type === 'reasoning') {
-      reasoningEntry = entry;
-      break;
-    }
-    if (!commandEntry && entry.type === 'command') {
-      commandEntry = entry;
-      continue;
-    }
-    if (!fileChangeEntry && entry.type === 'file_change') {
-      fileChangeEntry = entry;
-      continue;
-    }
-    if (!toolEntry && (entry.type === 'mcp_tool' || entry.type === 'dynamic_tool' || entry.type === 'collab_tool' || entry.type === 'web_search' || entry.type === 'thread_event')) {
-      toolEntry = entry;
-      continue;
-    }
-    if (!planEntry && (entry.type === 'plan' || entry.type === 'turn_plan')) {
-      planEntry = entry;
-    }
-  }
-
-  if (reasoningEntry) {
-    return { tone: 'thinking', label: withDetail('思考中', summarizeTimelineEntry(reasoningEntry)), active: true };
-  }
-
-  if (commandEntry) {
-    return { tone: 'command', label: withDetail('执行命令中', buildProcessPreview(commandEntry)), active: true };
-  }
-
-  if (fileChangeEntry) {
-    return { tone: 'file', label: withDetail('修改文件中', buildProcessPreview(fileChangeEntry)), active: true };
-  }
-
-  if (toolEntry) {
-    return { tone: 'command', label: withDetail('工具处理中', buildProcessPreview(toolEntry)), active: true };
-  }
-
-  if (planEntry) {
-    return { tone: 'thinking', label: withDetail('规划中', summarizeTimelineEntry(planEntry)), active: true };
-  }
-
   if (turnState?.active) {
-    return { tone: 'thinking', label: '等待响应中', active: true };
+    return { tone: 'thinking', label: formatWorkingLabel(), active: true };
   }
 
   return null;
@@ -1402,6 +1354,7 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [hasUnreadBelow, setHasUnreadBelow] = useState(false);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDERABLE_LIMIT);
+  const [statusNow, setStatusNow] = useState(() => Date.now());
   const hideJumpNotice = () => {
     setShowJumpToBottom((value) => value ? false : value);
     setHasUnreadBelow((value) => value ? false : value);
@@ -1420,9 +1373,19 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
     () => activeSessionId ? approvalItems.filter((item) => item.threadId === activeSessionId) : EMPTY_APPROVAL_ITEMS,
     [activeSessionId, approvalItems],
   );
+  useEffect(() => {
+    if (!turnState?.active) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      setStatusNow(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [turnState?.active, turnState?.turnId, turnState?.startedAt]);
+
   const activeTurnStatus = useMemo(
-    () => buildTurnActivityStatus(entries, turnState, approvals),
-    [entries, turnState, approvals],
+    () => buildTurnActivityStatus(entries, turnState, approvals, statusNow),
+    [entries, turnState, approvals, statusNow],
   );
   const { visibleRenderables, totalRenderableCount } = useMemo(
     () => buildVisibleRenderableTimeline(entries, approvals, renderLimit),

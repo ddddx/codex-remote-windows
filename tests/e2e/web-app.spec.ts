@@ -92,6 +92,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 
     await page.locator('#promptInput').fill('Ship the refactor');
     await page.locator('#promptInput').press('Enter');
+    await expect.poll(async () => page.locator('.thinking-indicator-text').textContent()).toMatch(/Working/);
 
     await expect(page.locator('.messages')).toContainText('Ship the refactor');
     await expect(page.locator('.messages')).toContainText('npm test');
@@ -135,6 +136,10 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.messages')).toContainText('Manual review recommended');
     await deprecationToast.getByRole('button', { name: '关闭通知' }).click();
     await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
+    await page.reload();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect.poll(async () => page.locator('.thinking-indicator-text').textContent()).toMatch(/Working · \d+s/);
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();

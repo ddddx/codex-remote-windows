@@ -12,6 +12,10 @@ type MockBackend = {
 export async function startMockBackend(): Promise<MockBackend> {
   const uploadedFiles = new Map<string, Buffer>();
   const threadSyncCountByThread = new Map<string, number>();
+  const activeTurnByThread = new Map<string, {
+    turnId: string;
+    startedAt: number;
+  }>();
   const threadPrefs = new Map<string, {
     model?: string;
     effort?: string;
@@ -466,7 +470,11 @@ export async function startMockBackend(): Promise<MockBackend> {
             threadId: message.threadId,
             name: message.threadId === 'thread-closed' ? 'Closed Session' : 'Mock Session',
             cwd: message.threadId === 'thread-closed' ? 'C:\\workspace\\docs' : 'C:\\workspace',
-            status: message.threadId === 'thread-closed' ? 'closed' : 'idle',
+            status: message.threadId === 'thread-closed'
+              ? 'closed'
+              : activeTurnByThread.has(message.threadId)
+                ? 'running'
+                : 'idle',
             windowStatus: message.threadId === 'thread-closed' ? 'detached' : 'attached',
             model: prefs.model,
             reasoningEffort: prefs.effort,
@@ -477,11 +485,27 @@ export async function startMockBackend(): Promise<MockBackend> {
         socket.send(JSON.stringify({
           type: 'thread_sync',
           threadId: message.threadId,
-          turns: [{
-            id: 'turn-1',
-            input: [{ type: 'text', text: 'hello from user' }],
-            output: 'hello from assistant',
-          }],
+          turns: [
+            {
+              id: 'turn-1',
+              input: [{ type: 'text', text: 'hello from user' }],
+              output: 'hello from assistant',
+              status: 'completed',
+              startedAt: 1_700_000_000,
+              completedAt: 1_700_000_010,
+              durationMs: 10_000,
+            },
+            ...(activeTurnByThread.has(message.threadId)
+              ? [{
+                id: activeTurnByThread.get(message.threadId)!.turnId,
+                items: [],
+                status: 'inProgress',
+                startedAt: Math.floor(activeTurnByThread.get(message.threadId)!.startedAt / 1000),
+                completedAt: null,
+                durationMs: null,
+              }]
+              : []),
+          ],
           supplementalItems: [],
           globalSupplementalItems: [{
             id: 'notice-1',
@@ -570,6 +594,10 @@ export async function startMockBackend(): Promise<MockBackend> {
           turnId: 'turn-2',
           startedAt: 3,
         }));
+        activeTurnByThread.set(message.threadId, {
+          turnId: 'turn-2',
+          startedAt: Date.now(),
+        });
         socket.send(JSON.stringify({
           type: 'item_delta',
           threadId: message.threadId,
@@ -701,11 +729,12 @@ export async function startMockBackend(): Promise<MockBackend> {
             details: 'persistExtendedHistory is deprecated and ignored',
           },
         })));
-        later(225, () => socket.send(JSON.stringify({
+        later(5000, () => socket.send(JSON.stringify({
           type: 'turn_completed',
           threadId: message.threadId,
           turnId: 'turn-2',
         })));
+        later(5000, () => activeTurnByThread.delete(message.threadId));
         return;
       }
 

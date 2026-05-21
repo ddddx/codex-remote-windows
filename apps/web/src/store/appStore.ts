@@ -1876,6 +1876,68 @@ function extractTokenUsageFromThreadSync(
   return normalizeTokenUsage(message.tokenUsage ?? message);
 }
 
+function resolveActiveTurnStateFromThreadSync(
+  threadId: string,
+  message: Extract<ServerMessage, { type: 'thread_sync' }>,
+  entries: TimelineEntry[],
+  approvals: ServerRequestItem[],
+  currentTurnState: ThreadRunState | undefined,
+): ThreadRunState | undefined {
+  const turns = Array.isArray(message.turns) ? message.turns : [];
+  let activeTurn: ThreadTurnProjection | null = null;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (!turn || typeof turn !== 'object') {
+      continue;
+    }
+    const candidate = turn as ThreadTurnProjection;
+    const status = typeof candidate.status === 'string' ? candidate.status : '';
+    if (status === 'inProgress') {
+      activeTurn = candidate;
+      break;
+    }
+  }
+
+  if (activeTurn?.id) {
+    return {
+      active: true,
+      turnId: activeTurn.id,
+      startedAt: normalizeTimestamp(activeTurn.startedAt, Date.now()),
+    };
+  }
+
+  if (currentTurnState?.active && currentTurnState.turnId) {
+    const hasPendingApproval = approvals.some((item) => (
+      item.threadId === threadId
+      && item.turnId === currentTurnState.turnId
+      && item.status !== 'submitting'
+    ));
+    const hasRunningEntry = entries.some((entry) => (
+      entry.turnId === currentTurnState.turnId
+      && (entry.partial || entry.status === 'running')
+    ));
+    const hasSettledResponse = entries.some((entry) => (
+      entry.turnId === currentTurnState.turnId
+      && entry.role !== 'user'
+      && !entry.partial
+      && entry.status !== 'running'
+    ));
+
+    if (hasPendingApproval || hasRunningEntry) {
+      return currentTurnState;
+    }
+    if (hasSettledResponse) {
+      return {
+        active: false,
+        turnId: currentTurnState.turnId,
+        startedAt: currentTurnState.startedAt,
+      };
+    }
+  }
+
+  return currentTurnState;
+}
+
 function createEntriesFromThreadTurn(threadId: string, turn: ThreadTurnProjection, index: number): TimelineEntry[] {
   const turnId = String(turn.id || `${threadId}-${index}`);
   const syntheticTurnTime = 1_700_000_000_000 + ((index + 1) * 1000);
@@ -2643,35 +2705,20 @@ export const useAppStore = create<AppStore>((set) => ({
     const currentEntries = state.timeline.entriesBySessionId[threadId] || [];
     const mergedEntries = mergeThreadSyncEntries(currentEntries, message);
     const currentTurnState = state.turns.activeBySessionId[threadId];
-    let nextTurns = state.turns.activeBySessionId;
-
-    if (currentTurnState?.active && currentTurnState.turnId) {
-      const hasPendingApproval = state.approvals.items.some((item) => (
-        item.threadId === threadId
-        && item.turnId === currentTurnState.turnId
-        && item.status !== 'submitting'
-      ));
-      const hasRunningEntry = mergedEntries.some((entry) => (
-        entry.turnId === currentTurnState.turnId
-        && (entry.partial || entry.status === 'running')
-      ));
-      const hasSettledResponse = mergedEntries.some((entry) => (
-        entry.turnId === currentTurnState.turnId
-        && entry.role !== 'user'
-        && !entry.partial
-        && entry.status !== 'running'
-      ));
-
-      if (!hasPendingApproval && !hasRunningEntry && hasSettledResponse) {
-        nextTurns = {
-          ...state.turns.activeBySessionId,
-          [threadId]: {
-            active: false,
-            turnId: currentTurnState.turnId,
-          },
-        };
+    const nextTurnState = resolveActiveTurnStateFromThreadSync(
+      threadId,
+      message,
+      mergedEntries,
+      state.approvals.items,
+      currentTurnState,
+    );
+    const turnsChanged = !isEqualUnknown(currentTurnState, nextTurnState);
+    const nextTurns = turnsChanged
+      ? {
+        ...state.turns.activeBySessionId,
+        ...(nextTurnState ? { [threadId]: nextTurnState } : {}),
       }
-    }
+      : state.turns.activeBySessionId;
 
     const nextUsage: TokenUsagePayload = extractTokenUsageFromThreadSync(message) ?? state.tokenUsage.bySessionId[threadId] ?? null;
     const entriesUnchanged = mergedEntries === currentEntries || areTimelineEntryListsEqual(currentEntries, mergedEntries);
