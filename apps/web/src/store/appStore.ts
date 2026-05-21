@@ -1086,6 +1086,35 @@ function dedupeOptimisticUserEntries(entries: TimelineEntry[]): TimelineEntry[] 
   });
 }
 
+function dedupeSyntheticAssistantFallbackEntries(entries: TimelineEntry[]): TimelineEntry[] {
+  const assistantCountByTurnId = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.role !== 'assistant' || !entry.turnId) {
+      continue;
+    }
+    assistantCountByTurnId.set(entry.turnId, (assistantCountByTurnId.get(entry.turnId) || 0) + 1);
+  }
+
+  let changed = false;
+  const nextEntries = entries.filter((entry) => {
+    if (entry.role !== 'assistant' || !entry.turnId) {
+      return true;
+    }
+    const assistantCount = assistantCountByTurnId.get(entry.turnId) || 0;
+    if (assistantCount <= 1) {
+      return true;
+    }
+    const syntheticFallbackId = `${entry.turnId}-assistant`;
+    if (entry.id !== syntheticFallbackId) {
+      return true;
+    }
+    changed = true;
+    return false;
+  });
+
+  return changed ? nextEntries : entries;
+}
+
 function extractPatchText(value: unknown): string | undefined {
   if (typeof value === 'string') {
     return value.trim() ? value : undefined;
@@ -1867,7 +1896,7 @@ function mergeThreadSyncEntries(
     entries = mergeTurnDiffIntoFileChangeEntry(entries, message.threadId, turnId, diff);
   }
 
-  return dedupeOptimisticUserEntries(entries);
+  return dedupeSyntheticAssistantFallbackEntries(dedupeOptimisticUserEntries(entries));
 }
 
 function extractTokenUsageFromThreadSync(

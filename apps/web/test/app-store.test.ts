@@ -1630,6 +1630,74 @@ test('completed assistant message persists stream text and clears stream cache',
   assert.equal(state.assistantStreams.bySessionId['thread-stream-final']?.['assistant-stream-final'], undefined);
 });
 
+test('thread sync does not duplicate completed assistant message when realtime completion already exists', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'item_completed',
+    threadId: 'thread-assistant-dedupe',
+    turnId: 'turn-assistant-dedupe',
+    item: {
+      id: 'assistant-realtime-final',
+      type: 'agentMessage',
+      text: 'final answer',
+    },
+    completedAt: 2,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-assistant-dedupe',
+    turns: [{
+      id: 'turn-assistant-dedupe',
+      input: [{ type: 'text', text: 'hello' }],
+      output: 'final answer',
+      status: 'completed',
+      createdAt: 1,
+      updatedAt: 3,
+      items: [],
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-assistant-dedupe'] || [];
+  const assistantEntries = entries.filter((entry) => entry.role === 'assistant');
+  assert.equal(assistantEntries.length, 1);
+  assert.equal(assistantEntries[0]?.id, 'assistant-realtime-final');
+  assert.equal(assistantEntries[0]?.text, 'final answer');
+});
+
+test('thread sync preserves multiple real assistant messages in the same turn', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-multi-assistant',
+    turns: [{
+      id: 'turn-multi-assistant',
+      createdAt: 1,
+      updatedAt: 2,
+      items: [
+        {
+          id: 'assistant-1',
+          type: 'agentMessage',
+          text: 'first answer',
+        },
+        {
+          id: 'assistant-2',
+          type: 'agentMessage',
+          text: 'second answer',
+        },
+      ],
+      output: 'fallback answer',
+      status: 'completed',
+    }],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-multi-assistant'] || [];
+  const assistantEntries = entries.filter((entry) => entry.role === 'assistant');
+  assert.deepEqual(assistantEntries.map((entry) => entry.id), ['assistant-1', 'assistant-2']);
+});
+
 test('thread sync replays in-flight turn events in chronological order after reload', () => {
   resetStore();
 

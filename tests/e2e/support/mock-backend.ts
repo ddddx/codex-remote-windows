@@ -9,12 +9,24 @@ type MockBackend = {
   close: () => Promise<void>;
 };
 
-export async function startMockBackend(): Promise<MockBackend> {
+type MockBackendOptions = {
+  scenario?: 'default' | 'assistant_completion_replay';
+};
+
+export async function startMockBackend(options: MockBackendOptions = {}): Promise<MockBackend> {
+  const scenario = options.scenario || 'default';
   const uploadedFiles = new Map<string, Buffer>();
   const threadSyncCountByThread = new Map<string, number>();
   const activeTurnByThread = new Map<string, {
     turnId: string;
     startedAt: number;
+  }>();
+  const completedAssistantTurnByThread = new Map<string, {
+    turnId: string;
+    prompt: string;
+    answer: string;
+    startedAt: number;
+    completedAt: number;
   }>();
   const threadPrefs = new Map<string, {
     model?: string;
@@ -443,7 +455,7 @@ export async function startMockBackend(): Promise<MockBackend> {
         status: 'closed',
         windowStatus: 'detached',
       }],
-      serverRequests: [{
+      serverRequests: scenario === 'assistant_completion_replay' ? [] : [{
         requestId: 'req-1',
         method: 'item/commandExecution/requestApproval',
         threadId: 'thread-1',
@@ -464,6 +476,19 @@ export async function startMockBackend(): Promise<MockBackend> {
         const threadSyncCount = (threadSyncCountByThread.get(message.threadId) || 0) + 1;
         threadSyncCountByThread.set(message.threadId, threadSyncCount);
         const prefs = threadPrefs.get(message.threadId) || {};
+        const completedAssistantTurn = completedAssistantTurnByThread.get(message.threadId);
+        const completedTurns = completedAssistantTurn
+          ? [{
+            id: completedAssistantTurn.turnId,
+            input: [{ type: 'text', text: completedAssistantTurn.prompt }],
+            output: completedAssistantTurn.answer,
+            status: 'completed',
+            startedAt: Math.floor(completedAssistantTurn.startedAt / 1000),
+            completedAt: Math.floor(completedAssistantTurn.completedAt / 1000),
+            durationMs: completedAssistantTurn.completedAt - completedAssistantTurn.startedAt,
+            items: [],
+          }]
+          : [];
         socket.send(JSON.stringify({
           type: 'tab_updated',
           tab: {
@@ -485,27 +510,42 @@ export async function startMockBackend(): Promise<MockBackend> {
         socket.send(JSON.stringify({
           type: 'thread_sync',
           threadId: message.threadId,
-          turns: [
-            {
-              id: 'turn-1',
-              input: [{ type: 'text', text: 'hello from user' }],
-              output: 'hello from assistant',
-              status: 'completed',
-              startedAt: 1_700_000_000,
-              completedAt: 1_700_000_010,
-              durationMs: 10_000,
-            },
-            ...(activeTurnByThread.has(message.threadId)
-              ? [{
-                id: activeTurnByThread.get(message.threadId)!.turnId,
-                items: [],
-                status: 'inProgress',
-                startedAt: Math.floor(activeTurnByThread.get(message.threadId)!.startedAt / 1000),
-                completedAt: null,
-                durationMs: null,
-              }]
-              : []),
-          ],
+          turns: scenario === 'assistant_completion_replay'
+            ? [
+              ...completedTurns,
+              ...(activeTurnByThread.has(message.threadId)
+                ? [{
+                  id: activeTurnByThread.get(message.threadId)!.turnId,
+                  items: [],
+                  status: 'inProgress',
+                  startedAt: Math.floor(activeTurnByThread.get(message.threadId)!.startedAt / 1000),
+                  completedAt: null,
+                  durationMs: null,
+                }]
+                : []),
+            ]
+            : [
+              {
+                id: 'turn-1',
+                input: [{ type: 'text', text: 'hello from user' }],
+                output: 'hello from assistant',
+                status: 'completed',
+                startedAt: 1_700_000_000,
+                completedAt: 1_700_000_010,
+                durationMs: 10_000,
+              },
+              ...completedTurns,
+              ...(activeTurnByThread.has(message.threadId)
+                ? [{
+                  id: activeTurnByThread.get(message.threadId)!.turnId,
+                  items: [],
+                  status: 'inProgress',
+                  startedAt: Math.floor(activeTurnByThread.get(message.threadId)!.startedAt / 1000),
+                  completedAt: null,
+                  durationMs: null,
+                }]
+                : []),
+            ],
           supplementalItems: [],
           globalSupplementalItems: [{
             id: 'notice-1',
@@ -560,6 +600,47 @@ export async function startMockBackend(): Promise<MockBackend> {
       }
 
       if (message.type === 'turn_send') {
+        if (scenario === 'assistant_completion_replay') {
+          const startedAt = Date.now();
+          activeTurnByThread.set(message.threadId, {
+            turnId: 'turn-2',
+            startedAt,
+          });
+          socket.send(JSON.stringify({
+            type: 'turn_started',
+            threadId: message.threadId,
+            turnId: 'turn-2',
+            startedAt,
+          }));
+          later(50, () => socket.send(JSON.stringify({
+            type: 'item_completed',
+            threadId: message.threadId,
+            turnId: 'turn-2',
+            item: {
+              id: 'assistant-turn-2-final',
+              type: 'agentMessage',
+              text: 'Final shipped answer',
+            },
+            completedAt: startedAt + 50,
+          })));
+          later(90, () => {
+            activeTurnByThread.delete(message.threadId);
+            completedAssistantTurnByThread.set(message.threadId, {
+              turnId: 'turn-2',
+              prompt: typeof message.prompt === 'string' && message.prompt.trim() ? message.prompt : 'Ship the refactor',
+              answer: 'Final shipped answer',
+              startedAt,
+              completedAt: startedAt + 90,
+            });
+            socket.send(JSON.stringify({
+              type: 'turn_completed',
+              threadId: message.threadId,
+              turnId: 'turn-2',
+            }));
+          });
+          return;
+        }
+
         if (message.threadId === 'thread-1') {
           const prefs = threadPrefs.get(message.threadId);
           if (

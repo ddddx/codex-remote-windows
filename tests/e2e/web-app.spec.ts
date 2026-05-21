@@ -224,3 +224,61 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     ]);
   }
 });
+
+test('web app does not render duplicate assistant completion after thread sync replay', async ({ page }) => {
+  const backend = await startMockBackend({ scenario: 'assistant_completion_replay' });
+  await page.setViewportSize({ width: 1400, height: 1000 });
+
+  const web = spawn(process.execPath, [
+    path.resolve('node_modules/vite/bin/vite.js'),
+    '--host',
+    '127.0.0.1',
+    '--port',
+    '4174',
+  ], {
+    cwd: path.resolve(process.cwd(), 'apps/web'),
+    env: {
+      ...process.env,
+      VITE_API_BASE_URL: backend.apiBaseUrl,
+      VITE_WS_URL: backend.wsBaseUrl,
+    },
+    stdio: 'pipe',
+  });
+
+  try {
+    await waitForServer('http://127.0.0.1:4174', 30000);
+    await page.goto('http://127.0.0.1:4174');
+
+    await page.locator('#tokenBtn').click();
+    await page.locator('#tokenInput').fill('secret-token');
+    await page.getByRole('button', { name: '保存并登录' }).click();
+
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
+
+    await page.locator('#promptInput').fill('Ship the refactor');
+    await page.locator('#promptInput').press('Enter');
+
+    await expect(page.locator('.messages')).toContainText('Final shipped answer');
+    const assistantMessagesBeforeReload = page.locator('.transcript-row-assistant .message-body');
+    await expect(assistantMessagesBeforeReload.filter({ hasText: 'Final shipped answer' })).toHaveCount(1);
+
+    await page.reload();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('.messages')).toContainText('Final shipped answer');
+
+    const assistantMessages = page.locator('.transcript-row-assistant .message-body');
+    await expect(assistantMessages.filter({ hasText: 'Final shipped answer' })).toHaveCount(1);
+  } finally {
+    web.kill('SIGKILL');
+    await Promise.race([
+      once(web, 'exit').then(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+    await Promise.race([
+      backend.close(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  }
+});
