@@ -33,3 +33,36 @@ test('active session id storage reads, writes, and clears values', async () => {
     (globalThis as any).window = originalWindow;
   }
 });
+
+test('dismissed notification keys are deduped and persisted', async () => {
+  const originalWindow = (globalThis as any).window;
+  const store = new Map<string, string>();
+  const localStorage = {
+    getItem(key: string) {
+      return store.has(key) ? store.get(key) || null : null;
+    },
+    setItem(key: string, value: string) {
+      store.set(key, String(value));
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+  };
+
+  (globalThis as any).window = {
+    localStorage,
+    location: { href: 'http://127.0.0.1:4173/' },
+    history: { replaceState() {} },
+  };
+
+  try {
+    const storage = await import('../src/lib/storage.js');
+    assert.deepEqual(storage.readDismissedNotificationKeys(), []);
+    storage.appendDismissedNotificationKey('notice-1');
+    storage.appendDismissedNotificationKey(' notice-1 ');
+    storage.appendDismissedNotificationKey('notice-2');
+    assert.deepEqual(storage.readDismissedNotificationKeys(), ['notice-1', 'notice-2']);
+  } finally {
+    (globalThis as any).window = originalWindow;
+  }
+});

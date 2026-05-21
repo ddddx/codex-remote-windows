@@ -26,6 +26,10 @@ import {
   getNotificationLevel,
   summarizeUnknownObject,
 } from '../app/view-helpers.js';
+import {
+  appendDismissedNotificationKey,
+  readDismissedNotificationKeys,
+} from '../lib/storage.js';
 
 export type SessionItem = {
   threadId: string;
@@ -90,6 +94,7 @@ export type FloatingNotice = {
   message: string;
   threadId?: string;
   createdAt: number;
+  dismissKey?: string;
 };
 
 type ThreadTurnProjection = ThreadTurnPayload & {
@@ -1769,6 +1774,52 @@ function buildTimelineEntryFromNotification(method: string, params: Record<strin
   });
 }
 
+function stringifyNotificationValue(value: unknown): string {
+  if (value === null) {
+    return 'null';
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stringifyNotificationValue(entry)).join(',')}]`;
+  }
+  if (!value || typeof value !== 'object') {
+    return JSON.stringify(String(value));
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stringifyNotificationValue(entry)}`)
+    .join(',')}}`;
+}
+
+function buildDismissKeyFromMessage(
+  message:
+    | Extract<ServerMessage, { type: 'notification' }>
+    | Extract<ServerMessage, { type: 'warning' | 'error_notice' }>,
+): string {
+  if (message.type === 'notification') {
+    const params = message.params && typeof message.params === 'object'
+      ? message.params as Record<string, unknown>
+      : {};
+    return `notification:${message.method}:${stringifyNotificationValue(params)}`;
+  }
+  return `${message.type}:${message.noticeId || ''}:${message.threadId || ''}:${message.noticeKind || ''}:${message.message}`;
+}
+
+function isDismissedNotificationKey(key: string | undefined): boolean {
+  const normalized = typeof key === 'string' ? key.trim() : '';
+  return normalized ? readDismissedNotificationKeys().includes(normalized) : false;
+}
+
+function shouldDisplayGenericNotification(method: string): boolean {
+  if (method === 'account/rateLimits/updated') {
+    return false;
+  }
+  return true;
+}
+
 function pushGlobalSupplementalNotifications(
   store: ReturnType<typeof useAppStore.getState>,
   notices: GlobalSupplementalItemPayload[] | undefined,
@@ -1780,6 +1831,10 @@ function pushGlobalSupplementalNotifications(
       continue;
     }
     const noticeKind = typeof notice.noticeKind === 'string' ? notice.noticeKind : '';
+    const dismissKey = `global-notice:${id}:${typeof notice.threadId === 'string' ? notice.threadId : ''}:${noticeKind}:${text}`;
+    if (isDismissedNotificationKey(dismissKey)) {
+      continue;
+    }
     store.pushNotification({
       id: `notice:${id}`,
       level: noticeKind === 'error' ? 'error' : noticeKind === 'warning' ? 'warning' : 'info',
@@ -1787,6 +1842,7 @@ function pushGlobalSupplementalNotifications(
       message: text,
       threadId: typeof notice.threadId === 'string' ? notice.threadId : undefined,
       createdAt: normalizeTimestamp(notice.createdAt),
+      dismissKey,
     });
   }
 }
@@ -2252,11 +2308,17 @@ export const useAppStore = create<AppStore>((set) => ({
         .sort((left, right) => left.createdAt - right.createdAt),
     },
   })),
-  dismissNotification: (noticeId) => set((state) => ({
-    notifications: {
-      items: state.notifications.items.filter((item) => item.id !== noticeId),
-    },
-  })),
+  dismissNotification: (noticeId) => set((state) => {
+    const notice = state.notifications.items.find((item) => item.id === noticeId);
+    if (notice?.dismissKey) {
+      appendDismissedNotificationKey(notice.dismissKey);
+    }
+    return {
+      notifications: {
+        items: state.notifications.items.filter((item) => item.id !== noticeId),
+      },
+    };
+  }),
   setTurnStarted: (threadId, turnId, startedAt) => set((state) => ({
     turns: {
       activeBySessionId: {
@@ -3100,6 +3162,10 @@ export function mapServerMessageToStore(message: ServerMessage) {
   if (message.type === 'warning' || message.type === 'error_notice') {
     const threadId = message.threadId;
     const noticeId = message.noticeId || `${threadId || 'global'}:${message.type}:${Date.now()}`;
+    const dismissKey = buildDismissKeyFromMessage(message);
+    if (isDismissedNotificationKey(dismissKey)) {
+      return;
+    }
     store.pushNotification({
       id: `notice:${noticeId}`,
       level: message.type === 'warning' ? 'warning' : 'error',
@@ -3107,6 +3173,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
       message: message.message,
       threadId,
       createdAt: normalizeTimestamp(message.createdAt),
+      dismissKey,
     });
     return;
   }
@@ -3171,9 +3238,16 @@ export function mapServerMessageToStore(message: ServerMessage) {
     const params = message.params && typeof message.params === 'object'
       ? message.params as Record<string, unknown>
       : {};
+    if (!shouldDisplayGenericNotification(message.method)) {
+      return;
+    }
     const title = formatNotificationTitle(message.method, params);
     const detail = formatNotificationMessage(message.method, params);
     const level = getNotificationLevel(message.method, params);
+    const dismissKey = buildDismissKeyFromMessage(message);
+    if (isDismissedNotificationKey(dismissKey)) {
+      return;
+    }
     store.pushNotification({
       id: `notification:${message.method}:${typeof params.threadId === 'string' ? params.threadId : typeof params.sessionId === 'string' ? params.sessionId : Date.now()}`,
       level,
@@ -3181,6 +3255,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
       message: detail,
       threadId: typeof params.threadId === 'string' ? params.threadId : undefined,
       createdAt: Date.now(),
+      dismissKey,
     });
     if (shouldRenderNotificationInTimeline(message.method, params)) {
       const entry = buildTimelineEntryFromNotification(message.method, params);

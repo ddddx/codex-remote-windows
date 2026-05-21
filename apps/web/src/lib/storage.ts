@@ -1,6 +1,8 @@
 const TOKEN_STORAGE_KEY = 'codex-remote-ws-token';
 const DEVICE_ID_STORAGE_KEY = 'codex-remote-device-id';
 const ACTIVE_SESSION_STORAGE_KEY = 'codex-remote-active-session-id';
+const DISMISSED_NOTIFICATION_KEYS_STORAGE_KEY = 'codex-remote-dismissed-notification-keys';
+const MAX_DISMISSED_NOTIFICATION_KEYS = 200;
 
 function readTokenFromUrl(): string {
   try {
@@ -69,6 +71,55 @@ export function writeStoredActiveSessionId(threadId: string): string {
     // Ignore storage failures.
   }
   return normalized;
+}
+
+function readStoredStringArray(key: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(key) || '';
+    if (!raw.trim()) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    const values = parsed
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return [...new Set(values)];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredStringArray(key: string, values: string[]): string[] {
+  const normalized = [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(-MAX_DISMISSED_NOTIFICATION_KEYS);
+  try {
+    if (normalized.length) {
+      window.localStorage.setItem(key, JSON.stringify(normalized));
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+  return normalized;
+}
+
+export function readDismissedNotificationKeys(): string[] {
+  return readStoredStringArray(DISMISSED_NOTIFICATION_KEYS_STORAGE_KEY);
+}
+
+export function appendDismissedNotificationKey(key: string): string[] {
+  const normalized = typeof key === 'string' ? key.trim() : '';
+  if (!normalized) {
+    return readDismissedNotificationKeys();
+  }
+  return writeStoredStringArray(DISMISSED_NOTIFICATION_KEYS_STORAGE_KEY, [
+    ...readStoredStringArray(DISMISSED_NOTIFICATION_KEYS_STORAGE_KEY),
+    normalized,
+  ]);
 }
 
 function generateDeviceId(): string {

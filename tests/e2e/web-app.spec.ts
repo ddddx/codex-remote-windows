@@ -127,9 +127,14 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.toast-stack')).toContainText('Manual review recommended');
     await expect(page.locator('.toast-stack')).toContainText('配置警告');
     await expect(page.locator('.toast-stack')).toContainText('Replace legacySandbox with sandboxMode');
-    await expect(page.locator('.toast-stack')).toContainText('额度更新');
-    await expect(page.locator('.toast-stack')).toContainText('GPT-5 · plus · soft');
+    const deprecationToast = page.locator('.toast').filter({ hasText: '弃用通知' });
+    await expect(deprecationToast).toContainText('persistExtendedHistory is deprecated and ignored');
+    await expect(page.locator('.toast-stack')).not.toContainText('额度更新');
+    await expect(page.locator('.toast-stack')).not.toContainText('账户额度状态已更新');
+    await expect(page.locator('.toast-stack')).not.toContainText('GPT-5 · plus · soft');
     await expect(page.locator('.messages')).toContainText('Manual review recommended');
+    await deprecationToast.getByRole('button', { name: '关闭通知' }).click();
+    await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
 
     await expect(page.locator('.approval-banner')).toContainText('npm test');
     await page.getByRole('button', { name: '批准' }).first().click();
@@ -161,6 +166,17 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
     await expect(page.locator('.messages')).toContainText('Recovered warning');
     await expect(page.locator('.toast-stack')).toContainText('Recovered warning');
+    await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
+
+    const recoveredWarningToast = page.locator('.toast').filter({ hasText: 'Recovered warning' });
+    await recoveredWarningToast.getByRole('button', { name: '关闭通知' }).click();
+    await expect(page.locator('.toast-stack')).not.toContainText('Recovered warning');
+
+    await page.reload();
+    await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
+    await expect(page.locator('.toast-stack')).not.toContainText('Recovered warning');
+    await expect(page.locator('.toast-stack')).not.toContainText('弃用通知');
 
     await page.locator('#imageInput').setInputFiles({
       name: 'demo.png',

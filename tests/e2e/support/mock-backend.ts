@@ -11,6 +11,7 @@ type MockBackend = {
 
 export async function startMockBackend(): Promise<MockBackend> {
   const uploadedFiles = new Map<string, Buffer>();
+  const threadSyncCountByThread = new Map<string, number>();
   const threadPrefs = new Map<string, {
     model?: string;
     effort?: string;
@@ -456,6 +457,8 @@ export async function startMockBackend(): Promise<MockBackend> {
       const message = JSON.parse(String(raw));
 
       if (message.type === 'thread_sync') {
+        const threadSyncCount = (threadSyncCountByThread.get(message.threadId) || 0) + 1;
+        threadSyncCountByThread.set(message.threadId, threadSyncCount);
         const prefs = threadPrefs.get(message.threadId) || {};
         socket.send(JSON.stringify({
           type: 'tab_updated',
@@ -504,6 +507,16 @@ export async function startMockBackend(): Promise<MockBackend> {
             updatedAt: 2,
           }],
         }));
+        if (threadSyncCount > 1) {
+          later(25, () => socket.send(JSON.stringify({
+            type: 'notification',
+            method: 'deprecationNotice',
+            params: {
+              summary: '弃用通知',
+              details: 'persistExtendedHistory is deprecated and ignored',
+            },
+          })));
+        }
         return;
       }
 
@@ -678,6 +691,14 @@ export async function startMockBackend(): Promise<MockBackend> {
               planType: 'plus',
               rateLimitReachedType: 'soft',
             },
+          },
+        })));
+        later(210, () => socket.send(JSON.stringify({
+          type: 'notification',
+          method: 'deprecationNotice',
+          params: {
+            summary: '弃用通知',
+            details: 'persistExtendedHistory is deprecated and ignored',
           },
         })));
         later(225, () => socket.send(JSON.stringify({

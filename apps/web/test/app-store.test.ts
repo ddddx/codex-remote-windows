@@ -1387,6 +1387,76 @@ test('generic notifications become toasts and thread-scoped timeline notices', (
   assert.ok(entries.some((entry) => entry.type === 'notice' && entry.text === 'Manual review recommended'));
 });
 
+test('dismissed generic notifications stay hidden after refresh replay', () => {
+  resetStore();
+
+  const originalWindow = (globalThis as any).window;
+  const store = new Map<string, string>();
+  (globalThis as any).window = {
+    localStorage: {
+      getItem(key: string) {
+        return store.has(key) ? store.get(key) || null : null;
+      },
+      setItem(key: string, value: string) {
+        store.set(key, String(value));
+      },
+      removeItem(key: string) {
+        store.delete(key);
+      },
+    },
+  };
+
+  try {
+    mapServerMessageToStore({
+      type: 'notification',
+      method: 'deprecationNotice',
+      params: {
+        summary: '弃用通知',
+        details: 'persistExtendedHistory is deprecated and ignored',
+      },
+    } as any);
+
+    let state = useAppStore.getState();
+    assert.equal(state.notifications.items.length, 1);
+    useAppStore.getState().dismissNotification(state.notifications.items[0]!.id);
+    state = useAppStore.getState();
+    assert.equal(state.notifications.items.length, 0);
+
+    mapServerMessageToStore({
+      type: 'notification',
+      method: 'deprecationNotice',
+      params: {
+        summary: '弃用通知',
+        details: 'persistExtendedHistory is deprecated and ignored',
+      },
+    } as any);
+
+    state = useAppStore.getState();
+    assert.equal(state.notifications.items.length, 0);
+  } finally {
+    (globalThis as any).window = originalWindow;
+  }
+});
+
+test('account rate limit updates do not create visible notifications', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'notification',
+    method: 'account/rateLimits/updated',
+    params: {
+      rateLimits: {
+        limitName: 'GPT-5',
+        planType: 'plus',
+        rateLimitReachedType: 'soft',
+      },
+    },
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.notifications.items.length, 0);
+});
+
 test('pending local user message is promoted when real turn output arrives after turn_started', () => {
   resetStore();
 
