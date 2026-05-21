@@ -1843,7 +1843,7 @@ function isDismissedNotificationKey(key: string | undefined): boolean {
 }
 
 function shouldDisplayGenericNotification(method: string): boolean {
-  if (method === 'account/rateLimits/updated') {
+  if (method === 'account/rateLimits/updated' || method === 'skills/changed') {
     return false;
   }
   return true;

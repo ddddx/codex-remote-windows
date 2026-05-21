@@ -1479,6 +1479,19 @@ test('account rate limit updates do not create visible notifications', () => {
   assert.equal(state.notifications.items.length, 0);
 });
 
+test('skills changed notifications do not create visible notifications', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'notification',
+    method: 'skills/changed',
+    params: {},
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.notifications.items.length, 0);
+});
+
 test('pending local user message is promoted when real turn output arrives after turn_started', () => {
   resetStore();
 
