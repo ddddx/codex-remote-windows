@@ -500,6 +500,15 @@ textarea {
   text-overflow: ellipsis;
 }
 
+.topbar-connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  margin-left: auto;
+}
+
 .btn-icon,
 .btn,
 .btn-secondary {

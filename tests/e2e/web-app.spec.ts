@@ -69,6 +69,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await page.locator('.tab-item-main').filter({ hasText: 'Mock Session' }).click();
     await expect(page.locator('#activeTitle')).toHaveText('Mock Session');
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('.topbar-connection-indicator #activeStatus')).toBeVisible();
     await expect(page.locator('#themeSelect')).toHaveValue('paper');
     await expect(page.locator('.composer-controls-usage .context-usage-ring')).toHaveAttribute('aria-label', /上下文余量/);
     await expect(page.locator('.composer-controls-usage .context-usage-popover')).toContainText('余量 78%');
@@ -198,6 +199,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('#modelSelect')).toBeVisible();
     await expect(page.locator('#themeSelect')).toBeVisible();
     await expect(page.locator('#activeStatus')).toHaveAttribute('aria-label', 'connected');
+    await expect(page.locator('.composer-select-group-status #activeStatus')).toBeVisible();
     await expect(page.locator('#composerMobileUsagePopover')).toBeHidden();
     await expect(page.locator('.composer-controls-usage')).toBeHidden();
     await expect(page.locator('#composerControlsToggle')).not.toContainText('会话参数');

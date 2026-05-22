@@ -990,6 +990,16 @@ export function App() {
               ☰
             </button>
             <h1 id="activeTitle">{activeTitle}</h1>
+            {isDesktopViewport ? (
+              <div className="topbar-connection-indicator">
+                <span
+                  id="activeStatus"
+                  className={`status-badge status-badge-dot ${connectionTone === 'connected' ? '' : connectionTone === 'error' ? ' error' : ' waiting'}`}
+                  aria-label={connectionStatus}
+                  title={connectionStatus}
+                />
+              </div>
+            ) : null}
           </header>
 
           <section className="panel">
@@ -1101,6 +1111,7 @@ export function App() {
               theme={theme}
               themeOptions={THEME_OPTIONS}
               onThemeChange={handleThemeChange}
+              showConnectionStatus={!isDesktopViewport}
               connectionStatus={connectionStatus}
               connectionTone={connectionTone}
             />
