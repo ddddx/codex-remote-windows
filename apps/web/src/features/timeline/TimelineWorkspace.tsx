@@ -750,22 +750,21 @@ function FloatingPlanDock({ entry, sessionId }: { entry: TimelineEntry | null; s
           {renderTurnPlanContent(entry, 'floating-plan-content')}
         </section>
       ) : null}
-      <button
-        type="button"
-        className="floating-plan-button"
-        aria-expanded={open && !isDismissed}
-        aria-label={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
-        title={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
-        onClick={() => {
-          if (planKey && dismissedPlanKey === planKey) {
-            setDismissedPlanKey(null);
-          }
-          setOpen((value) => !(value && !isDismissed));
-        }}
-      >
-        <span className="floating-plan-button-icon" aria-hidden="true">~</span>
-        <span className="floating-plan-button-text">计划</span>
-      </button>
+      {!isDismissed ? (
+        <button
+          type="button"
+          className="floating-plan-button"
+          aria-expanded={open && !isDismissed}
+          aria-label={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
+          title={open && !isDismissed ? '收缩执行计划' : '展开执行计划'}
+          onClick={() => {
+            setOpen((value) => !(value && !isDismissed));
+          }}
+        >
+          <span className="floating-plan-button-icon" aria-hidden="true">~</span>
+          <span className="floating-plan-button-text">计划</span>
+        </button>
+      ) : null}
     </div>
   );
 }
