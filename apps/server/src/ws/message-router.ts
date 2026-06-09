@@ -2,13 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
 import { ensureCodexReady } from './bridge.js';
 import { toSessionTabPayload } from '../application/services/session-tabs.js';
+import { sendServerMessage } from './send.js';
 
 type WsLike = {
   send: (payload: string) => void;
 };
 
-function sendMessage(socket: WsLike, message: ServerMessage): void {
-  socket.send(JSON.stringify(message));
+function sendMessage(app: FastifyInstance, socket: WsLike, message: ServerMessage): boolean {
+  return sendServerMessage(app, socket, message);
 }
 
 export async function routeClientMessage(app: FastifyInstance, socket: WsLike, message: ClientMessage): Promise<void> {
@@ -16,7 +17,7 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
 
   if (message.type === 'tab_create') {
     const tab = await app.services.sessions.createTab(message);
-    sendMessage(socket, { type: 'tab_created', threadId: tab.threadId, tab: toSessionTabPayload(tab) });
+    sendMessage(app, socket, { type: 'tab_created', threadId: tab.threadId, tab: toSessionTabPayload(tab) });
     return;
   }
 
@@ -24,7 +25,7 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
     try {
       await app.services.turns.startTurn(message);
     } catch (error) {
-      sendMessage(socket, {
+      sendMessage(app, socket, {
         type: 'error',
         op: 'turn_send',
         threadId: message.threadId,
@@ -39,7 +40,7 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
     try {
       await app.services.commands.runCommand(message);
     } catch (error) {
-      sendMessage(socket, {
+      sendMessage(app, socket, {
         type: 'error',
         op: 'command_send',
         threadId: message.threadId,
@@ -53,15 +54,15 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
   if (message.type === 'tab_close') {
     const tab = await app.services.sessions.closeTabWindow(message.threadId);
     if (tab) {
-      sendMessage(socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
+      sendMessage(app, socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     }
     return;
   }
 
   if (message.type === 'thread_sync') {
     const { tab, message: snapshot } = await app.services.sessions.syncThread(message.threadId);
-    sendMessage(socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
-    sendMessage(socket, snapshot);
+    sendMessage(app, socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
+    sendMessage(app, socket, snapshot);
     return;
   }
 
@@ -73,12 +74,12 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
   if (message.type === 'server_request_respond') {
     const errorMessage = app.services.approvals.respond(message);
     if (errorMessage) {
-      sendMessage(socket, errorMessage);
+      sendMessage(app, socket, errorMessage);
     }
     return;
   }
 
-  sendMessage(socket, {
+  sendMessage(app, socket, {
     type: 'error',
     message: 'Unsupported message type in scaffold',
   });

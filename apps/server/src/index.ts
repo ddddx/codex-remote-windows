@@ -31,6 +31,30 @@ function appendLifecycleLog(kind: string, details: Record<string, unknown> = {})
   appendDiagnosticLog('.server-lifecycle.log', kind, JSON.stringify(details));
 }
 
+let diagnosticsRegistered = false;
+
+function registerProcessDiagnostics(): void {
+  if (diagnosticsRegistered) {
+    return;
+  }
+  diagnosticsRegistered = true;
+
+  process.on('beforeExit', (code) => {
+    appendLifecycleLog('beforeExit', { code });
+  });
+  process.on('exit', (code) => {
+    appendLifecycleLog('exit', { code });
+  });
+  process.on('uncaughtExceptionMonitor', (error) => {
+    appendCrashLog('uncaughtException', error);
+  });
+  process.on('unhandledRejection', (reason) => {
+    appendCrashLog('unhandledRejection', reason);
+  });
+}
+
+registerProcessDiagnostics();
+
 async function main(): Promise<void> {
   applyLocalConfig();
   const config = loadConfig();
@@ -81,18 +105,6 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => {
     appendLifecycleLog('signal', { signal: 'SIGTERM' });
     void shutdown('SIGTERM');
-  });
-  process.on('beforeExit', (code) => {
-    appendLifecycleLog('beforeExit', { code });
-  });
-  process.on('exit', (code) => {
-    appendLifecycleLog('exit', { code });
-  });
-  process.on('uncaughtExceptionMonitor', (error) => {
-    appendCrashLog('uncaughtException', error);
-  });
-  process.on('unhandledRejection', (reason) => {
-    appendCrashLog('unhandledRejection', reason);
   });
 
   await app.listen({

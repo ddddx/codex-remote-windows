@@ -12,11 +12,7 @@ import {
   type RuntimeTab,
 } from '../application/services/session-tabs.js';
 import { handleCodexNotification } from '../application/services/event-bridge.js';
-
-type RuntimeClientLike = {
-  send: (payload: string) => void;
-  close?: (code?: number, reason?: string) => void;
-};
+import { sendServerMessage, type RuntimeSocketLike } from './send.js';
 
 function logWarn(app: FastifyInstance, payload: Record<string, unknown>, message: string): void {
   if (app.log && typeof app.log.warn === 'function') {
@@ -34,33 +30,9 @@ function logError(app: FastifyInstance, payload: Record<string, unknown>, messag
   console.error(message, payload);
 }
 
-function removeDeadClient(app: FastifyInstance, client: RuntimeClientLike): void {
-  if (app.runtimeState.clients.has(client as any)) {
-    app.runtimeState.clients.delete(client as any);
-    app.runtimeState.websocketClientCount = Math.max(0, app.runtimeState.websocketClientCount - 1);
-  }
-}
-
-function sendToClient(app: FastifyInstance, client: RuntimeClientLike, message: ServerMessage): void {
-  try {
-    client.send(JSON.stringify(message));
-  } catch (error) {
-    removeDeadClient(app, client);
-    logWarn(app, {
-      err: error,
-      messageType: message.type,
-    }, 'failed to send websocket message');
-    try {
-      client.close?.(1011, 'Send failed');
-    } catch {
-      // Ignore secondary close errors for dead sockets.
-    }
-  }
-}
-
 export function broadcastMessage(app: FastifyInstance, message: ServerMessage): void {
   for (const client of app.runtimeState.clients) {
-    sendToClient(app, client, message);
+    sendServerMessage(app, client as RuntimeSocketLike, message);
   }
 }
 

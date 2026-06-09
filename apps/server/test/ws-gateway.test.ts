@@ -248,3 +248,53 @@ test('ws gateway bootstrap preserves persisted permission preset when codex thre
   assert.equal((socket.sent[1] as any).tabs[0].approvalPolicy, 'never');
   assert.equal((socket.sent[1] as any).tabs[0].sandboxMode, 'danger-full-access');
 });
+
+test('ws gateway tolerates closed socket during async bootstrap sends', async () => {
+  const { app, routes } = createAppStub();
+  const originalListThreads = app.codexClient.listThreads;
+  let releaseBootstrap: (() => void) | null = null;
+  app.codexClient.listThreads = async () => {
+    await new Promise<void>((resolve) => {
+      releaseBootstrap = resolve;
+    });
+    return originalListThreads.call(app.codexClient);
+  };
+
+  await registerWsGateway(app);
+
+  const socket = createSocket();
+  const handler = routes.get('/ws');
+  assert.ok(handler);
+
+  handler?.(socket, createAuthorizedRequest());
+  assert.equal(socket.sent.length, 1);
+  await new Promise<void>((resolve) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (releaseBootstrap || Date.now() - startedAt > 1000) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 10);
+  });
+  assert.ok(releaseBootstrap);
+  socket.send = () => {
+    throw new Error('socket closed');
+  };
+
+  assert.doesNotThrow(() => {
+    releaseBootstrap?.();
+  });
+  await new Promise<void>((resolve) => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (!app.runtimeState.clients.has(socket as any) || Date.now() - startedAt > 1000) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 10);
+  });
+
+  assert.equal(app.runtimeState.clients.has(socket as any), false);
+  assert.equal(app.runtimeState.websocketClientCount, 0);
+});

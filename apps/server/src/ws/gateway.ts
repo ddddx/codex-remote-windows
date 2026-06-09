@@ -4,6 +4,7 @@ import { isAuthorizedWsSession } from './auth.js';
 import { routeClientMessage } from './message-router.js';
 import { ensureCodexReady } from './bridge.js';
 import { bootstrapTabs, buildInitialState, hydratePersistedRuntimeState } from '../application/services/thread-sync.js';
+import { sendServerMessage } from './send.js';
 
 type WsLike = {
   send: (payload: string) => void;
@@ -11,8 +12,8 @@ type WsLike = {
   on: (event: string, listener: (...args: any[]) => void) => void;
 };
 
-function sendMessage(socket: WsLike, message: ServerMessage): void {
-  socket.send(JSON.stringify(message));
+function sendMessage(app: FastifyInstance, socket: WsLike, message: ServerMessage): boolean {
+  return sendServerMessage(app, socket, message);
 }
 
 function normalizeIncomingMessage(raw: string): ClientMessage {
@@ -24,7 +25,7 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
     const auth = app.authorizeCookieSession(typeof request.headers.cookie === 'string' ? request.headers.cookie : undefined);
 
     if (!auth || !isAuthorizedWsSession(auth.sessionId)) {
-      sendMessage(socket, {
+      sendMessage(app, socket, {
         type: 'error',
         code: 'AUTH_FAILED',
         message: 'WebSocket 鉴权失败，请先重新登录。',
@@ -41,17 +42,17 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
     app.runtimeState.websocketClientCount += 1;
     app.runtimeState.clients.add(authedSocket);
     hydratePersistedRuntimeState(app);
-    sendMessage(socket, buildInitialState(app));
+    sendMessage(app, socket, buildInitialState(app));
 
     void (async () => {
       try {
         await ensureCodexReady(app);
         await bootstrapTabs(app);
         await app.windowAttachments.refreshAllTabsWindowStatus().catch(() => {});
-        sendMessage(socket, buildInitialState(app));
+        sendMessage(app, socket, buildInitialState(app));
       } catch (error) {
-        sendMessage(socket, buildInitialState(app));
-        sendMessage(socket, {
+        sendMessage(app, socket, buildInitialState(app));
+        sendMessage(app, socket, {
           type: 'backend_error',
           message: error instanceof Error ? error.message : 'Failed to bootstrap WebSocket state',
         });
@@ -63,7 +64,7 @@ export async function registerWsGateway(app: FastifyInstance): Promise<void> {
         const message = normalizeIncomingMessage(raw.toString());
         await routeClientMessage(app, socket, message);
       } catch (error) {
-        sendMessage(socket, {
+        sendMessage(app, socket, {
           type: 'error',
           message: error instanceof Error ? error.message : 'Invalid WebSocket message',
         });
