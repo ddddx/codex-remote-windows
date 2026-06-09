@@ -13,13 +13,54 @@ import {
 } from '../application/services/session-tabs.js';
 import { handleCodexNotification } from '../application/services/event-bridge.js';
 
-function sendToClient(client: { send: (payload: string) => void }, message: ServerMessage): void {
-  client.send(JSON.stringify(message));
+type RuntimeClientLike = {
+  send: (payload: string) => void;
+  close?: (code?: number, reason?: string) => void;
+};
+
+function logWarn(app: FastifyInstance, payload: Record<string, unknown>, message: string): void {
+  if (app.log && typeof app.log.warn === 'function') {
+    app.log.warn(payload, message);
+    return;
+  }
+  console.warn(message, payload);
+}
+
+function logError(app: FastifyInstance, payload: Record<string, unknown>, message: string): void {
+  if (app.log && typeof app.log.error === 'function') {
+    app.log.error(payload, message);
+    return;
+  }
+  console.error(message, payload);
+}
+
+function removeDeadClient(app: FastifyInstance, client: RuntimeClientLike): void {
+  if (app.runtimeState.clients.has(client as any)) {
+    app.runtimeState.clients.delete(client as any);
+    app.runtimeState.websocketClientCount = Math.max(0, app.runtimeState.websocketClientCount - 1);
+  }
+}
+
+function sendToClient(app: FastifyInstance, client: RuntimeClientLike, message: ServerMessage): void {
+  try {
+    client.send(JSON.stringify(message));
+  } catch (error) {
+    removeDeadClient(app, client);
+    logWarn(app, {
+      err: error,
+      messageType: message.type,
+    }, 'failed to send websocket message');
+    try {
+      client.close?.(1011, 'Send failed');
+    } catch {
+      // Ignore secondary close errors for dead sockets.
+    }
+  }
 }
 
 export function broadcastMessage(app: FastifyInstance, message: ServerMessage): void {
   for (const client of app.runtimeState.clients) {
-    sendToClient(client, message);
+    sendToClient(app, client, message);
   }
 }
 
@@ -38,7 +79,19 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
   }
 
   app.codexClient.on('notification', (msg: ServerNotification) => {
-    handleCodexNotification(app, msg);
+    try {
+      handleCodexNotification(app, msg);
+    } catch (error) {
+      logError(app, {
+        err: error,
+        method: msg.method,
+        params: msg.params,
+      }, 'failed to handle codex notification');
+      broadcastMessage(app, {
+        type: 'backend_error',
+        message: `codex notification handler failed for ${msg.method}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   });
 
   app.codexClient.on('log', (message: string) => {
@@ -46,13 +99,26 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
   });
 
   app.codexClient.on('server_request', (msg: ServerRequest) => {
-    const request = createServerRequestRecord(msg);
-    app.runtimeState.serverRequestsById.set(request.requestId, request);
-    persistServerRequest(app, request);
-    broadcastMessage(app, {
-      type: 'server_request_required',
-      request: toServerRequestPayload(request),
-    });
+    try {
+      const request = createServerRequestRecord(msg);
+      app.runtimeState.serverRequestsById.set(request.requestId, request);
+      persistServerRequest(app, request);
+      broadcastMessage(app, {
+        type: 'server_request_required',
+        request: toServerRequestPayload(request),
+      });
+    } catch (error) {
+      logError(app, {
+        err: error,
+        method: msg.method,
+        requestId: msg.id,
+        params: msg.params,
+      }, 'failed to handle codex server request');
+      broadcastMessage(app, {
+        type: 'backend_error',
+        message: `codex server request handler failed for ${msg.method}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
   });
 
   app.codexClient.on('exit', ({ code, signal }: { code: number | null; signal: string | null }) => {
