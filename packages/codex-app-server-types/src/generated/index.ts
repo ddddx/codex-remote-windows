@@ -1,10 +1,12 @@
 // GENERATED CODE! DO NOT MODIFY BY HAND!
 
 export type { AbsolutePathBuf } from "./AbsolutePathBuf.js";
+export type { AgentMessageInputContent } from "./AgentMessageInputContent.js";
 export type { AgentPath } from "./AgentPath.js";
 export type { ApplyPatchApprovalParams } from "./ApplyPatchApprovalParams.js";
 export type { ApplyPatchApprovalResponse } from "./ApplyPatchApprovalResponse.js";
 export type { AuthMode } from "./AuthMode.js";
+export type { AutoCompactTokenLimitScope } from "./AutoCompactTokenLimitScope.js";
 export type { ClientInfo } from "./ClientInfo.js";
 export type { ClientNotification } from "./ClientNotification.js";
 export type { ClientRequest } from "./ClientRequest.js";
@@ -47,6 +49,7 @@ export type { InternalSessionSource } from "./InternalSessionSource.js";
 export type { LocalShellAction } from "./LocalShellAction.js";
 export type { LocalShellExecAction } from "./LocalShellExecAction.js";
 export type { LocalShellStatus } from "./LocalShellStatus.js";
+export type { McpServerInfo } from "./McpServerInfo.js";
 export type { MessagePhase } from "./MessagePhase.js";
 export type { ModeKind } from "./ModeKind.js";
 export type { NetworkPolicyAmendment } from "./NetworkPolicyAmendment.js";

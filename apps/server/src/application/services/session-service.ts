@@ -28,8 +28,7 @@ export function createSessionService(app: FastifyInstance) {
       approvalPolicy: message.approvalPolicy || current.approvalPolicy || '',
       sandboxMode: message.sandboxMode || current.sandboxMode || '',
     };
-    const resumed = await app.codexClient.resumeThread(message.threadId, {
-      excludeTurns: true,
+    const updated = await app.codexClient.updateThreadSettings(message.threadId, {
       cwd: current.cwd || null,
       model: nextPrefs.model || null,
       effort: nextPrefs.reasoningEffort || null,
@@ -38,8 +37,9 @@ export function createSessionService(app: FastifyInstance) {
     });
     return upsertRuntimeTab(app, {
       ...current,
-      ...resumed,
+      ...updated,
       threadId: current.threadId,
+      cwd: updated.cwd || current.cwd,
       model: nextPrefs.model,
       reasoningEffort: nextPrefs.reasoningEffort,
       approvalPolicy: nextPrefs.approvalPolicy,

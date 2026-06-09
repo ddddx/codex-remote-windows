@@ -189,6 +189,21 @@ export function createServerRequestRecord(msg: ServerRequest): RuntimeServerRequ
         itemId: null,
         raw: toRecord(msg.params),
       };
+    case 'attestation/generate':
+      return {
+        requestId,
+        rawRequestId: msg.id,
+        method: msg.method,
+        kind: 'attestation_generate',
+        status: 'pending',
+        createdAt,
+        submittedAt: null,
+        threadId: null,
+        turnId: null,
+        itemId: null,
+        message: '生成 attestation token',
+        raw: toRecord(msg.params),
+      };
     default:
       return assertNever(msg);
   }

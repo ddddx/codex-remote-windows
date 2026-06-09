@@ -137,4 +137,34 @@ test('notification helpers format key official notifications', () => {
     }),
     'GPT-5 · plus · soft',
   );
+  assert.equal(
+    formatNotificationTitle('thread/settings/updated', {
+      threadId: 'thread-1',
+      threadSettings: { model: 'gpt-5.5', effort: 'high', cwd: 'C:\\workspace' },
+    }),
+    '会话参数已更新',
+  );
+  assert.equal(
+    formatNotificationMessage('thread/settings/updated', {
+      threadId: 'thread-1',
+      threadSettings: { model: 'gpt-5.5', effort: 'high', cwd: 'C:\\workspace' },
+    }),
+    'gpt-5.5 · high · C:\\workspace',
+  );
+  assert.equal(
+    formatNotificationTitle('turn/moderationMetadata', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      metadata: { category: 'safety', outcome: 'allow', action: 'none' },
+    }),
+    '内容审查元数据',
+  );
+  assert.equal(
+    formatNotificationMessage('turn/moderationMetadata', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      metadata: { category: 'safety', outcome: 'allow', action: 'none' },
+    }),
+    'safety · allow · none',
+  );
 });

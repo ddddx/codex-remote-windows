@@ -546,6 +546,12 @@ export function formatNotificationTitle(method: string, params: Record<string, u
   if (method === 'remoteControl/status/changed') {
     return '远程控制状态';
   }
+  if (method === 'thread/settings/updated') {
+    return '会话参数已更新';
+  }
+  if (method === 'turn/moderationMetadata') {
+    return '内容审查元数据';
+  }
   if (method === 'skills/changed') {
     return '技能已更新';
   }
@@ -634,6 +640,24 @@ export function formatNotificationMessage(method: string, params: Record<string,
     const status = typeof params.status === 'string' ? params.status : '';
     const environmentId = typeof params.environmentId === 'string' ? params.environmentId : '';
     return [status, environmentId].filter(Boolean).join(' · ') || '远程控制状态已更新';
+  }
+  if (method === 'thread/settings/updated') {
+    const settings = params.threadSettings && typeof params.threadSettings === 'object'
+      ? params.threadSettings as Record<string, unknown>
+      : null;
+    const model = typeof settings?.model === 'string' ? settings.model : '';
+    const effort = typeof settings?.effort === 'string' ? settings.effort : '';
+    const cwd = typeof settings?.cwd === 'string' ? settings.cwd : '';
+    return [model, effort, cwd].filter(Boolean).join(' · ') || '会话参数已更新';
+  }
+  if (method === 'turn/moderationMetadata') {
+    const metadata = params.metadata && typeof params.metadata === 'object'
+      ? params.metadata as Record<string, unknown>
+      : null;
+    const category = typeof metadata?.category === 'string' ? metadata.category : '';
+    const outcome = typeof metadata?.outcome === 'string' ? metadata.outcome : '';
+    const action = typeof metadata?.action === 'string' ? metadata.action : '';
+    return [category, outcome, action].filter(Boolean).join(' · ') || summarizeUnknownObject(metadata || params, 4) || '已收到审查元数据';
   }
   if (method === 'skills/changed') {
     return '可用技能列表已刷新';

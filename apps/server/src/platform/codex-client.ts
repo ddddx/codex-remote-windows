@@ -42,6 +42,7 @@ type RequestResponseMap = {
   'thread/list': v2.ThreadListResponse;
   'thread/start': v2.ThreadStartResponse;
   'thread/resume': v2.ThreadResumeResponse;
+  'thread/settings/update': v2.ThreadSettingsUpdateResponse;
   'turn/start': v2.TurnStartResponse;
   'thread/shellCommand': v2.ThreadShellCommandResponse;
   'thread/compact/start': v2.ThreadCompactStartResponse;
@@ -111,6 +112,16 @@ export type ThreadOptions = {
   approvalPolicy?: string | null;
   sandbox?: string | null;
   cwd?: string | null;
+};
+
+export type ThreadSettingsSnapshot = {
+  cwd?: string;
+  model?: string;
+  approvalPolicy?: string;
+  approvalPolicyRaw?: v2.AskForApproval | null;
+  reasoningEffort?: ReasoningEffort | null;
+  sandboxMode?: v2.SandboxMode;
+  sandboxPolicy?: v2.SandboxPolicy | null;
 };
 
 export type CodexClientNotification = ServerNotification;
@@ -338,6 +349,29 @@ export class CodexAppServerClient extends EventEmitter {
     return projectRuntimeThread(result.thread, result);
   }
 
+  async updateThreadSettings(
+    threadId: string,
+    options: ThreadOptions = {},
+  ): Promise<ThreadSettingsSnapshot> {
+    const sandboxPolicy = buildSandboxPolicy(options.sandbox, options.cwd);
+    await this.request('thread/settings/update', {
+      threadId,
+      cwd: options.cwd || null,
+      approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
+      sandboxPolicy,
+      model: options.model || null,
+      effort: normalizeReasoningEffort(options.effort),
+    });
+
+    return projectThreadSettings({
+      cwd: options.cwd || undefined,
+      approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
+      sandboxPolicy,
+      model: options.model || undefined,
+      effort: normalizeReasoningEffort(options.effort),
+    });
+  }
+
   async startTurn(threadId: string, text: string, options: StartTurnOptions = {}): Promise<Turn> {
     const input: TurnStartParamsInput = [];
     if (typeof text === 'string' && text.trim()) {
@@ -531,6 +565,7 @@ export class CodexAppServerClient extends EventEmitter {
   private async initialize(): Promise<void> {
     const capabilities: InitializeCapabilities = {
       experimentalApi: true,
+      requestAttestation: true,
     };
     const params: InitializeParams = {
       clientInfo: {
@@ -746,4 +781,48 @@ function normalizeSandboxModeFromPolicy(value: SandboxPolicy | SandboxMode | str
     default:
       return '';
   }
+}
+
+function buildSandboxPolicy(
+  sandboxMode: string | null | undefined,
+  cwd: string | null | undefined,
+): SandboxPolicy | null {
+  const normalized = normalizeSandboxMode(sandboxMode);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'danger-full-access') {
+    return { type: 'dangerFullAccess' };
+  }
+  if (normalized === 'read-only') {
+    return { type: 'readOnly', networkAccess: false };
+  }
+  return {
+    type: 'workspaceWrite',
+    writableRoots: cwd ? [cwd] : [],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  };
+}
+
+export function projectThreadSettings(
+  settings: Pick<v2.ThreadSettings, 'cwd' | 'approvalPolicy' | 'sandboxPolicy' | 'model' | 'effort'>
+  | {
+    cwd?: string | null;
+    approvalPolicy?: v2.AskForApproval | null;
+    sandboxPolicy?: v2.SandboxPolicy | null;
+    model?: string | null;
+    effort?: ReasoningEffort | null;
+  },
+): ThreadSettingsSnapshot {
+  return {
+    cwd: typeof settings.cwd === 'string' ? settings.cwd : undefined,
+    model: typeof settings.model === 'string' ? settings.model : undefined,
+    approvalPolicy: stringifyApprovalPolicy(settings.approvalPolicy),
+    approvalPolicyRaw: settings.approvalPolicy ?? null,
+    reasoningEffort: settings.effort ?? null,
+    sandboxMode: normalizeSandboxModeFromPolicy(settings.sandboxPolicy) || undefined,
+    sandboxPolicy: settings.sandboxPolicy ?? null,
+  };
 }

@@ -1492,6 +1492,26 @@ test('skills changed notifications do not create visible notifications', () => {
   assert.equal(state.notifications.items.length, 0);
 });
 
+test('thread settings updates do not create visible notifications', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'notification',
+    method: 'thread/settings/updated',
+    params: {
+      threadId: 'thread-1',
+      threadSettings: {
+        model: 'gpt-5.5',
+        effort: 'high',
+        cwd: 'C:\\workspace',
+      },
+    },
+  } as any);
+
+  const state = useAppStore.getState();
+  assert.equal(state.notifications.items.length, 0);
+});
+
 test('pending local user message is promoted when real turn output arrives after turn_started', () => {
   resetStore();
 

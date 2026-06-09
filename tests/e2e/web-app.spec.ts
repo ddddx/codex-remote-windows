@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import net from 'node:net';
 import path from 'node:path';
 import { startMockBackend } from './support/mock-backend.js';
 
@@ -22,16 +23,40 @@ async function waitForServer(url: string, timeoutMs: number): Promise<void> {
   throw new Error('vite startup timeout');
 }
 
+async function getAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('failed to allocate test port')));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
 test('web app matches current shell and conversation flow', async ({ page }) => {
   const backend = await startMockBackend();
   await page.setViewportSize({ width: 1400, height: 1000 });
+  const port = await getAvailablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
 
   const web = spawn(process.execPath, [
     path.resolve('node_modules/vite/bin/vite.js'),
     '--host',
     '127.0.0.1',
     '--port',
-    '4173',
+    String(port),
   ], {
     cwd: path.resolve(process.cwd(), 'apps/web'),
     env: {
@@ -43,9 +68,9 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
   });
 
   try {
-    await waitForServer('http://127.0.0.1:4173', 30000);
+    await waitForServer(baseUrl, 30000);
 
-    await page.goto('http://127.0.0.1:4173');
+    await page.goto(baseUrl);
 
     await expect(page.locator('#activeTitle')).toHaveText('codex-remote-windows');
     await expect(page.locator('.sidebar')).toBeVisible();
@@ -259,13 +284,15 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 test('web app does not render duplicate assistant completion after thread sync replay', async ({ page }) => {
   const backend = await startMockBackend({ scenario: 'assistant_completion_replay' });
   await page.setViewportSize({ width: 1400, height: 1000 });
+  const port = await getAvailablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
 
   const web = spawn(process.execPath, [
     path.resolve('node_modules/vite/bin/vite.js'),
     '--host',
     '127.0.0.1',
     '--port',
-    '4174',
+    String(port),
   ], {
     cwd: path.resolve(process.cwd(), 'apps/web'),
     env: {
@@ -277,8 +304,8 @@ test('web app does not render duplicate assistant completion after thread sync r
   });
 
   try {
-    await waitForServer('http://127.0.0.1:4174', 30000);
-    await page.goto('http://127.0.0.1:4174');
+    await waitForServer(baseUrl, 30000);
+    await page.goto(baseUrl);
 
     await page.locator('#tokenBtn').click();
     await page.locator('#tokenInput').fill('secret-token');

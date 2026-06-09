@@ -10,6 +10,7 @@ const packageRoot = path.join(repoRoot, 'packages', 'codex-app-server-types');
 const generatedRoot = path.join(packageRoot, 'src', 'generated');
 const versionFile = path.join(packageRoot, 'src', 'version.ts');
 const codexCommand = process.platform === 'win32' ? 'codex.cmd' : 'codex';
+const codexSyncVersion = process.env.CODEX_SYNC_NPX_VERSION?.trim();
 
 function quoteWindowsArg(value) {
   const normalized = String(value);
@@ -20,6 +21,14 @@ function quoteWindowsArg(value) {
 }
 
 function runCodex(args, options = {}) {
+  if (codexSyncVersion) {
+    return execFileSync('npx', ['-y', `@openai/codex@${codexSyncVersion}`, ...args], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: options.stdio ?? 'pipe',
+      shell: process.platform === 'win32',
+    });
+  }
   if (process.platform === 'win32') {
     const command = [codexCommand, ...args].map(quoteWindowsArg).join(' ');
     return execSync(command, {

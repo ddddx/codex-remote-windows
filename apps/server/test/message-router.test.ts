@@ -23,6 +23,7 @@ function createAppStub() {
     startThread: [] as unknown[],
     startTurn: [] as unknown[],
     resumeThread: [] as unknown[],
+    updateThreadSettings: [] as unknown[],
     respond: [] as unknown[],
     openWindowForThread: [] as unknown[],
     closeWindowForThread: [] as unknown[],
@@ -144,6 +145,16 @@ function createAppStub() {
             },
           ],
           tokenUsage: { totalTokens: 12 },
+        };
+      },
+      async updateThreadSettings(threadId: string, options?: unknown) {
+        calls.updateThreadSettings.push({ threadId, options });
+        return {
+          cwd: 'C:\\workspace',
+          model: (options as any)?.model || 'updated-model',
+          approvalPolicy: (options as any)?.approvalPolicy || 'never',
+          reasoningEffort: (options as any)?.effort || 'medium',
+          sandboxMode: (options as any)?.sandbox || 'workspace-write',
         };
       },
       async startTurn(threadId: string, text: string, options: unknown) {
@@ -385,7 +396,7 @@ test('turn_send maps permission overrides to codex approval and sandbox settings
   assert.equal((calls.startTurn[0] as any)?.options?.approvalPolicy, 'never');
 });
 
-test('thread_options_update resumes thread with host-visible option overrides and persists preferences', async () => {
+test('thread_options_update uses thread settings update with host-visible option overrides and persists preferences', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
   app.runtimeState.clients.add(socket as any);
@@ -410,8 +421,7 @@ test('thread_options_update resumes thread with host-visible option overrides an
     sandboxMode: 'danger-full-access',
   });
 
-  assert.deepEqual((calls.resumeThread[0] as any)?.options, {
-    excludeTurns: true,
+  assert.deepEqual((calls.updateThreadSettings[0] as any)?.options, {
     cwd: 'C:\\workspace',
     model: 'gpt-5.5',
     effort: 'high',
@@ -423,6 +433,55 @@ test('thread_options_update resumes thread with host-visible option overrides an
   assert.equal((socket.sent[0] as any).type, 'tab_updated');
   assert.equal((calls.upsertThreadPreference.at(-1) as any)?.model, 'gpt-5.5');
   assert.equal((calls.upsertThreadPreference.at(-1) as any)?.reasoningEffort, 'high');
+});
+
+test('thread settings updated notifications refresh runtime tab state', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+  app.runtimeState.tabsById.set('thread-settings-1', {
+    threadId: 'thread-settings-1',
+    name: 'Existing',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+    model: 'gpt-5.4',
+    reasoningEffort: 'low',
+    approvalPolicy: 'on-request',
+    sandboxMode: 'workspace-write',
+  });
+
+  handleCodexNotification(app, {
+    method: 'thread/settings/updated',
+    params: {
+      threadId: 'thread-settings-1',
+      threadSettings: {
+        cwd: 'C:\\workspace\\demo',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandboxPolicy: { type: 'dangerFullAccess' },
+        activePermissionProfile: null,
+        model: 'gpt-5.5',
+        modelProvider: 'openai',
+        serviceTier: null,
+        effort: 'high',
+        summary: null,
+        collaborationMode: 'native',
+        personality: null,
+      },
+    },
+  } as any);
+
+  const tab = app.runtimeState.tabsById.get('thread-settings-1');
+  assert.equal(tab?.cwd, 'C:\\workspace\\demo');
+  assert.equal(tab?.model, 'gpt-5.5');
+  assert.equal(tab?.reasoningEffort, 'high');
+  assert.equal(tab?.approvalPolicy, 'never');
+  assert.equal(tab?.sandboxMode, 'danger-full-access');
+  assert.equal((socket.sent[0] as any)?.type, 'tab_updated');
+  assert.equal((socket.sent[0] as any)?.tab?.model, 'gpt-5.5');
 });
 
 test('tab_close closes host window but keeps session', async () => {
@@ -593,6 +652,70 @@ test('bridge forwards plan, progress, hook and guardian notifications', async ()
   assert.equal(messages[3]?.type, 'guardian_review_completed');
   const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-1') || [];
   assert.equal(cachedEvents.length, 4);
+});
+
+test('bridge tolerates websocket send failures without throwing', async () => {
+  const { app, listeners } = createAppStub();
+  const socket = {
+    send() {
+      throw new Error('socket closed');
+    },
+    close() {},
+  };
+  app.runtimeState.clients.add(socket as any);
+
+  await ensureCodexReady(app);
+  const notificationListener = listeners.get('notification')?.[0];
+  assert.ok(notificationListener);
+
+  assert.doesNotThrow(() => {
+    notificationListener?.({
+      method: 'item/mcpToolCall/progress',
+      params: {
+        threadId: 'thread-send-fail',
+        turnId: 'turn-send-fail',
+        itemId: 'item-send-fail',
+        message: 'Searching',
+      },
+    });
+  });
+
+  assert.equal(app.runtimeState.clients.has(socket as any), false);
+  assert.equal(app.runtimeState.websocketClientCount, 0);
+});
+
+test('bridge converts notification handler exceptions into backend errors', async () => {
+  const { app, listeners } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+  app.runtimeState.tabsById.set('thread-bad-turn', {
+    threadId: 'thread-bad-turn',
+    name: 'Bad Turn',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    updatedAt: 1,
+    createdAt: 1,
+    windowStatus: 'detached',
+  });
+
+  await ensureCodexReady(app);
+  const notificationListener = listeners.get('notification')?.[0];
+  assert.ok(notificationListener);
+
+  assert.doesNotThrow(() => {
+    notificationListener?.({
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-bad-turn',
+      },
+    });
+  });
+
+  const messages = socket.sent as Array<any>;
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0]?.type, 'tab_updated');
+  assert.equal(messages[1]?.type, 'backend_error');
+  assert.match(messages[1]?.message || '', /turn\/started/);
 });
 
 test('bridge batches high-frequency assistant deltas before broadcasting', async () => {

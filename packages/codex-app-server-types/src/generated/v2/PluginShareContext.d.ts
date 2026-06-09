@@ -1,8 +1,0 @@
-import type { PluginSharePrincipal } from "./PluginSharePrincipal.js";
-export type PluginShareContext = {
-    remotePluginId: string;
-    shareUrl: string | null;
-    creatorAccountUserId: string | null;
-    creatorName: string | null;
-    shareTargets: Array<PluginSharePrincipal> | null;
-};

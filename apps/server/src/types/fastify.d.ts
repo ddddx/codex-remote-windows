@@ -53,6 +53,13 @@ type CodexClientLike = {
     sandbox?: string | null;
     cwd?: string | null;
   }) => Promise<Record<string, unknown>>;
+  updateThreadSettings: (threadId: string, options?: {
+    model?: string | null;
+    effort?: string | null;
+    approvalPolicy?: string | null;
+    sandbox?: string | null;
+    cwd?: string | null;
+  }) => Promise<Record<string, unknown>>;
   startTurn: (threadId: string, text: string, options?: {
     attachments?: Array<{ path: string; name?: string }>;
     model?: string | null;

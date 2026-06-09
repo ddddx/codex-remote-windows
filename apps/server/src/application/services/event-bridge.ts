@@ -19,6 +19,7 @@ import {
   upsertSupplementalItem,
 } from './runtime-cache.js';
 import { broadcastMessage } from '../../ws/bridge.js';
+import { projectThreadSettings } from '../../platform/codex-client.js';
 
 function nowUnix(): number {
   return Math.floor(Date.now() / 1000);
@@ -281,6 +282,28 @@ export function handleCodexNotification(
     const tab = upsertRuntimeTab(app, {
       ...current,
       name: typeof params.threadName === 'string' && params.threadName.trim() ? params.threadName : current.name,
+      updatedAt: nowUnix(),
+    });
+    broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
+    return;
+  }
+
+  if (method === 'thread/settings/updated' && typeof params.threadId === 'string') {
+    const notification = msg.params as v2.ThreadSettingsUpdatedNotification;
+    const current = app.runtimeState.tabsById.get(notification.threadId);
+    if (!current) {
+      return;
+    }
+    const projected = projectThreadSettings(notification.threadSettings);
+    const tab = upsertRuntimeTab(app, {
+      ...current,
+      cwd: projected.cwd || current.cwd,
+      model: projected.model || current.model || '',
+      reasoningEffort: typeof projected.reasoningEffort === 'string'
+        ? projected.reasoningEffort
+        : current.reasoningEffort || '',
+      approvalPolicy: projected.approvalPolicy || current.approvalPolicy || '',
+      sandboxMode: projected.sandboxMode || current.sandboxMode || '',
       updatedAt: nowUnix(),
     });
     broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
