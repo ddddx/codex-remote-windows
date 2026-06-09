@@ -64,6 +64,11 @@
   --diff-context-bg: rgba(0, 0, 0, 0.03);
   --grid-rgb: 20, 92, 79;
   --sidebar-w: 260px;
+  --motion-fast: 120ms;
+  --motion-medium: 180ms;
+  --motion-slow: 260ms;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 body[data-theme="bay"] {
@@ -202,6 +207,7 @@ body {
   font-family: "Segoe UI", "PingFang SC", sans-serif;
   background: radial-gradient(circle at 20% 0%, var(--bg2), var(--bg));
   min-height: 100vh;
+  transition: background var(--motion-slow) var(--motion-ease), color var(--motion-medium) var(--motion-ease);
 }
 
 button,
@@ -253,6 +259,7 @@ textarea {
   padding: 0;
   background: rgba(31, 26, 23, 0.12);
   cursor: pointer;
+  animation: motion-fade-in var(--motion-medium) var(--motion-ease);
 }
 
 .sidebar {
@@ -263,7 +270,7 @@ textarea {
   flex-direction: column;
   padding: 12px;
   overflow-y: auto;
-  transition: transform 0.25s ease;
+  transition: transform var(--motion-slow) var(--motion-ease), box-shadow var(--motion-medium) var(--motion-ease);
   position: fixed;
   top: 0;
   left: 0;
@@ -307,7 +314,11 @@ textarea {
   padding: 0;
   text-align: left;
   position: relative;
-  transition: border-color 0.15s;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
   color: inherit;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -316,6 +327,7 @@ textarea {
 
 .tab-item:hover {
   border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .tab-item.active {
@@ -416,6 +428,10 @@ textarea {
   color: var(--muted);
   cursor: pointer;
   text-align: left;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
 }
 
 .tab-section-toggle:hover {
@@ -448,6 +464,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  animation: motion-reveal-in var(--motion-medium) var(--motion-ease);
 }
 
 .status-dot {
@@ -475,7 +492,7 @@ textarea {
   flex-direction: column;
   min-width: 0;
   margin-left: var(--sidebar-w);
-  transition: margin-left 0.25s ease;
+  transition: margin-left var(--motion-slow) var(--motion-ease);
 }
 
 .main-area.full {
@@ -526,10 +543,16 @@ textarea {
   align-items: center;
   justify-content: center;
   color: var(--ink);
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
 }
 
 .btn-icon:hover {
   background: var(--surface-soft);
+  transform: translateY(-1px);
 }
 
 .btn-icon.has-unread {
@@ -552,20 +575,29 @@ textarea {
   background: var(--accent);
   color: var(--btn-primary-ink);
   padding: 10px 16px;
+  transition:
+    filter var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
 }
 
 .btn:hover {
   filter: brightness(0.98);
+  transform: translateY(-1px);
 }
 
 .btn-secondary {
   background: var(--surface-soft);
   color: var(--ink);
   padding: 10px 14px;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
 }
 
 .btn-secondary:hover {
   background: var(--surface-soft-hover);
+  transform: translateY(-1px);
 }
 
 .btn-inline {
@@ -727,6 +759,7 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  animation: motion-subtle-up var(--motion-medium) var(--motion-ease);
 }
 
 .timeline-group-head {
@@ -753,6 +786,7 @@ textarea {
 .transcript-row {
   display: flex;
   width: 100%;
+  animation: motion-subtle-up var(--motion-medium) var(--motion-ease);
 }
 
 .transcript-row-user {
@@ -785,6 +819,10 @@ textarea {
   padding: 14px 16px;
   background: var(--bubble-commentary-bg);
   box-shadow: var(--bubble-shadow);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
 }
 
 .message.user {
@@ -1005,6 +1043,7 @@ textarea {
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
+  animation: motion-subtle-up var(--motion-medium) var(--motion-ease);
 }
 
 .timeline-marker {
@@ -1110,6 +1149,9 @@ textarea {
   background: transparent;
   color: inherit;
   text-align: left;
+  transition:
+    color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
 }
 
 .timeline-process-summary.is-expandable {
@@ -1181,6 +1223,7 @@ textarea {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0 0;
+  animation: motion-reveal-in var(--motion-medium) var(--motion-ease);
 }
 
 .timeline-inline-pre {
@@ -1410,6 +1453,8 @@ textarea {
   border-radius: 12px;
   background: color-mix(in srgb, var(--card-strong) 94%, var(--thinking-ink-strong) 6%);
   box-shadow: 0 18px 36px rgba(31, 26, 23, 0.18);
+  transform-origin: right bottom;
+  animation: motion-pop-in var(--motion-slow) var(--motion-ease);
 }
 
 .floating-plan-panel-head {
@@ -1444,6 +1489,14 @@ textarea {
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
+  transition:
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.floating-plan-icon-btn:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--surface-soft-hover) 88%, transparent);
 }
 
 .floating-plan-content {
@@ -1468,6 +1521,16 @@ textarea {
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
+  animation: motion-pop-in var(--motion-medium) var(--motion-ease);
+}
+
+.floating-plan-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(31, 26, 23, 0.16);
 }
 
 .floating-plan-button-icon {
@@ -1559,6 +1622,15 @@ textarea {
   padding: 10px 14px;
   cursor: pointer;
   box-shadow: 0 12px 24px rgba(31, 26, 23, 0.12);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease);
+  animation: motion-pop-in var(--motion-medium) var(--motion-ease);
+}
+
+.jump-to-bottom-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 30px rgba(31, 26, 23, 0.15);
 }
 
 .jump-to-bottom-btn[hidden] {
@@ -1665,6 +1737,8 @@ textarea {
   border-radius: 14px;
   background: var(--card-strong);
   box-shadow: 0 12px 28px rgba(31, 26, 23, 0.14);
+  transform-origin: right top;
+  animation: motion-toast-in var(--motion-slow) var(--motion-ease);
 }
 
 .toast-warning {
@@ -1695,6 +1769,12 @@ textarea {
   padding: 0;
   font: inherit;
   line-height: 1;
+  transition: transform var(--motion-fast) var(--motion-ease), opacity var(--motion-fast) var(--motion-ease);
+}
+
+.toast-close:hover {
+  opacity: 0.76;
+  transform: scale(1.08);
 }
 
 .composer {
@@ -1704,6 +1784,7 @@ textarea {
   flex-direction: column;
   gap: 10px;
   background: var(--card);
+  transition: padding var(--motion-medium) var(--motion-ease), background var(--motion-medium) var(--motion-ease);
 }
 
 .composer-empty {
@@ -1722,6 +1803,7 @@ textarea {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  transform-origin: bottom left;
 }
 
 .composer-controls-usage {
@@ -1840,6 +1922,15 @@ textarea {
   background: color-mix(in srgb, var(--card-strong) 92%, transparent);
   color: var(--muted);
   cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.context-usage-ring:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
 }
 
 .context-usage-ring-visual {
@@ -1868,6 +1959,7 @@ textarea {
   stroke-dasharray: var(--usage-ring-value) 100;
   transform: rotate(-90deg);
   transform-origin: 50% 50%;
+  transition: stroke-dasharray var(--motion-slow) var(--motion-ease);
 }
 
 .context-usage-ring-visual-fallback {
@@ -1882,7 +1974,7 @@ textarea {
   bottom: calc(100% + 8px);
   z-index: 6;
   min-width: 116px;
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
@@ -1893,11 +1985,24 @@ textarea {
   box-shadow: 0 12px 28px rgba(31, 26, 23, 0.14);
   white-space: nowrap;
   text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px) scale(0.98);
+  transform-origin: right bottom;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease),
+    visibility 0s linear var(--motion-fast);
 }
 
 .context-usage-popover.is-open,
 .context-usage-anchor:hover .context-usage-popover {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .context-usage-popover strong {
@@ -1939,6 +2044,7 @@ textarea {
   gap: 10px;
   margin-bottom: 10px;
   overflow-x: auto;
+  animation: motion-reveal-in var(--motion-medium) var(--motion-ease);
 }
 
 .composer-attachment-card {
@@ -1950,6 +2056,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface-soft);
+  animation: motion-pop-in var(--motion-medium) var(--motion-ease);
 }
 
 .composer-attachment-thumb {
@@ -2025,6 +2132,8 @@ textarea {
   background: var(--card-strong);
   box-shadow: 0 18px 44px rgba(31, 26, 23, 0.16);
   padding: 6px;
+  transform-origin: left bottom;
+  animation: motion-pop-in var(--motion-medium) var(--motion-ease);
 }
 
 .slash-menu-item {
@@ -2041,6 +2150,9 @@ textarea {
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
 }
 
 .slash-menu-item:hover,
@@ -2312,6 +2424,7 @@ textarea {
   inset: 0;
   background: var(--modal-backdrop);
   backdrop-filter: blur(3px);
+  animation: motion-fade-in var(--motion-medium) var(--motion-ease);
 }
 
 .modal-card {
@@ -2322,6 +2435,8 @@ textarea {
   border-radius: 18px;
   background: var(--modal-card-bg);
   box-shadow: var(--modal-card-shadow);
+  transform-origin: center;
+  animation: motion-modal-in var(--motion-slow) var(--motion-ease);
 }
 
 .session-modal-card {
@@ -2484,6 +2599,59 @@ textarea {
   }
 }
 
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-subtle-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes motion-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes motion-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes motion-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 720px) {
   .composer-mobile-toggle-row {
     display: flex;
@@ -2491,15 +2659,33 @@ textarea {
   }
 
   .composer-controls {
-    display: none;
+    display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
-    padding: 4px 0 2px;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    padding: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+    visibility: hidden;
+    transition:
+      max-height var(--motion-slow) var(--motion-ease),
+      opacity var(--motion-medium) var(--motion-ease),
+      padding var(--motion-medium) var(--motion-ease),
+      transform var(--motion-medium) var(--motion-ease),
+      visibility 0s linear var(--motion-medium);
   }
 
   .composer.mobile-controls-open .composer-controls {
-    display: flex;
+    max-height: 360px;
+    opacity: 1;
+    padding: 4px 0 2px;
+    pointer-events: auto;
+    transform: translateY(0);
+    visibility: visible;
+    transition-delay: 0s;
   }
 
   .composer-select-group {
@@ -2682,5 +2868,16 @@ textarea {
 
   .session-modal-actions .btn {
     flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
   }
 }

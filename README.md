@@ -41,6 +41,18 @@ Windows 本机启动：
 npm start
 ```
 
+重启已有服务：
+
+```bash
+npm run restart
+```
+
+停止已有服务：
+
+```bash
+npm stop
+```
+
 默认地址：
 
 - web dev：`http://127.0.0.1:5173`

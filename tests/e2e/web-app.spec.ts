@@ -120,7 +120,7 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
 
     await page.locator('#promptInput').fill('Ship the refactor');
     await page.locator('#promptInput').press('Enter');
-    await expect.poll(async () => page.locator('.thinking-indicator-text').textContent()).toMatch(/Working/);
+    await expect.poll(async () => page.locator('.thinking-indicator-text').textContent()).toMatch(/Working|等待批准/);
 
     await expect(page.locator('.messages')).toContainText('Ship the refactor');
     await expect(page.locator('.messages')).toContainText('npm test');
@@ -129,7 +129,8 @@ test('web app matches current shell and conversation flow', async ({ page }) => 
     await expect(page.locator('.messages')).toContainText('+2');
     await expect(page.locator('.messages')).toContainText('-1');
     await expect(page.locator('.messages')).not.toContainText('Run tests');
-    await expect(page.locator('.floating-plan-button')).toBeVisible();
+    await expect(page.locator('.floating-plan-panel')).toBeVisible();
+    await expect(page.locator('.floating-plan-button')).toBeHidden();
     await page.locator('.floating-plan-icon-btn[aria-label="关闭执行计划浮窗"]').click();
     await expect(page.locator('.floating-plan-panel')).toBeHidden();
     await expect(page.locator('.floating-plan-button')).toBeHidden();

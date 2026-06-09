@@ -750,7 +750,7 @@ function FloatingPlanDock({ entry, sessionId }: { entry: TimelineEntry | null; s
           {renderTurnPlanContent(entry, 'floating-plan-content')}
         </section>
       ) : null}
-      {!isDismissed ? (
+      {!isDismissed && !open ? (
         <button
           type="button"
           className="floating-plan-button"
