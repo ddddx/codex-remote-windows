@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -324,11 +325,17 @@ class SessionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selected = state.activeSessionId == session.threadId;
+    final unread = state.unreadThreadIds.contains(session.threadId);
+    final running = state.activeTurnStartedAt.containsKey(session.threadId);
     return ListTile(
       selected: selected,
-      leading: Icon(session.isClosed ? Icons.radio_button_unchecked : Icons.trip_origin, size: 16),
+      leading: Badge(
+        isLabelVisible: unread,
+        smallSize: 8,
+        child: Icon(running ? Icons.sync : session.isClosed ? Icons.radio_button_unchecked : Icons.trip_origin, size: 16),
+      ),
       title: Text(session.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(_workspaceLabel(session.cwd), maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text([if (running) 'Working', _workspaceLabel(session.cwd)].join(' · '), maxLines: 1, overflow: TextOverflow.ellipsis),
       trailing: IconButton(
         tooltip: '关闭窗口',
         icon: const Icon(Icons.close),
@@ -397,8 +404,8 @@ class TimelineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isUser = entry.title == '你';
-    final isAssistant = entry.title == 'Codex';
+    final isUser = entry.role == 'user' || entry.title == '你';
+    final isAssistant = entry.role == 'assistant' || entry.title == 'Codex';
     final color = isUser
         ? Theme.of(context).colorScheme.primaryContainer
         : isAssistant
@@ -434,6 +441,25 @@ class TimelineCard extends StatelessWidget {
                 if (entry.text.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   SelectableText(entry.text),
+                ],
+                if (entry.meta.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: entry.meta.map((item) => Chip(label: Text(item), visualDensity: VisualDensity.compact)).toList(growable: false),
+                  ),
+                ],
+                if (entry.changes.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  ...entry.changes.take(4).map((change) => Row(
+                        children: [
+                          const Icon(Icons.description_outlined, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(readString(change, 'path', readString(change, 'name')), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          Text(_changeStats(change), style: Theme.of(context).textTheme.labelSmall),
+                        ],
+                      )),
                 ],
                 if (entry.patch.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -544,6 +570,7 @@ class ComposerBar extends StatelessWidget {
                     ),
                   ],
                 ),
+                SlashCommandSuggestions(controller: controller),
                 if (state.activeAttachments.isNotEmpty)
                   SizedBox(
                     height: 44,
@@ -608,6 +635,58 @@ class ComposerBar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class SlashCommandSuggestions extends StatelessWidget {
+  const SlashCommandSuggestions({super.key, required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final query = _slashQuery(value.text);
+        if (query == null) {
+          return const SizedBox.shrink();
+        }
+        final matches = _slashCommands.where((item) {
+          final command = item['command'] ?? '';
+          final aliases = item['aliases'] ?? '';
+          return command.startsWith(query) || aliases.split(',').any((alias) => alias.startsWith(query));
+        }).take(8).toList(growable: false);
+        if (matches.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return SizedBox(
+          height: 48,
+          child: ListView.separated(
+            padding: const EdgeInsets.only(top: 8),
+            scrollDirection: Axis.horizontal,
+            itemBuilder: (context, index) {
+              final item = matches[index];
+              final command = item['command'] ?? '';
+              final args = item['args'] ?? '';
+              return ActionChip(
+                avatar: const Icon(Icons.shortcut, size: 16),
+                label: Text('/$command${args.isNotEmpty ? ' $args' : ''}'),
+                onPressed: () {
+                  final next = '/$command${args.isNotEmpty ? ' ' : ' '}';
+                  controller.value = TextEditingValue(
+                    text: next,
+                    selection: TextSelection.collapsed(offset: next.length),
+                  );
+                },
+              );
+            },
+            separatorBuilder: (_, _) => const SizedBox(width: 8),
+            itemCount: matches.length,
+          ),
+        );
+      },
     );
   }
 }
@@ -712,39 +791,81 @@ class ErrorBanner extends StatelessWidget {
 Future<void> showSettingsSheet(BuildContext context, CodexAppState state) async {
   final server = TextEditingController(text: state.serverUrl);
   final token = TextEditingController(text: state.token);
+  unawaited(state.loadAuthSessions());
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => Padding(
-      padding: EdgeInsets.only(left: 16, right: 16, bottom: MediaQuery.viewInsetsOf(context).bottom + 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('连接设置', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          TextField(controller: server, decoration: const InputDecoration(labelText: '服务地址', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          TextField(controller: token, obscureText: true, decoration: const InputDecoration(labelText: 'Token', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          Row(
+    builder: (context) => AnimatedBuilder(
+      animation: state,
+      builder: (context, _) => Padding(
+        padding: EdgeInsets.only(left: 16, right: 16, bottom: MediaQuery.viewInsetsOf(context).bottom + 16),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.82),
+          child: ListView(
+            shrinkWrap: true,
             children: [
-              Expanded(child: OutlinedButton(onPressed: state.refreshHealth, child: const Text('检查服务'))),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () async {
-                    state.updateServerDraft(server.text);
-                    state.updateTokenDraft(token.text);
-                    await state.login();
-                    if (context.mounted) Navigator.pop(context);
-                  },
-                  child: const Text('保存并登录'),
-                ),
+              Text('连接设置', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              TextField(controller: server, decoration: const InputDecoration(labelText: '服务地址', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              TextField(controller: token, obscureText: true, decoration: const InputDecoration(labelText: 'Token', border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: OutlinedButton(onPressed: state.refreshHealth, child: const Text('检查服务'))),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () async {
+                        state.updateServerDraft(server.text);
+                        state.updateTokenDraft(token.text);
+                        await state.login();
+                        if (context.mounted) Navigator.pop(context);
+                      },
+                      child: const Text('保存并登录'),
+                    ),
+                  ),
+                ],
               ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(child: Text('在线连接', style: Theme.of(context).textTheme.titleMedium)),
+                  TextButton.icon(
+                    onPressed: state.authSessionsLoading ? null : state.loadAuthSessions,
+                    icon: state.authSessionsLoading
+                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh),
+                    label: const Text('刷新'),
+                  ),
+                ],
+              ),
+              if (state.authSessions.isEmpty)
+                const ListTile(
+                  dense: true,
+                  leading: Icon(Icons.devices_other_outlined),
+                  title: Text('暂无在线连接'),
+                )
+              else
+                ...state.authSessions.map((session) => ListTile(
+                      dense: true,
+                      leading: Icon(session.current ? Icons.phone_android : Icons.devices_other_outlined),
+                      title: Text(session.deviceName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(session.current ? '当前设备' : '最近活动 ${_formatDateTime(session.lastSeenAt)}'),
+                      trailing: session.online ? const Icon(Icons.circle, size: 10, color: Colors.green) : null,
+                    )),
+              if (state.cookie.isNotEmpty && state.authSessions.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: state.busy ? null : state.revokeAuthSessions,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('全部踢下线'),
+                ),
+              ],
             ],
           ),
-        ],
+        ),
       ),
     ),
   );
@@ -914,6 +1035,7 @@ class _ApprovalCardState extends State<ApprovalCard> {
   @override
   Widget build(BuildContext context) {
     final request = widget.request;
+    final special = _specialForm(context, request);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -925,14 +1047,17 @@ class _ApprovalCardState extends State<ApprovalCard> {
             SelectableText(request.displayBody),
             if (request.cwd.isNotEmpty) Text(request.cwd, style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 12),
-            ..._specialForm(context, request),
-            if (_specialForm(context, request).isEmpty)
+            ...special,
+            if (special.isEmpty)
               Wrap(
                 spacing: 8,
-                children: [
-                  FilledButton(onPressed: () => widget.state.respondApproval(request, {'decision': 'accept'}), child: const Text('批准')),
-                  OutlinedButton(onPressed: () => widget.state.respondApproval(request, {'decision': 'decline'}), child: const Text('拒绝')),
-                ],
+                children: (request.availableDecisions.isNotEmpty ? request.availableDecisions : const ['accept', 'decline']).map((decision) {
+                  final index = (request.availableDecisions.isNotEmpty ? request.availableDecisions : const ['accept', 'decline']).indexOf(decision);
+                  final onPressed = request.status == 'submitting' ? null : () => widget.state.respondApproval(request, _decisionResponse(decision));
+                  return index == 0
+                      ? FilledButton(onPressed: onPressed, child: Text(_decisionLabel(decision)))
+                      : OutlinedButton(onPressed: onPressed, child: Text(_decisionLabel(decision)));
+                }).toList(growable: false),
               ),
           ],
         ),
@@ -946,19 +1071,40 @@ class _ApprovalCardState extends State<ApprovalCard> {
         ...request.questions.map((question) {
           final id = readString(question, 'id', readString(question, 'header'));
           final controller = _answers.putIfAbsent(id, TextEditingController.new);
+          final options = question['options'] is List ? (question['options'] as List).whereType<JsonMap>().toList(growable: false) : const <JsonMap>[];
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: TextField(
-              controller: controller,
-              obscureText: question['isSecret'] == true,
-              decoration: InputDecoration(labelText: readString(question, 'question', id), border: const OutlineInputBorder()),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(readString(question, 'header', readString(question, 'question', id)), style: Theme.of(context).textTheme.labelLarge),
+                if (options.isNotEmpty)
+                  ...options.map((option) {
+                    final label = readString(option, 'label');
+                    final checked = controller.text == label;
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(checked ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+                      title: Text(label),
+                      subtitle: readString(option, 'description').isEmpty ? null : Text(readString(option, 'description')),
+                      onTap: () => setState(() => controller.text = label),
+                    );
+                  }),
+                if (options.isEmpty || question['isOther'] == true || question['isSecret'] == true)
+                  TextField(
+                    controller: controller,
+                    obscureText: question['isSecret'] == true,
+                    decoration: InputDecoration(labelText: readString(question, 'question', id), border: const OutlineInputBorder()),
+                  ),
+              ],
             ),
           );
         }),
         FilledButton(
           onPressed: () {
             widget.state.respondApproval(request, {
-              'answers': _answers.map((key, value) => MapEntry(key, value.text)),
+              'answers': _answers.map((key, value) => MapEntry(key, {'answers': [value.text]})),
             });
           },
           child: const Text('提交回答'),
@@ -983,8 +1129,12 @@ class _ApprovalCardState extends State<ApprovalCard> {
             dynamic contentItems = [];
             try {
               contentItems = _json.text.trim().isEmpty ? [] : jsonDecode(_json.text);
+              if (contentItems is! List) {
+                throw const FormatException('contentItems 必须是数组');
+              }
             } catch (_) {
-              contentItems = [{'type': 'inputText', 'text': _json.text}];
+              widget.state.respondApproval(request, {'error': 'contentItems JSON 无效'});
+              return;
             }
             widget.state.respondApproval(request, {'contentItems': contentItems, 'success': _toolSuccess});
           },
@@ -999,23 +1149,35 @@ class _ApprovalCardState extends State<ApprovalCard> {
           OutlinedButton(onPressed: () => widget.state.respondApproval(request, {'action': 'decline', 'content': null}), child: const Text('拒绝')),
         ];
       }
-      final properties = request.requestedSchema['properties'];
+      final schema = request.requestedSchema.isNotEmpty ? request.requestedSchema : request.responseSchema;
+      final properties = schema['properties'];
       final fields = properties is JsonMap ? properties : const <String, dynamic>{};
       return [
         ...fields.entries.map((entry) {
           final controller = _answers.putIfAbsent(entry.key, TextEditingController.new);
+          final fieldSpec = entry.value is JsonMap ? entry.value as JsonMap : const <String, dynamic>{};
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: TextField(controller: controller, decoration: InputDecoration(labelText: entry.key, border: const OutlineInputBorder())),
+            child: TextField(
+              controller: controller,
+              keyboardType: _keyboardForSchema(fieldSpec),
+              decoration: InputDecoration(labelText: readString(fieldSpec, 'title', entry.key), border: const OutlineInputBorder()),
+            ),
           );
         }),
-        FilledButton(
-          onPressed: () => widget.state.respondApproval(request, {
-            'action': 'accept',
-            'content': _answers.map((key, value) => MapEntry(key, value.text)),
-            '_meta': request.raw['meta'],
-          }),
-          child: const Text('提交'),
+        Wrap(
+          spacing: 8,
+          children: [
+            FilledButton(
+              onPressed: () => widget.state.respondApproval(request, {
+                'action': 'accept',
+                'content': fields.map((key, spec) => MapEntry(key, _normalizeSchemaValue(_answers[key]?.text ?? '', spec is JsonMap ? spec : const <String, dynamic>{}))),
+                '_meta': request.raw['meta'],
+              }),
+              child: const Text('提交'),
+            ),
+            OutlinedButton(onPressed: () => widget.state.respondApproval(request, {'action': 'decline', 'content': null}), child: const Text('拒绝')),
+          ],
         ),
       ];
     }
@@ -1067,6 +1229,107 @@ Future<void> showUsageSheet(BuildContext context, UsageDisplay usage) async {
   );
 }
 
+const List<Map<String, String>> _slashCommands = [
+  {'command': 'goal', 'args': '[objective]', 'aliases': '', 'description': 'set or view the goal'},
+  {'command': 'compact', 'args': '', 'aliases': '', 'description': 'summarize conversation'},
+  {'command': 'rename', 'args': '<name>', 'aliases': '', 'description': 'rename thread'},
+  {'command': 'stop', 'args': '', 'aliases': 'clean', 'description': 'stop background terminals'},
+  {'command': 'review', 'args': '', 'aliases': '', 'description': 'review current changes'},
+  {'command': 'plan', 'args': '', 'aliases': '', 'description': 'switch to Plan mode'},
+  {'command': 'diff', 'args': '', 'aliases': '', 'description': 'show git diff'},
+  {'command': 'status', 'args': '', 'aliases': '', 'description': 'show status'},
+  {'command': 'model', 'args': '', 'aliases': '', 'description': 'choose model'},
+  {'command': 'permissions', 'args': '', 'aliases': '', 'description': 'choose permissions'},
+  {'command': 'new', 'args': '', 'aliases': '', 'description': 'start a new chat'},
+  {'command': 'resume', 'args': '', 'aliases': '', 'description': 'resume chat'},
+  {'command': 'fork', 'args': '', 'aliases': '', 'description': 'fork chat'},
+  {'command': 'init', 'args': '', 'aliases': '', 'description': 'create AGENTS.md'},
+  {'command': 'copy', 'args': '', 'aliases': '', 'description': 'copy last response'},
+  {'command': 'mention', 'args': '', 'aliases': '', 'description': 'mention a file'},
+  {'command': 'skills', 'args': '', 'aliases': '', 'description': 'use skills'},
+  {'command': 'mcp', 'args': '', 'aliases': '', 'description': 'list MCP tools'},
+  {'command': 'apps', 'args': '', 'aliases': '', 'description': 'manage apps'},
+  {'command': 'plugins', 'args': '', 'aliases': '', 'description': 'browse plugins'},
+  {'command': 'logout', 'args': '', 'aliases': '', 'description': 'log out'},
+  {'command': 'quit', 'args': '', 'aliases': 'exit', 'description': 'exit Codex'},
+];
+
+String? _slashQuery(String value) {
+  if (!value.startsWith('/') || value.contains('\n') || value.contains(' ')) {
+    return null;
+  }
+  return value.substring(1).toLowerCase();
+}
+
+String _changeStats(JsonMap change) {
+  final added = _num(change['addedLines']) ?? _num(change['added_lines']) ?? 0;
+  final deleted = _num(change['deletedLines']) ?? _num(change['deleted_lines']) ?? 0;
+  final parts = [
+    if (added > 0) '+${added.round()}',
+    if (deleted > 0) '-${deleted.round()}',
+  ];
+  return parts.join(' / ');
+}
+
+String _formatDateTime(int timestamp) {
+  if (timestamp <= 0) {
+    return '未知';
+  }
+  final dt = DateTime.fromMillisecondsSinceEpoch(timestamp < 100000000000 ? timestamp * 1000 : timestamp);
+  return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+}
+
+String _decisionLabel(dynamic decision) {
+  if (decision is String) {
+    return switch (decision) {
+      'accept' || 'approved' => '批准',
+      'acceptForSession' || 'approved_for_session' => '本会话内批准',
+      'decline' || 'denied' => '拒绝',
+      'cancel' => '取消',
+      _ => decision,
+    };
+  }
+  if (decision is JsonMap) {
+    if (decision.containsKey('acceptWithExecpolicyAmendment')) {
+      return '按策略批准';
+    }
+    if (decision.containsKey('acceptWithNetworkPolicyAmendments')) {
+      return '批准网络权限';
+    }
+  }
+  return '提交';
+}
+
+JsonMap _decisionResponse(dynamic decision) {
+  return {'decision': decision};
+}
+
+TextInputType _keyboardForSchema(JsonMap schema) {
+  final type = readString(schema, 'type');
+  if (type == 'number' || type == 'integer') {
+    return const TextInputType.numberWithOptions(decimal: true, signed: true);
+  }
+  return TextInputType.text;
+}
+
+dynamic _normalizeSchemaValue(String value, JsonMap schema) {
+  final type = readString(schema, 'type', 'string');
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return type == 'number' || type == 'integer' ? null : '';
+  }
+  if (type == 'number') {
+    return num.tryParse(trimmed);
+  }
+  if (type == 'integer') {
+    return int.tryParse(trimmed);
+  }
+  if (type == 'boolean') {
+    return trimmed.toLowerCase() == 'true';
+  }
+  return trimmed;
+}
+
 IconData _entryIcon(TimelineEntry entry) {
   if (entry.title == '你') return Icons.person_outline;
   if (entry.title == 'Codex') return Icons.smart_toy_outlined;
@@ -1078,7 +1341,7 @@ IconData _entryIcon(TimelineEntry entry) {
 
 String _formatStatus(String status) {
   return switch (status) {
-    'running' || 'in_progress' => '进行中',
+    'running' || 'in_progress' || 'inProgress' => '进行中',
     'completed' || 'idle' || 'ready' => '完成',
     'failed' || 'error' => '异常',
     'pending' => '待处理',
