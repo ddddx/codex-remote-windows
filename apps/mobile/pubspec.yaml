@@ -1,0 +1,15 @@
+name: codex_remote_mobile
+description: Codex Remote Android client.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
