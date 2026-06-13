@@ -16,6 +16,53 @@ int readInt(JsonMap map, String key, [int fallback = 0]) {
   return fallback;
 }
 
+bool readBool(JsonMap map, String key, [bool fallback = false]) {
+  final value = map[key];
+  return value is bool ? value : fallback;
+}
+
+JsonMap readMap(JsonMap map, String key) {
+  final value = map[key];
+  return value is JsonMap ? value : const {};
+}
+
+List<JsonMap> readMapList(JsonMap map, String key) {
+  final value = map[key];
+  return value is List ? value.whereType<JsonMap>().toList(growable: false) : const [];
+}
+
+class AuthSessionItem {
+  AuthSessionItem({
+    required this.sessionId,
+    required this.deviceName,
+    this.createdAt = 0,
+    this.lastSeenAt = 0,
+    this.expiresAt = 0,
+    this.current = false,
+    this.online = false,
+  });
+
+  factory AuthSessionItem.fromJson(JsonMap json) {
+    return AuthSessionItem(
+      sessionId: readString(json, 'sessionId'),
+      deviceName: readString(json, 'deviceName', '未知设备'),
+      createdAt: readInt(json, 'createdAt'),
+      lastSeenAt: readInt(json, 'lastSeenAt'),
+      expiresAt: readInt(json, 'expiresAt'),
+      current: readBool(json, 'current'),
+      online: readBool(json, 'online'),
+    );
+  }
+
+  final String sessionId;
+  final String deviceName;
+  final int createdAt;
+  final int lastSeenAt;
+  final int expiresAt;
+  final bool current;
+  final bool online;
+}
+
 class SessionItem {
   SessionItem({
     required this.threadId,
@@ -70,12 +117,14 @@ class TimelineEntry {
     required this.id,
     required this.type,
     required this.title,
+    this.role = '',
     this.text = '',
     this.status = '',
     this.turnId = '',
     this.itemId = '',
     this.meta = const [],
     this.patch = '',
+    this.changes = const [],
     this.createdAt = 0,
     this.partial = false,
     this.raw,
@@ -84,36 +133,44 @@ class TimelineEntry {
   final String id;
   final String type;
   final String title;
+  final String role;
   final String text;
   final String status;
   final String turnId;
   final String itemId;
   final List<String> meta;
   final String patch;
+  final List<JsonMap> changes;
   final int createdAt;
   final bool partial;
   final JsonMap? raw;
 
   TimelineEntry copyWith({
+    String? title,
+    String? role,
     String? text,
     String? status,
     String? patch,
     bool? partial,
     List<String>? meta,
+    List<JsonMap>? changes,
+    JsonMap? raw,
   }) {
     return TimelineEntry(
       id: id,
       type: type,
-      title: title,
+      title: title ?? this.title,
+      role: role ?? this.role,
       text: text ?? this.text,
       status: status ?? this.status,
       turnId: turnId,
       itemId: itemId,
       meta: meta ?? this.meta,
       patch: patch ?? this.patch,
+      changes: changes ?? this.changes,
       createdAt: createdAt,
       partial: partial ?? this.partial,
-      raw: raw,
+      raw: raw ?? this.raw,
     );
   }
 }
@@ -134,24 +191,28 @@ class ServerRequestItem {
   String get cwd => readString(raw, 'cwd');
   String get tool => readString(raw, 'tool');
   String get namespace => readString(raw, 'namespace');
+  String get serverName => readString(raw, 'serverName');
   String get url => readString(raw, 'url');
   String get mode => readString(raw, 'mode');
+  String get patch => readString(raw, 'patch');
 
-  List<JsonMap> get questions {
-    final value = raw['questions'];
-    if (value is! List) {
-      return const [];
-    }
-    return value.whereType<JsonMap>().toList(growable: false);
-  }
+  List<JsonMap> get questions => readMapList(raw, 'questions');
+  List<JsonMap> get changes => readMapList(raw, 'changes');
 
   JsonMap get arguments => raw['arguments'] is JsonMap ? raw['arguments'] as JsonMap : const {};
   JsonMap get requestedSchema => raw['requestedSchema'] is JsonMap ? raw['requestedSchema'] as JsonMap : const {};
+  JsonMap get responseSchema => raw['responseSchema'] is JsonMap ? raw['responseSchema'] as JsonMap : const {};
   List<dynamic> get availableDecisions => raw['availableDecisions'] is List ? raw['availableDecisions'] as List<dynamic> : const [];
 
   String get displayTitle {
-    if (kind.contains('command') || method.contains('commandExecution')) {
+    if (kind.contains('command') || method.contains('commandExecution') || method == 'execCommandApproval') {
       return '命令审批';
+    }
+    if (method.contains('fileChange') || method == 'applyPatchApproval') {
+      return '文件变更审批';
+    }
+    if (method.contains('permissions')) {
+      return '权限审批';
     }
     if (method.contains('requestUserInput')) {
       return '需要输入';
@@ -172,11 +233,17 @@ class ServerRequestItem {
     if (tool.isNotEmpty || namespace.isNotEmpty) {
       return [namespace, tool].where((item) => item.isNotEmpty).join('.');
     }
+    if (serverName.isNotEmpty) {
+      return serverName;
+    }
     if (message.isNotEmpty) {
       return message;
     }
     if (url.isNotEmpty) {
       return url;
+    }
+    if (patch.isNotEmpty) {
+      return patch.length > 240 ? patch.substring(0, 240) : patch;
     }
     return requestId;
   }

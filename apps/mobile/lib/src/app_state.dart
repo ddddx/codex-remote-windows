@@ -30,6 +30,7 @@ class CodexAppState extends ChangeNotifier {
   String workspacePath = '';
   WorkspaceListing? workspaceListing;
   List<SessionItem> sessions = [];
+  List<AuthSessionItem> authSessions = [];
   List<ServerRequestItem> approvals = [];
   List<JsonMap> notices = [];
   List<CodexModelOption> modelOptions = [];
@@ -39,8 +40,11 @@ class CodexAppState extends ChangeNotifier {
   Map<String, List<AttachmentItem>> attachmentsByThread = {};
   Map<String, JsonMap> tokenUsageByThread = {};
   Map<String, int> activeTurnStartedAt = {};
+  Set<String> dismissedNoticeKeys = {};
+  Set<String> unreadThreadIds = {};
   bool controlsExpanded = false;
   bool busy = false;
+  bool authSessionsLoading = false;
 
   CodexApi get api {
     final current = _api;
@@ -90,6 +94,7 @@ class CodexAppState extends ChangeNotifier {
     cookie = await bridge.getString('cookie') ?? '';
     activeSessionId = await bridge.getString('activeSessionId') ?? '';
     theme = await bridge.getString('theme') ?? 'paper';
+    dismissedNoticeKeys = _decodeStringSet(await bridge.getString('dismissedNoticeKeys') ?? '');
     deviceId = await bridge.getString('deviceId') ?? '';
     if (deviceId.isEmpty) {
       deviceId = 'android-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
@@ -101,6 +106,7 @@ class CodexAppState extends ChangeNotifier {
       await connectSocket();
       unawaited(loadCodexOptions());
       unawaited(loadWorkspace());
+      unawaited(loadAuthSessions());
     }
   }
 
@@ -131,7 +137,7 @@ class CodexAppState extends ChangeNotifier {
     notifyListeners();
     try {
       _configureApi();
-      final response = await api.postJson('/api/auth/session', {
+      await api.postJson('/api/auth/session', {
         'token': token,
         'deviceName': 'Android App',
         'deviceId': deviceId,
@@ -143,14 +149,11 @@ class CodexAppState extends ChangeNotifier {
       await bridge.setString('serverUrl', serverUrl);
       await bridge.setString('token', token);
       await bridge.setString('cookie', cookie);
-      final session = response['session'];
-      if (session is JsonMap) {
-        notices.insert(0, {'level': 'info', 'title': '已登录', 'message': readString(session, 'deviceName', 'Android App')});
-      }
       await connectSocket();
       await refreshHealth();
       await loadCodexOptions();
       await loadWorkspace();
+      await loadAuthSessions();
     } catch (error) {
       errorMessage = error.toString();
     } finally {
@@ -163,13 +166,56 @@ class CodexAppState extends ChangeNotifier {
     await _socket?.close();
     cookie = '';
     sessions = [];
+    authSessions = [];
     activeSessionId = '';
     approvals = [];
     timelineByThread.clear();
     attachmentsByThread.clear();
+    unreadThreadIds.clear();
     await bridge.remove('cookie');
     await bridge.remove('activeSessionId');
     notifyListeners();
+  }
+
+  Future<void> loadAuthSessions() async {
+    if (cookie.isEmpty) {
+      authSessions = [];
+      notifyListeners();
+      return;
+    }
+    authSessionsLoading = true;
+    notifyListeners();
+    try {
+      final payload = await api.getJson('/api/auth/sessions');
+      final rawSessions = payload['sessions'];
+      authSessions = rawSessions is List
+          ? rawSessions.whereType<JsonMap>().map(AuthSessionItem.fromJson).toList(growable: false)
+          : [];
+    } catch (error) {
+      errorMessage = error.toString();
+    } finally {
+      authSessionsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> revokeAuthSessions() async {
+    if (cookie.isEmpty) {
+      return;
+    }
+    busy = true;
+    notifyListeners();
+    try {
+      await api.deleteJson('/api/auth/sessions');
+      await logout();
+      token = '';
+      await bridge.remove('token');
+    } catch (error) {
+      errorMessage = error.toString();
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
   }
 
   Future<void> refreshHealth() async {
@@ -253,6 +299,7 @@ class CodexAppState extends ChangeNotifier {
 
   void selectSession(String threadId) {
     activeSessionId = threadId;
+    unreadThreadIds.remove(threadId);
     unawaited(bridge.setString('activeSessionId', threadId));
     _socket?.send({'type': 'thread_sync', 'threadId': threadId});
     notifyListeners();
@@ -310,10 +357,12 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
+    final clientMessageId = 'mobile-$now';
     _appendEntry(activeSessionId, TimelineEntry(
-      id: 'local-user-$now',
+      id: 'local-user:$clientMessageId',
       type: 'message',
       title: '你',
+      role: 'user',
       text: trimmed,
       createdAt: now,
     ));
@@ -322,7 +371,7 @@ class CodexAppState extends ChangeNotifier {
         'type': 'command_send',
         'threadId': activeSessionId,
         'text': trimmed,
-        'clientMessageId': 'mobile-$now',
+        'clientMessageId': clientMessageId,
       });
       notifyListeners();
       return;
@@ -335,7 +384,7 @@ class CodexAppState extends ChangeNotifier {
       'threadId': activeSessionId,
       'text': trimmed,
       'attachments': attachments,
-      'clientMessageId': 'mobile-$now',
+      'clientMessageId': clientMessageId,
       if (prefs.model.isNotEmpty) 'model': prefs.model,
       'effort': prefs.reasoningEffort,
       'approvalPolicy': prefs.approvalPolicy,
@@ -393,7 +442,12 @@ class CodexAppState extends ChangeNotifier {
     if (index < 0 || index >= notices.length) {
       return;
     }
-    notices.removeAt(index);
+    final notice = notices.removeAt(index);
+    final dismissKey = readString(notice, 'dismissKey');
+    if (dismissKey.isNotEmpty) {
+      dismissedNoticeKeys = {...dismissedNoticeKeys, dismissKey};
+      unawaited(_persistDismissedNoticeKeys());
+    }
     notifyListeners();
   }
 
@@ -424,7 +478,13 @@ class CodexAppState extends ChangeNotifier {
         }
         break;
       case 'tab_removed':
-        sessions = sessions.where((item) => item.threadId != readString(message, 'threadId')).toList(growable: false);
+        _removeSession(readString(message, 'threadId'));
+        break;
+      case 'unread':
+        final threadId = readString(message, 'threadId');
+        if (threadId.isNotEmpty && threadId != activeSessionId) {
+          unreadThreadIds = {...unreadThreadIds, threadId};
+        }
         break;
       case 'thread_sync':
         _applyThreadSync(message);
@@ -446,37 +506,47 @@ class CodexAppState extends ChangeNotifier {
         _setTurnStarted(readString(message, 'threadId'), readString(message, 'turnId'), readInt(message, 'startedAt'));
         break;
       case 'turn_completed':
-        activeTurnStartedAt.remove(readString(message, 'threadId'));
+        _setTurnCompleted(readString(message, 'threadId'), readString(message, 'turnId'));
         break;
       case 'agent_delta':
         _appendAgentDelta(message);
         break;
       case 'plan_delta':
-        _appendEntry(readString(message, 'threadId'), TimelineEntry(
-          id: _eventId(message),
-          type: 'plan',
-          title: '执行计划',
-          text: readString(message, 'delta'),
-          turnId: readString(message, 'turnId'),
-          itemId: readString(message, 'itemId'),
-          createdAt: _eventTime(message),
-          partial: true,
-        ));
+        _appendPlanDelta(message);
         break;
       case 'turn_plan_updated':
         _appendPlan(message);
         break;
       case 'item_started':
+        _appendItemStarted(message);
+        break;
       case 'item_completed':
+        _appendItemCompleted(message);
+        break;
       case 'item_delta':
+        _appendItemDelta(message);
+        break;
       case 'thread_event':
+        if (_shouldDisplayThreadEvent(readString(message, 'method'))) {
+          _appendThreadEvent(message);
+        }
+        break;
       case 'hook_started':
       case 'hook_completed':
+        _appendHookEvent(message);
+        break;
       case 'guardian_review_started':
       case 'guardian_review_completed':
+        _appendGuardianEvent(message);
+        break;
       case 'mcp_tool_progress':
+        _appendMcpProgress(message);
+        break;
       case 'turn_diff_updated':
-        _appendGenericEvent(message);
+        _appendTurnDiff(message);
+        break;
+      case 'model_rerouted':
+        _applyModelReroute(message);
         break;
       case 'token_usage':
         final threadId = readString(message, 'threadId');
@@ -485,15 +555,29 @@ class CodexAppState extends ChangeNotifier {
           tokenUsageByThread[threadId] = usage;
         }
         break;
+      case 'codex_error':
+        _appendNoticeEvent(
+          readString(message, 'threadId'),
+          'Codex 错误',
+          _extractText(message['error']).ifEmpty('发生了 Codex 错误'),
+          'error',
+        );
+        break;
       case 'warning':
       case 'error_notice':
-      case 'backend_error':
-      case 'error':
-        notices.insert(0, {
+        _pushNotice({
           'level': type == 'error' || type == 'error_notice' || type == 'backend_error' ? 'error' : 'warning',
-          'title': type == 'backend_error' ? '服务错误' : type,
+          'title': readString(message, 'noticeKind', type == 'warning' ? '警告' : '错误'),
           'message': readString(message, 'message', jsonEncode(message)),
+          'threadId': readString(message, 'threadId'),
+          'dismissKey': _dismissKeyForMessage(message),
         });
+        break;
+      case 'backend_error':
+        _appendNoticeEvent(activeSessionId, '后端错误', readString(message, 'message', jsonEncode(message)), 'error');
+        break;
+      case 'error':
+        _handleErrorMessage(message);
         break;
       case 'notification':
         _handleNotification(message);
@@ -533,11 +617,39 @@ class CodexAppState extends ChangeNotifier {
     if (value is! List) {
       return;
     }
-    notices = value.whereType<JsonMap>().map((item) => {
-      'level': readString(item, 'noticeKind', 'info'),
-      'title': readString(item, 'type', '通知'),
-      'message': readString(item, 'text'),
-    }).toList(growable: true);
+    for (final item in value.whereType<JsonMap>()) {
+      final id = readString(item, 'id');
+      final text = readString(item, 'text');
+      if (id.isEmpty || text.trim().isEmpty) {
+        continue;
+      }
+      final kind = readString(item, 'noticeKind', 'info');
+      _pushNotice({
+        'level': kind == 'error' ? 'error' : kind == 'warning' ? 'warning' : 'info',
+        'title': kind.isEmpty ? '通知' : kind,
+        'message': text,
+        'threadId': readString(item, 'threadId'),
+        'dismissKey': 'global-notice:$id:${readString(item, 'threadId')}:$kind:$text',
+      });
+    }
+  }
+
+  void _removeSession(String threadId) {
+    if (threadId.isEmpty) {
+      return;
+    }
+    sessions = sessions.where((item) => item.threadId != threadId).toList(growable: false);
+    timelineByThread.remove(threadId);
+    attachmentsByThread.remove(threadId);
+    tokenUsageByThread.remove(threadId);
+    activeTurnStartedAt.remove(threadId);
+    prefsByThread.remove(threadId);
+    unreadThreadIds.remove(threadId);
+    approvals = approvals.where((item) => item.threadId != threadId).toList(growable: false);
+    if (activeSessionId == threadId) {
+      activeSessionId = sessions.isEmpty ? '' : sessions.first.threadId;
+      unawaited(bridge.setString('activeSessionId', activeSessionId));
+    }
   }
 
   void _upsertSession(SessionItem session) {
@@ -577,13 +689,43 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty) {
       return;
     }
-    final entries = <TimelineEntry>[];
+    final entries = <TimelineEntry>[
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
     final turns = message['turns'];
     if (turns is List) {
       for (final rawTurn in turns.whereType<JsonMap>()) {
         entries.addAll(_entriesFromTurn(rawTurn));
       }
     }
+    final turnPlans = message['turnPlans'];
+    if (turnPlans is List) {
+      for (final plan in turnPlans.whereType<JsonMap>()) {
+        final entry = _entryFromTurnPlan(plan);
+        if (entry != null) {
+          entries.add(entry);
+        }
+      }
+    }
+    final turnDiffs = message['turnDiffs'];
+    if (turnDiffs is List) {
+      for (final diff in turnDiffs.whereType<JsonMap>()) {
+        final entry = _entryFromTurnDiff(diff);
+        if (entry != null) {
+          entries.add(entry);
+        }
+      }
+    }
+    final supplemental = message['supplementalItems'];
+    if (supplemental is List) {
+      for (final item in supplemental.whereType<JsonMap>()) {
+        final entry = _entryFromSupplemental(item);
+        if (entry != null) {
+          entries.add(entry);
+        }
+      }
+    }
+    _replaceGlobalNotices(message['globalSupplementalItems']);
     final events = message['timelineEvents'];
     if (events is List) {
       for (final event in events.whereType<JsonMap>()) {
@@ -597,6 +739,7 @@ class CodexAppState extends ChangeNotifier {
       tokenUsageByThread[threadId] = usage;
     }
     _restoreActiveTurn(threadId, turns);
+    unreadThreadIds.remove(threadId);
   }
 
   List<TimelineEntry> _entriesFromTurn(JsonMap turn) {
@@ -609,9 +752,10 @@ class CodexAppState extends ChangeNotifier {
         id: 'turn-$turnId-user',
         type: 'message',
         title: '你',
+        role: 'user',
         text: inputText,
         turnId: turnId,
-        createdAt: startedAt,
+        createdAt: _normalizeTimestamp(startedAt),
       ));
     }
     final items = turn['items'];
@@ -626,9 +770,10 @@ class CodexAppState extends ChangeNotifier {
         id: 'turn-$turnId-assistant',
         type: 'message',
         title: 'Codex',
+        role: 'assistant',
         text: outputText,
         turnId: turnId,
-        createdAt: readInt(turn, 'completedAt', startedAt + 1),
+        createdAt: _normalizeTimestamp(readInt(turn, 'completedAt', startedAt + 1)),
       ));
     }
     return threadEntries;
@@ -637,19 +782,23 @@ class CodexAppState extends ChangeNotifier {
   TimelineEntry _entryFromItem(JsonMap item, String turnId, int fallbackTime) {
     final type = readString(item, 'type');
     final id = readString(item, 'id', 'item-$turnId-${timelineByThread.length}-${Random().nextInt(99999)}');
-    final status = readString(item, 'status');
+    final status = readString(item, 'status', 'completed');
     final title = _itemTitle(type, item);
     final text = _itemText(item);
+    final patch = readString(item, 'patch').ifEmpty(readString(item, 'diff')).ifEmpty(readString(item, 'output'));
     return TimelineEntry(
       id: id,
-      type: type,
+      type: _timelineTypeForItem(type),
       title: title,
+      role: _roleForItem(type, item),
       text: text,
       status: status,
       turnId: turnId,
       itemId: id,
-      patch: readString(item, 'patch'),
-      createdAt: readInt(item, 'startedAt', fallbackTime),
+      meta: _itemMeta(type, item),
+      patch: patch,
+      changes: readMapList(item, 'changes'),
+      createdAt: _normalizeTimestamp(readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime))),
       raw: item,
     );
   }
@@ -657,30 +806,282 @@ class CodexAppState extends ChangeNotifier {
   TimelineEntry _entryFromEvent(JsonMap event) {
     final type = readString(event, 'type');
     if (type == 'agent_delta') {
+      final itemId = readString(event, 'itemId', readString(event, 'turnId', 'assistant'));
       return TimelineEntry(
-        id: _eventId(event),
+        id: 'agent-$itemId',
         type: 'message',
         title: 'Codex',
+        role: 'assistant',
         text: readString(event, 'delta'),
         turnId: readString(event, 'turnId'),
-        itemId: readString(event, 'itemId'),
+        itemId: itemId,
         createdAt: _eventTime(event),
         partial: true,
         raw: event,
       );
     }
+    if (type == 'turn_plan_updated') {
+      return _entryFromTurnPlan(event) ?? _genericEventEntry(event);
+    }
+    if (type == 'turn_diff_updated') {
+      return _entryFromTurnDiff(event) ?? _genericEventEntry(event);
+    }
+    if (type == 'item_started' || type == 'item_completed') {
+      final item = event['item'];
+      if (item is JsonMap) {
+        return _entryFromItem(item, readString(event, 'turnId'), _eventTime(event));
+      }
+    }
+    if (type == 'warning' || type == 'error_notice') {
+      return TimelineEntry(
+        id: readString(event, 'noticeId', _eventId(event)),
+        type: 'notice',
+        title: readString(event, 'noticeKind', type == 'warning' ? '警告' : '错误'),
+        role: 'system',
+        text: readString(event, 'message'),
+        status: type == 'warning' ? 'warning' : 'error',
+        turnId: readString(event, 'turnId'),
+        createdAt: _eventTime(event),
+        raw: event,
+      );
+    }
+    return _genericEventEntry(event);
+  }
+
+  TimelineEntry _genericEventEntry(JsonMap event) {
+    final type = readString(event, 'type');
     return TimelineEntry(
       id: _eventId(event),
       type: type,
       title: _eventTitle(event),
+      role: 'system',
       text: _eventText(event),
       status: readString(event, 'status', 'running'),
       turnId: readString(event, 'turnId'),
       itemId: readString(event, 'itemId'),
       patch: readString(event, 'patch'),
+      changes: readMapList(event, 'changes'),
       createdAt: _eventTime(event),
       raw: event,
     );
+  }
+
+  TimelineEntry? _entryFromTurnPlan(JsonMap planEntry) {
+    final turnId = readString(planEntry, 'turnId');
+    final plan = planEntry['plan'];
+    if (turnId.isEmpty || plan is! List || plan.isEmpty) {
+      return null;
+    }
+    return TimelineEntry(
+      id: 'turn-plan:$turnId',
+      type: 'turn_plan',
+      title: '执行计划',
+      role: 'assistant',
+      text: readString(planEntry, 'explanation'),
+      status: 'completed',
+      turnId: turnId,
+      meta: plan.whereType<JsonMap>().map(_formatPlanStep).where((item) => item.isNotEmpty).toList(growable: false),
+      createdAt: _normalizeTimestamp(readInt(planEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch)),
+      raw: planEntry,
+    );
+  }
+
+  TimelineEntry? _entryFromTurnDiff(JsonMap diffEntry) {
+    final turnId = readString(diffEntry, 'turnId');
+    final diff = readString(diffEntry, 'diff');
+    if (turnId.isEmpty || diff.trim().isEmpty) {
+      return null;
+    }
+    return TimelineEntry(
+      id: 'turn-diff:$turnId',
+      type: 'turn_diff',
+      title: '轮次 Diff',
+      role: 'system',
+      text: '已恢复的差异快照',
+      status: 'completed',
+      turnId: turnId,
+      patch: diff,
+      createdAt: _normalizeTimestamp(readInt(diffEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch)),
+      raw: diffEntry,
+    );
+  }
+
+  TimelineEntry? _entryFromSupplemental(JsonMap item) {
+    final id = readString(item, 'id');
+    final type = readString(item, 'type');
+    if (id.isEmpty || type.isEmpty) {
+      return null;
+    }
+    final turnId = readString(item, '_turnId');
+    final createdAt = _normalizeTimestamp(
+      readInt(item, 'completedAt', readInt(item, 'startedAt', readInt(item, 'createdAt', readInt(item, 'updatedAt')))),
+    );
+    if (type == 'hookEvent') {
+      final run = readMap(item, 'run');
+      return TimelineEntry(
+        id: id,
+        type: 'hook',
+        title: 'Hook',
+        role: 'system',
+        text: readString(run, 'command').ifEmpty('Hook ${readString(item, 'phase', 'event')}'),
+        status: readString(item, 'status', 'completed'),
+        turnId: turnId,
+        itemId: id,
+        meta: [
+          readString(item, 'phase'),
+          readInt(run, 'exitCode', -999999) == -999999 ? '' : '退出码 ${readInt(run, 'exitCode')}',
+        ].where((entry) => entry.isNotEmpty).toList(growable: false),
+        createdAt: createdAt,
+        raw: item,
+      );
+    }
+    if (type == 'guardianReview') {
+      return TimelineEntry(
+        id: id,
+        type: 'guardian_review',
+        title: 'Guardian 审查',
+        role: 'system',
+        text: _summarizeMap(readMap(item, 'review')).ifEmpty(_summarizeMap(readMap(item, 'action'))).ifEmpty('Guardian 审查'),
+        status: readString(item, 'status', 'completed'),
+        turnId: turnId,
+        itemId: id,
+        meta: [readString(item, 'phase'), readString(item, 'decisionSource')].where((entry) => entry.isNotEmpty).toList(growable: false),
+        createdAt: createdAt,
+        raw: item,
+      );
+    }
+    if (type == 'pendingUserMessage') {
+      final text = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['input'])).ifEmpty(_extractText(item['message']));
+      if (text.isEmpty) {
+        return null;
+      }
+      return TimelineEntry(
+        id: readString(item, 'entryId', 'pending-user:$id'),
+        type: 'message',
+        title: '你',
+        role: 'user',
+        text: text,
+        status: readString(item, 'status', 'completed'),
+        turnId: turnId,
+        itemId: id,
+        createdAt: createdAt,
+        raw: item,
+      );
+    }
+    return null;
+  }
+
+  String _formatPlanStep(JsonMap item) {
+    final step = readString(item, 'step');
+    if (step.isEmpty) {
+      return '';
+    }
+    final status = readString(item, 'status');
+    return status.isEmpty ? step : '${_formatStatusText(status)} · $step';
+  }
+
+  String _formatStatusText(String status) {
+    return switch (status.replaceAll(RegExp(r'[\s_-]'), '').toLowerCase()) {
+      'completed' || 'done' || 'success' || 'succeeded' => '已完成',
+      'inprogress' || 'running' || 'active' => '进行中',
+      'failed' || 'error' => '失败',
+      'cancelled' || 'canceled' || 'aborted' || 'declined' => '已中断',
+      'pendingapproval' => '待批准',
+      'pending' => '待处理',
+      _ => status,
+    };
+  }
+
+  String _timelineTypeForItem(String type) {
+    return switch (type) {
+      'userMessage' || 'agentMessage' || 'message' => 'message',
+      'commandExecution' => 'command',
+      'fileChange' => 'file_change',
+      'contextCompaction' => 'context_compaction',
+      'hookPrompt' => 'hook',
+      'mcpToolCall' => 'mcp_tool',
+      'dynamicToolCall' => 'dynamic_tool',
+      'collabAgentToolCall' => 'collab_tool',
+      'webSearch' => 'web_search',
+      'imageView' => 'image_view',
+      'imageGeneration' => 'image_generation',
+      'enteredReviewMode' || 'exitedReviewMode' => 'review_mode',
+      _ => type.ifEmpty('item_delta'),
+    };
+  }
+
+  String _roleForItem(String type, JsonMap item) {
+    final role = readString(item, 'role');
+    if (role.isNotEmpty) {
+      return role == 'assistant' ? 'assistant' : role;
+    }
+    if (type == 'userMessage') {
+      return 'user';
+    }
+    if (type == 'agentMessage' || type == 'reasoning' || type == 'plan') {
+      return 'assistant';
+    }
+    return 'system';
+  }
+
+  List<String> _itemMeta(String type, JsonMap item) {
+    final values = <String>[];
+    if (type == 'commandExecution') {
+      values.add(readString(item, 'cwd'));
+      final exitCode = item['exitCode'];
+      if (exitCode is num) {
+        values.add('退出码 ${exitCode.round()}');
+      }
+    } else if (type == 'mcpToolCall') {
+      values.add(readString(item, 'server'));
+      values.addAll(readMapList(item, 'progressMessages').map((entry) => _summarizeMap(entry)));
+    } else if (type == 'collabAgentToolCall') {
+      final receivers = item['receiverThreadIds'];
+      if (receivers is List && receivers.isNotEmpty) {
+        values.add('目标 ${receivers.length} 个线程');
+      }
+    } else if (type == 'webSearch') {
+      final action = readMap(item, 'action');
+      values.add(readString(action, 'type'));
+      values.add(readString(item, 'url').ifEmpty(readString(action, 'url')));
+    } else if (type == 'imageGeneration') {
+      values.add(readString(item, 'revisedPrompt'));
+    }
+    return values.where((entry) => entry.trim().isNotEmpty).toList(growable: false);
+  }
+
+  bool _shouldDisplayThreadEvent(String method) {
+    if (method.isEmpty) {
+      return false;
+    }
+    if (method == 'account/rateLimits/updated' || method == 'skills/changed' || method == 'thread/settings/updated') {
+      return false;
+    }
+    return true;
+  }
+
+  String _formatMethodLabel(String method) {
+    if (method.isEmpty) {
+      return '事件';
+    }
+    const labels = {
+      'process/outputDelta': '进程输出',
+      'command/exec/outputDelta': '命令输出',
+      'thread/realtime/transcript/delta': '实时转录',
+      'item/reasoning/summaryTextDelta': '推理',
+      'item/reasoning/summaryPartAdded': '推理',
+      'item/reasoning/textDelta': '推理',
+      'item/commandExecution/outputDelta': '命令输出',
+      'item/fileChange/outputDelta': '文件变更',
+      'item/fileChange/patchUpdated': '补丁更新',
+    };
+    final direct = labels[method];
+    if (direct != null) {
+      return direct;
+    }
+    final parts = method.split('/').where((part) => part.isNotEmpty).toList(growable: false);
+    final tail = parts.isEmpty ? method : parts.last;
+    return tail.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (match) => '${match[1]} ${match[2]}');
   }
 
   void _setTurnStarted(String threadId, String turnId, int startedAt) {
@@ -691,13 +1092,35 @@ class CodexAppState extends ChangeNotifier {
     _startWorkingTimer();
   }
 
+  void _setTurnCompleted(String threadId, String turnId) {
+    if (threadId.isEmpty) {
+      return;
+    }
+    activeTurnStartedAt.remove(threadId);
+    final entries = [...(timelineByThread[threadId] ?? const <TimelineEntry>[])];
+    var changed = false;
+    for (var index = 0; index < entries.length; index += 1) {
+      final entry = entries[index];
+      if (turnId.isNotEmpty && entry.turnId != turnId) {
+        continue;
+      }
+      if (entry.partial || entry.status == 'running' || entry.status == 'in_progress' || entry.status == 'inProgress') {
+        entries[index] = entry.copyWith(partial: false, status: entry.status.isEmpty || entry.status == 'running' ? 'completed' : entry.status);
+        changed = true;
+      }
+    }
+    if (changed) {
+      timelineByThread[threadId] = entries;
+    }
+  }
+
   void _restoreActiveTurn(String threadId, dynamic turns) {
     if (turns is! List) {
       return;
     }
     for (final rawTurn in turns.reversed.whereType<JsonMap>()) {
       final status = readString(rawTurn, 'status');
-      if (status == 'in_progress' || status == 'running') {
+      if (status == 'in_progress' || status == 'inProgress' || status == 'running') {
         activeTurnStartedAt[threadId] = _normalizeTimestamp(readInt(rawTurn, 'startedAt'));
         _startWorkingTimer();
         return;
@@ -714,7 +1137,7 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final entries = [...(timelineByThread[threadId] ?? const <TimelineEntry>[])];
-    final index = entries.indexWhere((entry) => entry.type == 'message' && entry.itemId == itemId && entry.title == 'Codex');
+    final index = entries.indexWhere((entry) => entry.id == 'agent-$itemId' || (entry.type == 'message' && entry.itemId == itemId && entry.title == 'Codex'));
     if (index >= 0) {
       entries[index] = entries[index].copyWith(text: entries[index].text + delta, partial: true);
     } else {
@@ -722,6 +1145,7 @@ class CodexAppState extends ChangeNotifier {
         id: 'agent-$itemId',
         type: 'message',
         title: 'Codex',
+        role: 'assistant',
         text: delta,
         turnId: readString(event, 'turnId'),
         itemId: itemId,
@@ -734,24 +1158,243 @@ class CodexAppState extends ChangeNotifier {
 
   void _appendPlan(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    final plan = event['plan'];
-    final steps = plan is List
-        ? plan.whereType<JsonMap>().map((item) => '${readString(item, 'status')} · ${readString(item, 'step')}').join('\n')
-        : '';
+    final entry = _entryFromTurnPlan(event);
+    if (entry != null) {
+      _appendEntry(threadId, entry);
+    }
+  }
+
+  void _appendPlanDelta(JsonMap event) {
+    final threadId = readString(event, 'threadId');
+    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:plan-live');
+    final id = 'plan:$itemId';
+    final current = _findEntry(threadId, id);
     _appendEntry(threadId, TimelineEntry(
-      id: _eventId(event),
+      id: id,
       type: 'plan',
-      title: '执行计划',
-      text: [readString(event, 'explanation'), steps].where((item) => item.isNotEmpty).join('\n'),
+      title: '计划草稿',
+      role: 'assistant',
+      text: '${current?.text ?? ''}${readString(event, 'delta')}',
+      status: 'running',
+      turnId: readString(event, 'turnId'),
+      itemId: itemId,
+      meta: const ['流式输出中'],
+      createdAt: current?.createdAt ?? _eventTime(event),
+      partial: true,
+      raw: event,
+    ));
+  }
+
+  void _appendTurnDiff(JsonMap event) {
+    final threadId = readString(event, 'threadId');
+    final entry = _entryFromTurnDiff(event);
+    if (entry != null) {
+      _appendEntry(threadId, entry);
+    }
+  }
+
+  void _appendItemStarted(JsonMap event) {
+    final item = event['item'];
+    if (item is JsonMap) {
+      _appendEntry(readString(event, 'threadId'), _entryFromItem(item, readString(event, 'turnId'), _eventTime(event)).copyWith(partial: true));
+    }
+  }
+
+  void _appendItemCompleted(JsonMap event) {
+    final threadId = readString(event, 'threadId');
+    final item = event['item'];
+    if (item is! JsonMap) {
+      return;
+    }
+    final itemType = readString(item, 'type');
+    final itemId = readString(item, 'id', readString(event, 'itemId', readString(event, 'turnId', 'assistant')));
+    if (itemType == 'agentMessage' || (itemType == 'message' && readString(item, 'role') == 'assistant')) {
+      final finalText = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['output']));
+      final existing = _findEntry(threadId, 'agent-$itemId') ?? _findEntryByItem(threadId, itemId);
+      final text = finalText.trim().isNotEmpty ? finalText : existing?.text ?? '';
+      if (text.trim().isNotEmpty) {
+        _appendEntry(threadId, TimelineEntry(
+          id: existing?.id ?? 'agent-$itemId',
+          type: 'message',
+          title: 'Codex',
+          role: 'assistant',
+          text: text,
+          status: 'completed',
+          turnId: readString(event, 'turnId'),
+          itemId: itemId,
+          createdAt: existing?.createdAt ?? _eventTime(event),
+          raw: item,
+        ));
+      }
+      return;
+    }
+    _appendEntry(threadId, _entryFromItem(item, readString(event, 'turnId'), _eventTime(event)).copyWith(partial: false));
+  }
+
+  void _appendItemDelta(JsonMap event) {
+    final method = readString(event, 'method');
+    final threadId = readString(event, 'threadId');
+    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:$method');
+    final id = 'delta:$itemId:$method';
+    final current = _findEntry(threadId, id);
+    final delta = readString(event, 'delta').ifEmpty(_extractText(event['part']));
+
+    if (method == 'item/reasoning/summaryTextDelta' || method == 'item/reasoning/summaryPartAdded' || method == 'item/reasoning/textDelta') {
+      _appendEntry(threadId, TimelineEntry(
+        id: id,
+        type: 'reasoning',
+        title: '推理',
+        role: 'assistant',
+        text: '${current?.text ?? ''}$delta',
+        status: 'running',
+        turnId: readString(event, 'turnId'),
+        itemId: itemId,
+        meta: const ['流式输出中'],
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        raw: event,
+      ));
+      return;
+    }
+
+    if (method == 'item/commandExecution/outputDelta') {
+      _appendEntry(threadId, TimelineEntry(
+        id: id,
+        type: 'command',
+        title: current?.title ?? '命令',
+        role: 'system',
+        text: current?.text ?? '执行命令',
+        status: 'running',
+        turnId: readString(event, 'turnId'),
+        itemId: itemId,
+        meta: [...(current?.meta ?? const <String>[]), delta].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(8),
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        raw: event,
+      ));
+      return;
+    }
+
+    if (method == 'item/fileChange/outputDelta' || method == 'item/fileChange/patchUpdated') {
+      final nextPatch = readString(event, 'patch').ifEmpty(method == 'item/fileChange/outputDelta' ? '${current?.patch ?? ''}$delta' : current?.patch ?? '');
+      _appendEntry(threadId, TimelineEntry(
+        id: id,
+        type: 'file_change',
+        title: current?.title ?? '文件变更',
+        role: 'system',
+        text: current?.text ?? '文件变更处理中',
+        status: 'running',
+        turnId: readString(event, 'turnId'),
+        itemId: itemId,
+        patch: nextPatch,
+        changes: readMapList(event, 'changes').isNotEmpty ? readMapList(event, 'changes') : current?.changes ?? const [],
+        meta: [...(current?.meta ?? const <String>[]), delta].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(8),
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        raw: event,
+      ));
+      return;
+    }
+
+    _appendEntry(threadId, TimelineEntry(
+      id: id,
+      type: 'item_delta',
+      title: _formatMethodLabel(method.ifEmpty('item_delta')),
+      role: 'system',
+      text: delta.ifEmpty(readString(event, 'patch')).ifEmpty(_summarizeMap(event)),
+      status: 'running',
+      turnId: readString(event, 'turnId'),
+      itemId: itemId,
+      patch: readString(event, 'patch'),
+      changes: readMapList(event, 'changes'),
+      meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
+      createdAt: current?.createdAt ?? _eventTime(event),
+      partial: true,
+      raw: event,
+    ));
+  }
+
+  void _appendThreadEvent(JsonMap event) {
+    final threadId = readString(event, 'threadId');
+    final method = readString(event, 'method');
+    final id = readString(event, 'itemId', '$threadId:${readString(event, 'turnId', 'thread')}:$method');
+    final current = _findEntry(threadId, id);
+    final params = event['params'] is JsonMap ? event['params'] as JsonMap : const <String, dynamic>{};
+    final streaming = method == 'process/outputDelta' || method == 'command/exec/outputDelta' || method == 'thread/realtime/transcript/delta';
+    final delta = readString(event, 'delta').ifEmpty(readString(event, 'message')).ifEmpty(_extractText(params['text'])).ifEmpty(_summarizeMap(params));
+    _appendEntry(threadId, TimelineEntry(
+      id: id,
+      type: 'thread_event',
+      title: _formatMethodLabel(method),
+      role: 'system',
+      text: streaming ? '${current?.text ?? ''}$delta' : delta,
+      status: readString(event, 'status', streaming ? 'running' : 'completed'),
+      turnId: readString(event, 'turnId'),
+      itemId: readString(event, 'itemId'),
+      meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
+      createdAt: current?.createdAt ?? _eventTime(event),
+      partial: streaming,
+      raw: event,
+    ));
+  }
+
+  void _appendHookEvent(JsonMap event) {
+    final threadId = readString(event, 'threadId');
+    final run = readMap(event, 'run');
+    final id = readString(run, 'id', '$threadId:${readString(event, 'turnId', 'turn')}:${readString(event, 'type')}');
+    _appendEntry(threadId, TimelineEntry(
+      id: id,
+      type: 'hook',
+      title: 'Hook',
+      role: 'system',
+      text: readString(run, 'command').ifEmpty(readString(event, 'type') == 'hook_started' ? 'Hook 开始' : 'Hook 完成'),
+      status: readString(run, 'status', readString(event, 'type') == 'hook_started' ? 'running' : 'completed'),
+      turnId: readString(event, 'turnId'),
+      itemId: id,
+      meta: [
+        readString(event, 'type') == 'hook_started' ? 'started' : 'completed',
+        run['exitCode'] is num ? '退出码 ${(run['exitCode'] as num).round()}' : '',
+      ].where((item) => item.isNotEmpty).toList(growable: false),
+      createdAt: _eventTime(event),
+      raw: event,
+    ));
+  }
+
+  void _appendGuardianEvent(JsonMap event) {
+    final type = readString(event, 'type');
+    _appendEntry(readString(event, 'threadId'), TimelineEntry(
+      id: '${readString(event, 'threadId')}:${readString(event, 'turnId', 'turn')}:$type',
+      type: 'guardian_review',
+      title: 'Guardian 审查',
+      role: 'system',
+      text: type == 'guardian_review_started' ? '审查开始' : '审查完成',
+      status: type == 'guardian_review_started' ? 'running' : 'completed',
       turnId: readString(event, 'turnId'),
       createdAt: _eventTime(event),
       raw: event,
     ));
   }
 
-  void _appendGenericEvent(JsonMap event) {
+  void _appendMcpProgress(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    _appendEntry(threadId, _entryFromEvent(event));
+    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:mcp-progress');
+    final id = 'mcp:$itemId';
+    final current = _findEntry(threadId, id);
+    final nextMeta = [...(current?.meta ?? const <String>[]), readString(event, 'message')].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(6);
+    _appendEntry(threadId, TimelineEntry(
+      id: id,
+      type: 'mcp_tool_progress',
+      title: 'MCP 工具',
+      role: 'system',
+      text: current?.text ?? '工具运行中',
+      status: 'running',
+      turnId: readString(event, 'turnId'),
+      itemId: itemId,
+      meta: nextMeta,
+      createdAt: current?.createdAt ?? _eventTime(event),
+      partial: true,
+      raw: event,
+    ));
   }
 
   void _appendEntry(String threadId, TimelineEntry entry) {
@@ -775,11 +1418,133 @@ class CodexAppState extends ChangeNotifier {
     if (method == 'account/rateLimits/updated' || method == 'skills/changed' || method == 'thread/settings/updated') {
       return;
     }
-    notices.insert(0, {
-      'level': 'info',
+    final paramsMap = params is JsonMap ? params : const <String, dynamic>{};
+    _pushNotice({
+      'level': _notificationLevel(method, paramsMap),
       'title': _notificationTitle(method),
-      'message': params is JsonMap ? _summarizeMap(params) : params?.toString() ?? method,
+      'message': params is JsonMap ? _notificationMessage(method, params) : params?.toString() ?? method,
+      'threadId': readString(paramsMap, 'threadId'),
+      'dismissKey': _dismissKeyForMessage(message),
     });
+    final threadId = readString(paramsMap, 'threadId');
+    if (threadId.isNotEmpty && (method == 'guardianWarning' || method.startsWith('turn/'))) {
+      _appendNoticeEvent(threadId, _notificationTitle(method), _notificationMessage(method, paramsMap), _notificationLevel(method, paramsMap));
+    }
+  }
+
+  void _handleErrorMessage(JsonMap message) {
+    final threadId = readString(message, 'threadId');
+    final clientMessageId = readString(message, 'clientMessageId');
+    if (threadId.isNotEmpty && clientMessageId.isNotEmpty) {
+      _removeEntry(threadId, 'local-user:$clientMessageId');
+    }
+    final text = readString(message, 'message', jsonEncode(message));
+    if (threadId.isNotEmpty) {
+      _appendNoticeEvent(threadId, '请求错误', text, 'error');
+    } else {
+      _pushNotice({'level': 'error', 'title': '请求错误', 'message': text});
+    }
+  }
+
+  void _applyModelReroute(JsonMap message) {
+    final threadId = readString(message, 'threadId');
+    final toModel = readString(message, 'toModel');
+    if (threadId.isEmpty || toModel.isEmpty) {
+      return;
+    }
+    final next = [...sessions];
+    final index = next.indexWhere((item) => item.threadId == threadId);
+    if (index >= 0) {
+      final session = next[index];
+      next[index] = SessionItem(
+        threadId: session.threadId,
+        name: session.name,
+        cwd: session.cwd,
+        status: session.status,
+        windowStatus: session.windowStatus,
+        approvalPolicy: session.approvalPolicy,
+        sandboxMode: session.sandboxMode,
+        model: toModel,
+        reasoningEffort: session.reasoningEffort,
+        tokenUsage: session.tokenUsage,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      );
+      sessions = next;
+    }
+    final prefs = prefsByThread[threadId];
+    if (prefs != null) {
+      prefsByThread[threadId] = prefs.copyWith(model: toModel);
+    }
+  }
+
+  void _appendNoticeEvent(String threadId, String title, String text, String level) {
+    if (threadId.isEmpty || text.trim().isEmpty) {
+      return;
+    }
+    _appendEntry(threadId, TimelineEntry(
+      id: 'notice:$threadId:${DateTime.now().microsecondsSinceEpoch}',
+      type: 'notice',
+      title: title,
+      role: 'system',
+      text: text,
+      status: level == 'error' ? 'error' : level == 'warning' ? 'warning' : 'completed',
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+    ));
+  }
+
+  void _pushNotice(JsonMap notice) {
+    final message = readString(notice, 'message');
+    final title = readString(notice, 'title', '通知');
+    if (message.trim().isEmpty && title.trim().isEmpty) {
+      return;
+    }
+    final dismissKey = readString(notice, 'dismissKey');
+    if (dismissKey.isNotEmpty && dismissedNoticeKeys.contains(dismissKey)) {
+      return;
+    }
+    final id = readString(notice, 'id').ifEmpty(dismissKey).ifEmpty('notice:${DateTime.now().microsecondsSinceEpoch}');
+    notices.removeWhere((item) => readString(item, 'id').isNotEmpty && readString(item, 'id') == id);
+    notices.insert(0, {
+      ...notice,
+      'id': id,
+      'createdAt': notice['createdAt'] ?? DateTime.now().millisecondsSinceEpoch,
+    });
+    if (notices.length > 40) {
+      notices = notices.take(40).toList(growable: true);
+    }
+  }
+
+  TimelineEntry? _findEntry(String threadId, String id) {
+    if (id.isEmpty) {
+      return null;
+    }
+    for (final entry in timelineByThread[threadId] ?? const <TimelineEntry>[]) {
+      if (entry.id == id) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  TimelineEntry? _findEntryByItem(String threadId, String itemId) {
+    if (itemId.isEmpty) {
+      return null;
+    }
+    for (final entry in timelineByThread[threadId] ?? const <TimelineEntry>[]) {
+      if (entry.itemId == itemId) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  void _removeEntry(String threadId, String entryId) {
+    final entries = timelineByThread[threadId];
+    if (entries == null) {
+      return;
+    }
+    timelineByThread[threadId] = entries.where((entry) => entry.id != entryId).toList(growable: false);
   }
 
   void _startWorkingTimer() {
@@ -911,16 +1676,125 @@ class CodexAppState extends ChangeNotifier {
     if (method == 'mcpServer/startupStatus/updated') {
       return 'MCP 服务状态';
     }
+    if (method == 'mcpServer/oauthLogin/completed') {
+      return 'MCP OAuth';
+    }
+    if (method == 'account/updated') {
+      return '账户更新';
+    }
+    if (method == 'account/login/completed') {
+      return '账户登录';
+    }
     if (method == 'guardianWarning') {
       return 'Guardian 警告';
     }
-    if (method == 'configWarning') {
+    if (method == 'configWarning' || method == 'windows/worldWritableWarning') {
       return '配置警告';
     }
-    if (method == 'deprecated') {
+    if (method == 'deprecationNotice' || method == 'deprecated') {
       return '弃用通知';
     }
+    if (method == 'windowsSandbox/setupCompleted') {
+      return 'Windows Sandbox';
+    }
+    if (method == 'remoteControl/status/changed') {
+      return '远程控制状态';
+    }
+    if (method == 'turn/moderationMetadata') {
+      return '内容审查元数据';
+    }
+    if (method == 'app/list/updated') {
+      return '应用列表更新';
+    }
+    if (method == 'externalAgentConfig/import/completed') {
+      return '外部代理配置导入完成';
+    }
+    if (method == 'fs/changed') {
+      return '文件系统更新';
+    }
+    if (method == 'fuzzyFileSearch/sessionUpdated') {
+      return '模糊搜索更新';
+    }
+    if (method == 'fuzzyFileSearch/sessionCompleted') {
+      return '模糊搜索完成';
+    }
     return method;
+  }
+
+  String _notificationMessage(String method, JsonMap params) {
+    if (method == 'mcpServer/startupStatus/updated') {
+      return [readString(params, 'name', 'MCP'), readString(params, 'status', 'unknown'), readString(params, 'error')]
+          .where((item) => item.isNotEmpty)
+          .join(' · ');
+    }
+    if (method == 'mcpServer/oauthLogin/completed') {
+      return '${readString(params, 'name', 'MCP')} · ${params['success'] == true ? '登录成功' : '登录失败'}${readString(params, 'error').isNotEmpty ? ' · ${readString(params, 'error')}' : ''}';
+    }
+    if (method == 'account/updated') {
+      return [readString(params, 'authMode'), readString(params, 'planType')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('账户信息已更新');
+    }
+    if (method == 'account/login/completed') {
+      return '${params['success'] == true ? '登录成功' : '登录失败'}${readString(params, 'error').isNotEmpty ? ' · ${readString(params, 'error')}' : ''}';
+    }
+    if (method == 'guardianWarning') {
+      return readString(params, 'message', 'Guardian 发出警告');
+    }
+    if (method == 'deprecationNotice' || method == 'deprecated') {
+      return [readString(params, 'summary'), readString(params, 'details')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('存在即将弃用的能力');
+    }
+    if (method == 'configWarning') {
+      return [readString(params, 'summary'), readString(params, 'details'), readString(params, 'path')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('配置存在警告');
+    }
+    if (method == 'windowsSandbox/setupCompleted') {
+      return [readString(params, 'mode', 'sandbox'), params['success'] == true ? '设置完成' : '设置失败', readString(params, 'error')].where((item) => item.isNotEmpty).join(' · ');
+    }
+    if (method == 'remoteControl/status/changed') {
+      return [readString(params, 'status'), readString(params, 'environmentId')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('远程控制状态已更新');
+    }
+    if (method == 'turn/moderationMetadata') {
+      final metadata = readMap(params, 'metadata');
+      return [readString(metadata, 'category'), readString(metadata, 'outcome'), readString(metadata, 'action')]
+          .where((item) => item.isNotEmpty)
+          .join(' · ')
+          .ifEmpty(_summarizeMap(metadata).ifEmpty('已收到审查元数据'));
+    }
+    if (method == 'app/list/updated') {
+      final data = params['data'];
+      return data is List ? '共 ${data.length} 个应用' : '应用列表已更新';
+    }
+    if (method == 'externalAgentConfig/import/completed') {
+      return '外部代理配置已导入';
+    }
+    if (method == 'fs/changed') {
+      final changed = params['changedPaths'];
+      final paths = changed is List ? changed.whereType<String>().take(2).toList(growable: false) : const <String>[];
+      return [readString(params, 'watchId'), ...paths].where((item) => item.isNotEmpty).join(' · ').ifEmpty('文件系统事件');
+    }
+    if (method == 'fuzzyFileSearch/sessionUpdated') {
+      final files = params['files'];
+      return [readString(params, 'query'), files is List ? '${files.length} 个结果' : ''].where((item) => item.isNotEmpty).join(' · ').ifEmpty('模糊搜索结果已更新');
+    }
+    if (method == 'fuzzyFileSearch/sessionCompleted') {
+      return readString(params, 'sessionId').ifEmpty('模糊搜索已完成');
+    }
+    return _summarizeMap(params).ifEmpty('收到系统通知');
+  }
+
+  String _notificationLevel(String method, JsonMap params) {
+    if (method == 'guardianWarning' || method == 'configWarning' || method == 'deprecationNotice' || method == 'windows/worldWritableWarning') {
+      return 'warning';
+    }
+    if ((method == 'mcpServer/startupStatus/updated' || method == 'mcpServer/oauthLogin/completed' || method == 'windowsSandbox/setupCompleted') &&
+        (params['success'] == false || readString(params, 'status') == 'failed' || readString(params, 'error').isNotEmpty)) {
+      return 'error';
+    }
+    if (method == 'account/login/completed' && params['success'] == false) {
+      return 'error';
+    }
+    if (method == 'remoteControl/status/changed' && readString(params, 'status') == 'errored') {
+      return 'error';
+    }
+    return 'info';
   }
 
   String _summarizeMap(JsonMap map) {
@@ -929,6 +1803,49 @@ class CodexAppState extends ChangeNotifier {
         .map((entry) => '${entry.key}: ${entry.value}')
         .take(4)
         .join(' · ');
+  }
+
+  String _dismissKeyForMessage(JsonMap message) {
+    final type = readString(message, 'type');
+    if (type == 'notification') {
+      return 'notification:${readString(message, 'method')}:${_stableJson(message['params'])}';
+    }
+    return '$type:${readString(message, 'noticeId')}:${readString(message, 'threadId')}:${readString(message, 'noticeKind')}:${readString(message, 'message')}';
+  }
+
+  String _stableJson(dynamic value) {
+    if (value == null) {
+      return 'null';
+    }
+    if (value is String || value is num || value is bool) {
+      return jsonEncode(value);
+    }
+    if (value is List) {
+      return '[${value.map(_stableJson).join(',')}]';
+    }
+    if (value is Map) {
+      final keys = value.keys.map((key) => key.toString()).toList()..sort();
+      return '{${keys.map((key) => '${jsonEncode(key)}:${_stableJson(value[key])}').join(',')}}';
+    }
+    return jsonEncode(value.toString());
+  }
+
+  Set<String> _decodeStringSet(String raw) {
+    try {
+      final decoded = raw.trim().isEmpty ? const [] : jsonDecode(raw);
+      if (decoded is List) {
+        return decoded.whereType<String>().map((item) => item.trim()).where((item) => item.isNotEmpty).toSet();
+      }
+    } catch (_) {
+      return {};
+    }
+    return {};
+  }
+
+  Future<void> _persistDismissedNoticeKeys() async {
+    final values = dismissedNoticeKeys.toList(growable: false);
+    final tail = values.length > 200 ? values.sublist(values.length - 200) : values;
+    await bridge.setString('dismissedNoticeKeys', jsonEncode(tail));
   }
 
   @override
@@ -944,4 +1861,13 @@ class CodexAppState extends ChangeNotifier {
 
 extension _StringFallback on String {
   String ifEmpty(String fallback) => isEmpty ? fallback : this;
+}
+
+extension _ListTail<T> on List<T> {
+  List<T> takeLast(int count) {
+    if (length <= count) {
+      return this;
+    }
+    return sublist(length - count);
+  }
 }
