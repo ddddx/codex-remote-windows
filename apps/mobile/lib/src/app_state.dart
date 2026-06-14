@@ -64,14 +64,20 @@ class CodexAppState extends ChangeNotifier {
   }
 
   ComposerPrefs get activePrefs {
-    return prefsByThread[activeSessionId] ?? _prefsFromSession(activeSession) ?? defaultPrefs;
+    return prefsByThread[activeSessionId] ??
+        _prefsFromSession(activeSession) ??
+        defaultPrefs;
   }
 
-  List<TimelineEntry> get activeTimeline => timelineByThread[activeSessionId] ?? const [];
-  List<AttachmentItem> get activeAttachments => attachmentsByThread[activeSessionId] ?? const [];
-  JsonMap? get activeTokenUsage => tokenUsageByThread[activeSessionId] ?? activeSession?.tokenUsage;
+  List<TimelineEntry> get activeTimeline =>
+      timelineByThread[activeSessionId] ?? const [];
+  List<AttachmentItem> get activeAttachments =>
+      attachmentsByThread[activeSessionId] ?? const [];
+  JsonMap? get activeTokenUsage =>
+      tokenUsageByThread[activeSessionId] ?? activeSession?.tokenUsage;
 
-  bool get isConfigured => serverUrl.trim().isNotEmpty && token.trim().isNotEmpty;
+  bool get isConfigured =>
+      serverUrl.trim().isNotEmpty && token.trim().isNotEmpty;
   bool get isConnected => connectionStatus == 'connected';
   bool get isWorking => activeTurnStartedAt.containsKey(activeSessionId);
 
@@ -94,10 +100,13 @@ class CodexAppState extends ChangeNotifier {
     cookie = await bridge.getString('cookie') ?? '';
     activeSessionId = await bridge.getString('activeSessionId') ?? '';
     theme = await bridge.getString('theme') ?? 'paper';
-    dismissedNoticeKeys = _decodeStringSet(await bridge.getString('dismissedNoticeKeys') ?? '');
+    dismissedNoticeKeys = _decodeStringSet(
+      await bridge.getString('dismissedNoticeKeys') ?? '',
+    );
     deviceId = await bridge.getString('deviceId') ?? '';
     if (deviceId.isEmpty) {
-      deviceId = 'android-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
+      deviceId =
+          'android-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
       await bridge.setString('deviceId', deviceId);
     }
     _configureApi();
@@ -189,7 +198,10 @@ class CodexAppState extends ChangeNotifier {
       final payload = await api.getJson('/api/auth/sessions');
       final rawSessions = payload['sessions'];
       authSessions = rawSessions is List
-          ? rawSessions.whereType<JsonMap>().map(AuthSessionItem.fromJson).toList(growable: false)
+          ? rawSessions
+                .whereType<JsonMap>()
+                .map(AuthSessionItem.fromJson)
+                .toList(growable: false)
           : [];
     } catch (error) {
       errorMessage = error.toString();
@@ -233,9 +245,14 @@ class CodexAppState extends ChangeNotifier {
 
   Future<void> loadCodexOptions() async {
     try {
-      final payload = await api.getJson('/api/codex/options', query: workspacePath.isEmpty ? const {} : {'cwd': workspacePath});
+      final payload = await api.getJson(
+        '/api/codex/options',
+        query: workspacePath.isEmpty ? const {} : {'cwd': workspacePath},
+      );
       final models = payload['models'];
-      modelOptions = models is List ? models.whereType<JsonMap>().map(CodexModelOption.fromJson).toList() : [];
+      modelOptions = models is List
+          ? models.whereType<JsonMap>().map(CodexModelOption.fromJson).toList()
+          : [];
       final defaults = payload['defaults'];
       if (defaults is JsonMap) {
         defaultPrefs = ComposerPrefs(
@@ -254,9 +271,13 @@ class CodexAppState extends ChangeNotifier {
   Future<void> loadWorkspace([String? path]) async {
     try {
       final shortcuts = await api.getJson('/api/workspace/shortcuts');
-      final selected = path ?? workspacePath.ifEmpty(readString(shortcuts, 'preferredPath'));
+      final selected =
+          path ?? workspacePath.ifEmpty(readString(shortcuts, 'preferredPath'));
       workspacePath = selected;
-      final listing = await api.getJson('/api/workspace/list', query: selected.isEmpty ? const {} : {'path': selected});
+      final listing = await api.getJson(
+        '/api/workspace/list',
+        query: selected.isEmpty ? const {} : {'path': selected},
+      );
       workspaceListing = WorkspaceListing.fromJson(listing);
       workspacePath = workspaceListing?.path ?? selected;
     } catch (error) {
@@ -313,7 +334,10 @@ class CodexAppState extends ChangeNotifier {
     _socket?.send({'type': 'thread_sync', 'threadId': activeSessionId});
   }
 
-  Future<void> createSession({required String name, required String cwd}) async {
+  Future<void> createSession({
+    required String name,
+    required String cwd,
+  }) async {
     final prefs = activePrefs;
     _socket?.send({
       'type': 'tab_create',
@@ -351,31 +375,50 @@ class CodexAppState extends ChangeNotifier {
   void applyPermissionPreset(String preset) {
     final current = activePrefs;
     if (preset == 'read-only') {
-      updatePrefs(current.copyWith(approvalPolicy: 'on-request', sandboxMode: 'read-only'));
+      updatePrefs(
+        current.copyWith(
+          approvalPolicy: 'on-request',
+          sandboxMode: 'read-only',
+        ),
+      );
     } else if (preset == 'full-access') {
-      updatePrefs(current.copyWith(approvalPolicy: 'never', sandboxMode: 'danger-full-access'));
+      updatePrefs(
+        current.copyWith(
+          approvalPolicy: 'never',
+          sandboxMode: 'danger-full-access',
+        ),
+      );
     } else {
-      updatePrefs(current.copyWith(approvalPolicy: 'on-request', sandboxMode: 'workspace-write'));
+      updatePrefs(
+        current.copyWith(
+          approvalPolicy: 'on-request',
+          sandboxMode: 'workspace-write',
+        ),
+      );
     }
   }
 
   Future<void> sendPrompt(String text) async {
     final trimmed = text.trim();
     final pendingAttachments = activeAttachments;
-    if ((trimmed.isEmpty && pendingAttachments.isEmpty) || activeSessionId.isEmpty) {
+    if ((trimmed.isEmpty && pendingAttachments.isEmpty) ||
+        activeSessionId.isEmpty) {
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
     final clientMessageId = 'mobile-$now';
-    _appendEntry(activeSessionId, TimelineEntry(
-      id: 'local-user:$clientMessageId',
-      type: 'message',
-      title: '你',
-      role: 'user',
-      text: trimmed.isEmpty ? '图片' : trimmed,
-      attachments: pendingAttachments,
-      createdAt: now,
-    ));
+    _appendEntry(
+      activeSessionId,
+      TimelineEntry(
+        id: 'local-user:$clientMessageId',
+        type: 'message',
+        title: '你',
+        role: 'user',
+        text: trimmed.isEmpty ? '图片' : trimmed,
+        attachments: pendingAttachments,
+        createdAt: now,
+      ),
+    );
     if (trimmed.startsWith('/') || trimmed.startsWith('!')) {
       _socket?.send({
         'type': 'command_send',
@@ -387,7 +430,9 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final prefs = activePrefs;
-    final attachments = pendingAttachments.map((item) => {'path': item.filePath, 'name': item.name}).toList(growable: false);
+    final attachments = pendingAttachments
+        .map((item) => {'path': item.filePath, 'name': item.name})
+        .toList(growable: false);
     attachmentsByThread[activeSessionId] = [];
     _socket?.send({
       'type': 'turn_send',
@@ -427,7 +472,9 @@ class CodexAppState extends ChangeNotifier {
   }
 
   void removeAttachment(String id) {
-    attachmentsByThread[activeSessionId] = activeAttachments.where((item) => item.id != id).toList(growable: false);
+    attachmentsByThread[activeSessionId] = activeAttachments
+        .where((item) => item.id != id)
+        .toList(growable: false);
     notifyListeners();
   }
 
@@ -437,14 +484,16 @@ class CodexAppState extends ChangeNotifier {
       'requestId': request.requestId,
       'response': response,
     });
-    approvals = approvals.map((item) {
-      if (item.requestId == request.requestId) {
-        final next = JsonMap.from(item.raw);
-        next['status'] = 'submitting';
-        return ServerRequestItem(next);
-      }
-      return item;
-    }).toList(growable: false);
+    approvals = approvals
+        .map((item) {
+          if (item.requestId == request.requestId) {
+            final next = JsonMap.from(item.raw);
+            next['status'] = 'submitting';
+            return ServerRequestItem(next);
+          }
+          return item;
+        })
+        .toList(growable: false);
     notifyListeners();
   }
 
@@ -478,7 +527,9 @@ class CodexAppState extends ChangeNotifier {
         final tab = message['tab'];
         if (tab is JsonMap) {
           _upsertSession(SessionItem.fromJson(tab));
-          selectSession(readString(message, 'threadId', readString(tab, 'threadId')));
+          selectSession(
+            readString(message, 'threadId', readString(tab, 'threadId')),
+          );
         }
         break;
       case 'tab_updated':
@@ -507,16 +558,25 @@ class CodexAppState extends ChangeNotifier {
         }
         break;
       case 'server_request_resolved':
-        approvals = approvals.where((item) => item.requestId != readString(message, 'requestId')).toList(growable: false);
+        approvals = approvals
+            .where((item) => item.requestId != readString(message, 'requestId'))
+            .toList(growable: false);
         break;
       case 'server_request_reset':
         approvals = [];
         break;
       case 'turn_started':
-        _setTurnStarted(readString(message, 'threadId'), readString(message, 'turnId'), readInt(message, 'startedAt'));
+        _setTurnStarted(
+          readString(message, 'threadId'),
+          readString(message, 'turnId'),
+          readInt(message, 'startedAt'),
+        );
         break;
       case 'turn_completed':
-        _setTurnCompleted(readString(message, 'threadId'), readString(message, 'turnId'));
+        _setTurnCompleted(
+          readString(message, 'threadId'),
+          readString(message, 'turnId'),
+        );
         break;
       case 'agent_delta':
         _appendAgentDelta(message);
@@ -576,15 +636,29 @@ class CodexAppState extends ChangeNotifier {
       case 'warning':
       case 'error_notice':
         _pushNotice({
-          'level': type == 'error' || type == 'error_notice' || type == 'backend_error' ? 'error' : 'warning',
-          'title': readString(message, 'noticeKind', type == 'warning' ? '警告' : '错误'),
+          'level':
+              type == 'error' ||
+                  type == 'error_notice' ||
+                  type == 'backend_error'
+              ? 'error'
+              : 'warning',
+          'title': readString(
+            message,
+            'noticeKind',
+            type == 'warning' ? '警告' : '错误',
+          ),
           'message': readString(message, 'message', jsonEncode(message)),
           'threadId': readString(message, 'threadId'),
           'dismissKey': _dismissKeyForMessage(message),
         });
         break;
       case 'backend_error':
-        _appendNoticeEvent(activeSessionId, '后端错误', readString(message, 'message', jsonEncode(message)), 'error');
+        _appendNoticeEvent(
+          activeSessionId,
+          '后端错误',
+          readString(message, 'message', jsonEncode(message)),
+          'error',
+        );
         break;
       case 'error':
         _handleErrorMessage(message);
@@ -606,18 +680,26 @@ class CodexAppState extends ChangeNotifier {
       sessions = [];
       return;
     }
-    sessions = value.whereType<JsonMap>().map(SessionItem.fromJson).where((item) => item.threadId.isNotEmpty).toList(growable: false);
+    sessions = value
+        .whereType<JsonMap>()
+        .map(SessionItem.fromJson)
+        .where((item) => item.threadId.isNotEmpty)
+        .toList(growable: false);
     if (sessions.isEmpty) {
       activeSessionId = '';
       unawaited(bridge.remove('activeSessionId'));
       return;
     }
-    if (activeSessionId.isEmpty || !sessions.any((item) => item.threadId == activeSessionId)) {
+    if (activeSessionId.isEmpty ||
+        !sessions.any((item) => item.threadId == activeSessionId)) {
       activeSessionId = sessions.first.threadId;
       unawaited(bridge.setString('activeSessionId', activeSessionId));
     }
     for (final session in sessions) {
-      prefsByThread.putIfAbsent(session.threadId, () => _prefsFromSession(session) ?? defaultPrefs);
+      prefsByThread.putIfAbsent(
+        session.threadId,
+        () => _prefsFromSession(session) ?? defaultPrefs,
+      );
       if (session.tokenUsage != null) {
         tokenUsageByThread[session.threadId] = session.tokenUsage!;
       }
@@ -626,7 +708,12 @@ class CodexAppState extends ChangeNotifier {
   }
 
   void _replaceApprovals(dynamic value) {
-    approvals = value is List ? value.whereType<JsonMap>().map(ServerRequestItem.new).toList(growable: false) : [];
+    approvals = value is List
+        ? value
+              .whereType<JsonMap>()
+              .map(ServerRequestItem.new)
+              .toList(growable: false)
+        : [];
   }
 
   void _replaceGlobalNotices(dynamic value) {
@@ -641,11 +728,16 @@ class CodexAppState extends ChangeNotifier {
       }
       final kind = readString(item, 'noticeKind', 'info');
       _pushNotice({
-        'level': kind == 'error' ? 'error' : kind == 'warning' ? 'warning' : 'info',
+        'level': kind == 'error'
+            ? 'error'
+            : kind == 'warning'
+            ? 'warning'
+            : 'info',
         'title': kind.isEmpty ? '通知' : kind,
         'message': text,
         'threadId': readString(item, 'threadId'),
-        'dismissKey': 'global-notice:$id:${readString(item, 'threadId')}:$kind:$text',
+        'dismissKey':
+            'global-notice:$id:${readString(item, 'threadId')}:$kind:$text',
       });
     }
   }
@@ -654,14 +746,18 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty) {
       return;
     }
-    sessions = sessions.where((item) => item.threadId != threadId).toList(growable: false);
+    sessions = sessions
+        .where((item) => item.threadId != threadId)
+        .toList(growable: false);
     timelineByThread.remove(threadId);
     attachmentsByThread.remove(threadId);
     tokenUsageByThread.remove(threadId);
     activeTurnStartedAt.remove(threadId);
     prefsByThread.remove(threadId);
     unreadThreadIds.remove(threadId);
-    approvals = approvals.where((item) => item.threadId != threadId).toList(growable: false);
+    approvals = approvals
+        .where((item) => item.threadId != threadId)
+        .toList(growable: false);
     if (activeSessionId == threadId) {
       activeSessionId = sessions.isEmpty ? '' : sessions.first.threadId;
       unawaited(bridge.setString('activeSessionId', activeSessionId));
@@ -680,7 +776,10 @@ class CodexAppState extends ChangeNotifier {
       next.insert(0, session);
     }
     sessions = next;
-    prefsByThread.putIfAbsent(session.threadId, () => _prefsFromSession(session) ?? defaultPrefs);
+    prefsByThread.putIfAbsent(
+      session.threadId,
+      () => _prefsFromSession(session) ?? defaultPrefs,
+    );
     if (session.tokenUsage != null) {
       tokenUsageByThread[session.threadId] = session.tokenUsage!;
     }
@@ -691,7 +790,9 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final next = [...approvals];
-    final index = next.indexWhere((item) => item.requestId == request.requestId);
+    final index = next.indexWhere(
+      (item) => item.requestId == request.requestId,
+    );
     if (index >= 0) {
       next[index] = request;
     } else {
@@ -705,7 +806,7 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty) {
       return;
     }
-    final entries = <TimelineEntry>[
+    var entries = <TimelineEntry>[
       ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
     ];
     final turns = message['turns'];
@@ -728,7 +829,7 @@ class CodexAppState extends ChangeNotifier {
       for (final diff in turnDiffs.whereType<JsonMap>()) {
         final entry = _entryFromTurnDiff(diff);
         if (entry != null) {
-          entries.add(entry);
+          entries = _mergeTurnDiffEntry(entries, entry);
         }
       }
     }
@@ -765,27 +866,31 @@ class CodexAppState extends ChangeNotifier {
     final inputText = _extractTurnUserText(turn);
     final inputAttachments = _attachmentsFromInput(turn['input']);
     if (inputText.isNotEmpty) {
-      threadEntries.add(TimelineEntry(
-        id: 'turn-$turnId-user',
-        type: 'message',
-        title: '你',
-        role: 'user',
-        text: inputText,
-        attachments: inputAttachments,
-        turnId: turnId,
-        createdAt: _normalizeTimestamp(startedAt),
-      ));
+      threadEntries.add(
+        TimelineEntry(
+          id: 'turn-$turnId-user',
+          type: 'message',
+          title: '你',
+          role: 'user',
+          text: inputText,
+          attachments: inputAttachments,
+          turnId: turnId,
+          createdAt: _normalizeTimestamp(startedAt),
+        ),
+      );
     } else if (inputAttachments.isNotEmpty) {
-      threadEntries.add(TimelineEntry(
-        id: 'turn-$turnId-user',
-        type: 'message',
-        title: '你',
-        role: 'user',
-        text: '图片',
-        attachments: inputAttachments,
-        turnId: turnId,
-        createdAt: _normalizeTimestamp(startedAt),
-      ));
+      threadEntries.add(
+        TimelineEntry(
+          id: 'turn-$turnId-user',
+          type: 'message',
+          title: '你',
+          role: 'user',
+          text: '图片',
+          attachments: inputAttachments,
+          turnId: turnId,
+          createdAt: _normalizeTimestamp(startedAt),
+        ),
+      );
     }
     final items = turn['items'];
     if (items is List) {
@@ -794,16 +899,23 @@ class CodexAppState extends ChangeNotifier {
       }
     }
     final outputText = _extractTurnAssistantText(turn);
-    if (outputText.isNotEmpty) {
-      threadEntries.add(TimelineEntry(
-        id: 'turn-$turnId-assistant',
-        type: 'message',
-        title: 'Codex',
-        role: 'assistant',
-        text: outputText,
-        turnId: turnId,
-        createdAt: _normalizeTimestamp(readInt(turn, 'completedAt', startedAt + 1)),
-      ));
+    final hasAssistantMessage = threadEntries.any(
+      (entry) => entry.type == 'message' && entry.role == 'assistant',
+    );
+    if (outputText.isNotEmpty && !hasAssistantMessage) {
+      threadEntries.add(
+        TimelineEntry(
+          id: 'turn-$turnId-assistant',
+          type: 'message',
+          title: 'Codex',
+          role: 'assistant',
+          text: outputText,
+          turnId: turnId,
+          createdAt: _normalizeTimestamp(
+            readInt(turn, 'completedAt', startedAt + 1),
+          ),
+        ),
+      );
     }
     return threadEntries;
   }
@@ -820,11 +932,13 @@ class CodexAppState extends ChangeNotifier {
         final type = readString(item, 'type');
         final role = readString(item, 'role');
         if (type == 'userMessage' || (type == 'message' && role == 'user')) {
-          parts.add(_extractText(item['text'])
-              .ifEmpty(_extractText(item['content']))
-              .ifEmpty(_extractText(item['input']))
-              .ifEmpty(_extractText(item['message']))
-              .ifEmpty(_extractText(item['parts'])));
+          parts.add(
+            _extractText(item['text'])
+                .ifEmpty(_extractText(item['content']))
+                .ifEmpty(_extractText(item['input']))
+                .ifEmpty(_extractText(item['message']))
+                .ifEmpty(_extractText(item['parts'])),
+          );
         }
       }
       final joined = parts.where((item) => item.trim().isNotEmpty).join('\n');
@@ -849,8 +963,11 @@ class CodexAppState extends ChangeNotifier {
       for (final item in items.whereType<JsonMap>()) {
         final type = readString(item, 'type');
         final role = readString(item, 'role');
-        if (type == 'agentMessage' || (type == 'message' && role == 'assistant')) {
-          final text = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['output']));
+        if (type == 'agentMessage' ||
+            (type == 'message' && role == 'assistant')) {
+          final text = _extractText(item['text'])
+              .ifEmpty(_extractText(item['content']))
+              .ifEmpty(_extractText(item['output']));
           if (text.isNotEmpty) {
             return text;
           }
@@ -865,7 +982,9 @@ class CodexAppState extends ChangeNotifier {
       return const [];
     }
     if (value is List) {
-      return _dedupeAttachments(value.expand(_attachmentsFromInput).toList(growable: false));
+      return _dedupeAttachments(
+        value.expand(_attachmentsFromInput).toList(growable: false),
+      );
     }
     if (value is! JsonMap) {
       return const [];
@@ -881,12 +1000,21 @@ class CodexAppState extends ChangeNotifier {
       ..._attachmentsFromInput(value['input']),
       ..._attachmentsFromInput(value['message']),
     ];
-    if (type == 'localImage' || type == 'image' || type == 'input_image' || (path.isNotEmpty && _looksLikeImagePath(path))) {
+    if (type == 'localImage' ||
+        type == 'image' ||
+        type == 'input_image' ||
+        (path.isNotEmpty && _looksLikeImagePath(path))) {
       return _dedupeAttachments([
         AttachmentItem(
-          id: path.isEmpty ? 'image-${DateTime.now().microsecondsSinceEpoch}' : path,
+          id: path.isEmpty
+              ? 'image-${DateTime.now().microsecondsSinceEpoch}'
+              : path,
           name: _basename(path).ifEmpty('image'),
-          contentType: readString(value, 'contentType', readString(value, 'mimeType', 'image/*')),
+          contentType: readString(
+            value,
+            'contentType',
+            readString(value, 'mimeType', 'image/*'),
+          ),
           filePath: path,
           url: readString(value, 'url'),
         ),
@@ -899,7 +1027,10 @@ class CodexAppState extends ChangeNotifier {
   List<AttachmentItem> _dedupeAttachments(List<AttachmentItem> items) {
     final byId = <String, AttachmentItem>{};
     for (final item in items) {
-      final key = item.id.ifEmpty(item.filePath).ifEmpty(item.url).ifEmpty(item.name);
+      final key = item.id
+          .ifEmpty(item.filePath)
+          .ifEmpty(item.url)
+          .ifEmpty(item.name);
       if (key.isNotEmpty) {
         byId[key] = item;
       }
@@ -909,7 +1040,12 @@ class CodexAppState extends ChangeNotifier {
 
   bool _looksLikeImagePath(String path) {
     final lower = path.toLowerCase();
-    return lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif') || lower.endsWith('.bmp');
+    return lower.endsWith('.png') ||
+        lower.endsWith('.jpg') ||
+        lower.endsWith('.jpeg') ||
+        lower.endsWith('.webp') ||
+        lower.endsWith('.gif') ||
+        lower.endsWith('.bmp');
   }
 
   String _basename(String path) {
@@ -917,17 +1053,29 @@ class CodexAppState extends ChangeNotifier {
     if (normalized.isEmpty) {
       return '';
     }
-    final parts = normalized.split(RegExp(r'[\\/]')).where((item) => item.isNotEmpty).toList(growable: false);
+    final parts = normalized
+        .split(RegExp(r'[\\/]'))
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
     return parts.isEmpty ? normalized : parts.last;
   }
 
   TimelineEntry _entryFromItem(JsonMap item, String turnId, int fallbackTime) {
     final type = readString(item, 'type');
-    final id = readString(item, 'id', 'item-$turnId-${timelineByThread.length}-${Random().nextInt(99999)}');
+    final id = readString(
+      item,
+      'id',
+      'item-$turnId-${timelineByThread.length}-${Random().nextInt(99999)}',
+    );
     final status = readString(item, 'status', 'completed');
     final title = _itemTitle(type, item);
     final text = _itemText(item);
-    final patch = readString(item, 'patch').ifEmpty(readString(item, 'diff')).ifEmpty(readString(item, 'output'));
+    final timelineType = _timelineTypeForItem(type);
+    final patchSource = readString(
+      item,
+      'patch',
+    ).ifEmpty(readString(item, 'diff')).ifEmpty(readString(item, 'output'));
+    final patch = timelineType == 'command' ? '' : patchSource;
     final attachments = [
       ..._attachmentsFromInput(item['content']),
       ..._attachmentsFromInput(item['input']),
@@ -935,7 +1083,7 @@ class CodexAppState extends ChangeNotifier {
     ];
     return TimelineEntry(
       id: id,
-      type: _timelineTypeForItem(type),
+      type: timelineType,
       title: title,
       role: _roleForItem(type, item),
       text: text,
@@ -946,7 +1094,10 @@ class CodexAppState extends ChangeNotifier {
       patch: patch,
       changes: readMapList(item, 'changes'),
       attachments: _dedupeAttachments(attachments),
-      createdAt: _normalizeTimestamp(readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime))),
+      createdAt: _normalizeTimestamp(
+        readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime)),
+      ),
+      details: item,
       raw: item,
     );
   }
@@ -954,15 +1105,22 @@ class CodexAppState extends ChangeNotifier {
   TimelineEntry _entryFromEvent(JsonMap event) {
     final type = readString(event, 'type');
     if (type == 'agent_delta') {
-      final itemId = readString(event, 'itemId', readString(event, 'turnId', 'assistant'));
+      final itemId = readString(
+        event,
+        'itemId',
+        readString(event, 'turnId', 'assistant'),
+      );
+      final entryId = itemId.ifEmpty(
+        '${readString(event, 'threadId')}:${readString(event, 'turnId', 'turn')}:assistant',
+      );
       return TimelineEntry(
-        id: 'agent-$itemId',
+        id: entryId,
         type: 'message',
         title: 'Codex',
         role: 'assistant',
         text: readString(event, 'delta'),
         turnId: readString(event, 'turnId'),
-        itemId: itemId,
+        itemId: itemId.ifEmpty(entryId),
         createdAt: _eventTime(event),
         partial: true,
         raw: event,
@@ -977,7 +1135,11 @@ class CodexAppState extends ChangeNotifier {
     if (type == 'item_started' || type == 'item_completed') {
       final item = event['item'];
       if (item is JsonMap) {
-        return _entryFromItem(item, readString(event, 'turnId'), _eventTime(event));
+        return _entryFromItem(
+          item,
+          readString(event, 'turnId'),
+          _eventTime(event),
+        );
       }
     }
     if (type == 'warning' || type == 'error_notice') {
@@ -1010,6 +1172,7 @@ class CodexAppState extends ChangeNotifier {
       patch: readString(event, 'patch'),
       changes: readMapList(event, 'changes'),
       createdAt: _eventTime(event),
+      details: event,
       raw: event,
     );
   }
@@ -1028,8 +1191,15 @@ class CodexAppState extends ChangeNotifier {
       text: readString(planEntry, 'explanation'),
       status: 'completed',
       turnId: turnId,
-      meta: plan.whereType<JsonMap>().map(_formatPlanStep).where((item) => item.isNotEmpty).toList(growable: false),
-      createdAt: _normalizeTimestamp(readInt(planEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch)),
+      meta: plan
+          .whereType<JsonMap>()
+          .map(_formatPlanStep)
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false),
+      createdAt: _normalizeTimestamp(
+        readInt(planEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch),
+      ),
+      details: planEntry,
       raw: planEntry,
     );
   }
@@ -1049,9 +1219,41 @@ class CodexAppState extends ChangeNotifier {
       status: 'completed',
       turnId: turnId,
       patch: diff,
-      createdAt: _normalizeTimestamp(readInt(diffEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch)),
+      createdAt: _normalizeTimestamp(
+        readInt(diffEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch),
+      ),
+      details: diffEntry,
       raw: diffEntry,
     );
+  }
+
+  List<TimelineEntry> _mergeTurnDiffEntry(
+    List<TimelineEntry> entries,
+    TimelineEntry diffEntry,
+  ) {
+    if (diffEntry.turnId.isEmpty || diffEntry.patch.trim().isEmpty) {
+      return _dedupeEntries(entries);
+    }
+    final next = entries
+        .where(
+          (entry) =>
+              !(entry.turnId == diffEntry.turnId && entry.type == 'turn_diff'),
+        )
+        .toList(growable: true);
+    final fileIndex = next.indexWhere(
+      (entry) =>
+          entry.turnId == diffEntry.turnId && entry.type == 'file_change',
+    );
+    if (fileIndex < 0) {
+      next.add(diffEntry);
+      return _dedupeEntries(next);
+    }
+    final fileEntry = next[fileIndex];
+    next[fileIndex] = fileEntry.copyWith(
+      patch: diffEntry.patch,
+      details: {..._entryDetails(fileEntry), 'patch': diffEntry.patch},
+    );
+    return _dedupeEntries(next);
   }
 
   TimelineEntry? _entryFromSupplemental(JsonMap item) {
@@ -1062,7 +1264,15 @@ class CodexAppState extends ChangeNotifier {
     }
     final turnId = readString(item, '_turnId');
     final createdAt = _normalizeTimestamp(
-      readInt(item, 'completedAt', readInt(item, 'startedAt', readInt(item, 'createdAt', readInt(item, 'updatedAt')))),
+      readInt(
+        item,
+        'completedAt',
+        readInt(
+          item,
+          'startedAt',
+          readInt(item, 'createdAt', readInt(item, 'updatedAt')),
+        ),
+      ),
     );
     if (type == 'hookEvent') {
       final run = readMap(item, 'run');
@@ -1071,13 +1281,19 @@ class CodexAppState extends ChangeNotifier {
         type: 'hook',
         title: 'Hook',
         role: 'system',
-        text: readString(run, 'command').ifEmpty('Hook ${readString(item, 'phase', 'event')}'),
+        text: readString(
+          run,
+          'command',
+        ).ifEmpty('Hook ${readString(item, 'phase', 'event')}'),
         status: readString(item, 'status', 'completed'),
         turnId: turnId,
         itemId: id,
         meta: [
           readString(item, 'phase'),
-          readInt(run, 'exitCode', -999999) == -999999 ? '' : '退出码 ${readInt(run, 'exitCode')}',
+          readInt(run, 'exitCode', -999999) == -999999 ||
+                  readInt(run, 'exitCode') == 0
+              ? ''
+              : '退出码 ${readInt(run, 'exitCode')}',
         ].where((entry) => entry.isNotEmpty).toList(growable: false),
         createdAt: createdAt,
         raw: item,
@@ -1089,17 +1305,25 @@ class CodexAppState extends ChangeNotifier {
         type: 'guardian_review',
         title: 'Guardian 审查',
         role: 'system',
-        text: _summarizeMap(readMap(item, 'review')).ifEmpty(_summarizeMap(readMap(item, 'action'))).ifEmpty('Guardian 审查'),
+        text: _summarizeMap(readMap(item, 'review'))
+            .ifEmpty(_summarizeMap(readMap(item, 'action')))
+            .ifEmpty('Guardian 审查'),
         status: readString(item, 'status', 'completed'),
         turnId: turnId,
         itemId: id,
-        meta: [readString(item, 'phase'), readString(item, 'decisionSource')].where((entry) => entry.isNotEmpty).toList(growable: false),
+        meta: [
+          readString(item, 'phase'),
+          readString(item, 'decisionSource'),
+        ].where((entry) => entry.isNotEmpty).toList(growable: false),
         createdAt: createdAt,
         raw: item,
       );
     }
     if (type == 'pendingUserMessage') {
-      final text = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['input'])).ifEmpty(_extractText(item['message']));
+      final text = _extractText(item['text'])
+          .ifEmpty(_extractText(item['content']))
+          .ifEmpty(_extractText(item['input']))
+          .ifEmpty(_extractText(item['message']));
       if (text.isEmpty) {
         return null;
       }
@@ -1177,12 +1401,24 @@ class CodexAppState extends ChangeNotifier {
     if (type == 'commandExecution') {
       values.add(readString(item, 'cwd'));
       final exitCode = item['exitCode'];
-      if (exitCode is num) {
+      if (exitCode is num && exitCode.round() != 0) {
         values.add('退出码 ${exitCode.round()}');
+      }
+      final output = readString(
+        item,
+        'output',
+      ).ifEmpty(readString(item, 'aggregatedOutput'));
+      if (output.isNotEmpty) {
+        values.add('输出 ${output.length} 字符');
       }
     } else if (type == 'mcpToolCall') {
       values.add(readString(item, 'server'));
-      values.addAll(readMapList(item, 'progressMessages').map((entry) => _summarizeMap(entry)));
+      values.addAll(
+        readMapList(
+          item,
+          'progressMessages',
+        ).map((entry) => _summarizeMap(entry)),
+      );
     } else if (type == 'collabAgentToolCall') {
       final receivers = item['receiverThreadIds'];
       if (receivers is List && receivers.isNotEmpty) {
@@ -1195,14 +1431,18 @@ class CodexAppState extends ChangeNotifier {
     } else if (type == 'imageGeneration') {
       values.add(readString(item, 'revisedPrompt'));
     }
-    return values.where((entry) => entry.trim().isNotEmpty).toList(growable: false);
+    return values
+        .where((entry) => entry.trim().isNotEmpty)
+        .toList(growable: false);
   }
 
   bool _shouldDisplayThreadEvent(String method) {
     if (method.isEmpty) {
       return false;
     }
-    if (method == 'account/rateLimits/updated' || method == 'skills/changed' || method == 'thread/settings/updated') {
+    if (method == 'account/rateLimits/updated' ||
+        method == 'skills/changed' ||
+        method == 'thread/settings/updated') {
       return false;
     }
     return true;
@@ -1227,9 +1467,48 @@ class CodexAppState extends ChangeNotifier {
     if (direct != null) {
       return direct;
     }
-    final parts = method.split('/').where((part) => part.isNotEmpty).toList(growable: false);
+    final parts = method
+        .split('/')
+        .where((part) => part.isNotEmpty)
+        .toList(growable: false);
     final tail = parts.isEmpty ? method : parts.last;
-    return tail.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (match) => '${match[1]} ${match[2]}');
+    return tail.replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (match) => '${match[1]} ${match[2]}',
+    );
+  }
+
+  JsonMap _entryDetails(TimelineEntry? entry) {
+    final details = entry?.details ?? entry?.raw;
+    return details == null ? <String, dynamic>{} : JsonMap.from(details);
+  }
+
+  String _entryOutput(JsonMap details) {
+    return readString(
+      details,
+      'output',
+    ).ifEmpty(readString(details, 'aggregatedOutput'));
+  }
+
+  JsonMap _detailsWithOutput(JsonMap details, String output) {
+    return {
+      ...details,
+      if (output.isNotEmpty) 'output': output,
+      if (output.isNotEmpty) 'aggregatedOutput': output,
+    };
+  }
+
+  List<String> _cleanProcessMeta(Iterable<String> values) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final value in values) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || trimmed == '退出码 0' || !seen.add(trimmed)) {
+        continue;
+      }
+      result.add(trimmed);
+    }
+    return result;
   }
 
   void _setTurnStarted(String threadId, String turnId, int startedAt) {
@@ -1245,15 +1524,25 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     activeTurnStartedAt.remove(threadId);
-    final entries = [...(timelineByThread[threadId] ?? const <TimelineEntry>[])];
+    final entries = [
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
     var changed = false;
     for (var index = 0; index < entries.length; index += 1) {
       final entry = entries[index];
       if (turnId.isNotEmpty && entry.turnId != turnId) {
         continue;
       }
-      if (entry.partial || entry.status == 'running' || entry.status == 'in_progress' || entry.status == 'inProgress') {
-        entries[index] = entry.copyWith(partial: false, status: entry.status.isEmpty || entry.status == 'running' ? 'completed' : entry.status);
+      if (entry.partial ||
+          entry.status == 'running' ||
+          entry.status == 'in_progress' ||
+          entry.status == 'inProgress') {
+        entries[index] = entry.copyWith(
+          partial: false,
+          status: entry.status.isEmpty || entry.status == 'running'
+              ? 'completed'
+              : entry.status,
+        );
         changed = true;
       }
     }
@@ -1268,8 +1557,12 @@ class CodexAppState extends ChangeNotifier {
     }
     for (final rawTurn in turns.reversed.whereType<JsonMap>()) {
       final status = readString(rawTurn, 'status');
-      if (status == 'in_progress' || status == 'inProgress' || status == 'running') {
-        activeTurnStartedAt[threadId] = _normalizeTimestamp(readInt(rawTurn, 'startedAt'));
+      if (status == 'in_progress' ||
+          status == 'inProgress' ||
+          status == 'running') {
+        activeTurnStartedAt[threadId] = _normalizeTimestamp(
+          readInt(rawTurn, 'startedAt'),
+        );
         _startWorkingTimer();
         return;
       }
@@ -1279,29 +1572,64 @@ class CodexAppState extends ChangeNotifier {
 
   void _appendAgentDelta(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    final itemId = readString(event, 'itemId', readString(event, 'turnId', 'assistant'));
+    final rawItemId = readString(event, 'itemId');
+    final turnId = readString(event, 'turnId');
+    final entryId = rawItemId.ifEmpty(
+      '$threadId:${turnId.ifEmpty('turn')}:assistant',
+    );
+    final itemId = rawItemId.ifEmpty(entryId);
     final delta = readString(event, 'delta');
     if (threadId.isEmpty || delta.isEmpty) {
       return;
     }
-    final entries = [...(timelineByThread[threadId] ?? const <TimelineEntry>[])];
-    final index = entries.indexWhere((entry) => entry.id == 'agent-$itemId' || (entry.type == 'message' && entry.itemId == itemId && entry.title == 'Codex'));
+    final entries = [
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
+    final index = entries.indexWhere(
+      (entry) =>
+          entry.id == entryId ||
+          (rawItemId.isNotEmpty && entry.id == 'agent-$rawItemId') ||
+          (entry.type == 'message' &&
+              entry.itemId == itemId &&
+              entry.role == 'assistant'),
+    );
     if (index >= 0) {
-      entries[index] = entries[index].copyWith(text: entries[index].text + delta, partial: true);
-    } else {
-      entries.add(TimelineEntry(
-        id: 'agent-$itemId',
+      final current = entries[index];
+      entries[index] = TimelineEntry(
+        id: entryId,
         type: 'message',
         title: 'Codex',
         role: 'assistant',
-        text: delta,
-        turnId: readString(event, 'turnId'),
+        text: current.text + delta,
+        status: current.status,
+        turnId: current.turnId.ifEmpty(turnId),
         itemId: itemId,
-        createdAt: _eventTime(event),
+        meta: current.meta,
+        patch: current.patch,
+        changes: current.changes,
+        attachments: current.attachments,
+        createdAt: current.createdAt,
         partial: true,
-      ));
+        details: current.details,
+        raw: current.raw,
+      );
+    } else {
+      entries.add(
+        TimelineEntry(
+          id: entryId,
+          type: 'message',
+          title: 'Codex',
+          role: 'assistant',
+          text: delta,
+          turnId: turnId,
+          itemId: itemId,
+          createdAt: _eventTime(event),
+          partial: true,
+          raw: event,
+        ),
+      );
     }
-    timelineByThread[threadId] = entries;
+    timelineByThread[threadId] = _dedupeEntries(entries);
   }
 
   void _appendPlan(JsonMap event) {
@@ -1314,37 +1642,53 @@ class CodexAppState extends ChangeNotifier {
 
   void _appendPlanDelta(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:plan-live');
+    final itemId = readString(
+      event,
+      'itemId',
+      '${readString(event, 'turnId', 'turn')}:plan-live',
+    );
     final id = 'plan:$itemId';
     final current = _findEntry(threadId, id);
-    _appendEntry(threadId, TimelineEntry(
-      id: id,
-      type: 'plan',
-      title: '计划草稿',
-      role: 'assistant',
-      text: '${current?.text ?? ''}${readString(event, 'delta')}',
-      status: 'running',
-      turnId: readString(event, 'turnId'),
-      itemId: itemId,
-      meta: const ['流式输出中'],
-      createdAt: current?.createdAt ?? _eventTime(event),
-      partial: true,
-      raw: event,
-    ));
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: id,
+        type: 'plan',
+        title: '计划草稿',
+        role: 'assistant',
+        text: '${current?.text ?? ''}${readString(event, 'delta')}',
+        status: 'running',
+        turnId: readString(event, 'turnId'),
+        itemId: itemId,
+        meta: const ['流式输出中'],
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        raw: event,
+      ),
+    );
   }
 
   void _appendTurnDiff(JsonMap event) {
     final threadId = readString(event, 'threadId');
     final entry = _entryFromTurnDiff(event);
     if (entry != null) {
-      _appendEntry(threadId, entry);
+      timelineByThread[threadId] = _mergeTurnDiffEntry([
+        ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+      ], entry);
     }
   }
 
   void _appendItemStarted(JsonMap event) {
     final item = event['item'];
     if (item is JsonMap) {
-      _appendEntry(readString(event, 'threadId'), _entryFromItem(item, readString(event, 'turnId'), _eventTime(event)).copyWith(partial: true));
+      _appendEntry(
+        readString(event, 'threadId'),
+        _entryFromItem(
+          item,
+          readString(event, 'turnId'),
+          _eventTime(event),
+        ).copyWith(partial: true),
+      );
     }
   }
 
@@ -1355,228 +1699,391 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final itemType = readString(item, 'type');
-    final itemId = readString(item, 'id', readString(event, 'itemId', readString(event, 'turnId', 'assistant')));
-    if (itemType == 'agentMessage' || (itemType == 'message' && readString(item, 'role') == 'assistant')) {
-      final finalText = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['output']));
-      final existing = _findEntry(threadId, 'agent-$itemId') ?? _findEntryByItem(threadId, itemId);
-      final text = finalText.trim().isNotEmpty ? finalText : existing?.text ?? '';
+    final itemId = readString(
+      item,
+      'id',
+      readString(event, 'itemId', readString(event, 'turnId', 'assistant')),
+    );
+    if (itemType == 'agentMessage' ||
+        (itemType == 'message' && readString(item, 'role') == 'assistant')) {
+      final finalText = _extractText(item['text'])
+          .ifEmpty(_extractText(item['content']))
+          .ifEmpty(_extractText(item['output']));
+      final entryId = itemId.ifEmpty(
+        '${threadId}:${readString(event, 'turnId', 'turn')}:assistant',
+      );
+      final existing =
+          _findEntry(threadId, entryId) ??
+          _findEntry(threadId, 'agent-$itemId') ??
+          _findEntryByItem(threadId, itemId);
+      final text = finalText.trim().isNotEmpty
+          ? finalText
+          : existing?.text ?? '';
       if (text.trim().isNotEmpty) {
-        _appendEntry(threadId, TimelineEntry(
-          id: existing?.id ?? 'agent-$itemId',
-          type: 'message',
-          title: 'Codex',
-          role: 'assistant',
-          text: text,
-          status: 'completed',
-          turnId: readString(event, 'turnId'),
-          itemId: itemId,
-          createdAt: existing?.createdAt ?? _eventTime(event),
-          raw: item,
-        ));
+        if (existing != null && existing.id != entryId) {
+          _removeEntry(threadId, existing.id);
+        }
+        _appendEntry(
+          threadId,
+          TimelineEntry(
+            id: entryId,
+            type: 'message',
+            title: 'Codex',
+            role: 'assistant',
+            text: text,
+            status: 'completed',
+            turnId: readString(event, 'turnId'),
+            itemId: itemId.ifEmpty(entryId),
+            createdAt: existing?.createdAt ?? _eventTime(event),
+            details: item,
+            raw: item,
+          ),
+        );
       }
       return;
     }
-    _appendEntry(threadId, _entryFromItem(item, readString(event, 'turnId'), _eventTime(event)).copyWith(partial: false));
+    _appendEntry(
+      threadId,
+      _entryFromItem(
+        item,
+        readString(event, 'turnId'),
+        _eventTime(event),
+      ).copyWith(partial: false),
+    );
   }
 
   void _appendItemDelta(JsonMap event) {
     final method = readString(event, 'method');
     final threadId = readString(event, 'threadId');
-    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:$method');
-    final id = 'delta:$itemId:$method';
-    final current = _findEntry(threadId, id);
-    final delta = readString(event, 'delta').ifEmpty(_extractText(event['part']));
+    final turnId = readString(event, 'turnId');
+    final rawItemId = readString(event, 'itemId');
+    final id = rawItemId.ifEmpty(
+      '$threadId:${turnId.ifEmpty('turn')}:${method.ifEmpty('item_delta')}',
+    );
+    final itemId = rawItemId.ifEmpty(id);
+    final current =
+        _findEntry(threadId, id) ?? _findEntryByItem(threadId, itemId);
+    final delta = readString(
+      event,
+      'delta',
+    ).ifEmpty(_extractText(event['part']));
 
-    if (method == 'item/reasoning/summaryTextDelta' || method == 'item/reasoning/summaryPartAdded' || method == 'item/reasoning/textDelta') {
-      _appendEntry(threadId, TimelineEntry(
-        id: id,
-        type: 'reasoning',
-        title: '推理',
-        role: 'assistant',
-        text: '${current?.text ?? ''}$delta',
-        status: 'running',
-        turnId: readString(event, 'turnId'),
-        itemId: itemId,
-        meta: const ['流式输出中'],
-        createdAt: current?.createdAt ?? _eventTime(event),
-        partial: true,
-        raw: event,
-      ));
+    if (method == 'item/reasoning/summaryTextDelta' ||
+        method == 'item/reasoning/summaryPartAdded' ||
+        method == 'item/reasoning/textDelta') {
+      _appendEntry(
+        threadId,
+        TimelineEntry(
+          id: id,
+          type: 'reasoning',
+          title: '推理',
+          role: 'assistant',
+          text: '${current?.text ?? ''}$delta',
+          status: 'running',
+          turnId: turnId,
+          itemId: itemId,
+          meta: const ['流式输出中'],
+          createdAt: current?.createdAt ?? _eventTime(event),
+          partial: true,
+          details: _entryDetails(current)
+            ..addAll({'method': method, 'delta': delta}),
+          raw: event,
+        ),
+      );
       return;
     }
 
     if (method == 'item/commandExecution/outputDelta') {
-      _appendEntry(threadId, TimelineEntry(
-        id: id,
-        type: 'command',
-        title: current?.title ?? '命令',
-        role: 'system',
-        text: current?.text ?? '执行命令',
-        status: 'running',
-        turnId: readString(event, 'turnId'),
-        itemId: itemId,
-        meta: [...(current?.meta ?? const <String>[]), delta].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(8),
-        createdAt: current?.createdAt ?? _eventTime(event),
-        partial: true,
-        raw: event,
-      ));
+      final details = _entryDetails(current);
+      final nextOutput = '${_entryOutput(details)}$delta';
+      final nextDetails = _detailsWithOutput(details, nextOutput);
+      _appendEntry(
+        threadId,
+        TimelineEntry(
+          id: id,
+          type: 'command',
+          title: current?.title ?? '命令',
+          role: 'system',
+          text:
+              current?.text ??
+              readString(
+                nextDetails,
+                'command',
+              ).ifEmpty(readString(nextDetails, 'input')).ifEmpty('执行命令'),
+          status: 'running',
+          turnId: turnId,
+          itemId: itemId,
+          meta: _cleanProcessMeta([
+            ...(current?.meta ?? const <String>[]),
+            if (nextOutput.isNotEmpty) '输出 ${nextOutput.length} 字符',
+          ]).takeLast(8),
+          createdAt: current?.createdAt ?? _eventTime(event),
+          partial: true,
+          details: nextDetails,
+          raw: event,
+        ),
+      );
       return;
     }
 
-    if (method == 'item/fileChange/outputDelta' || method == 'item/fileChange/patchUpdated') {
-      final nextPatch = readString(event, 'patch').ifEmpty(method == 'item/fileChange/outputDelta' ? '${current?.patch ?? ''}$delta' : current?.patch ?? '');
-      _appendEntry(threadId, TimelineEntry(
-        id: id,
-        type: 'file_change',
-        title: current?.title ?? '文件变更',
-        role: 'system',
-        text: current?.text ?? '文件变更处理中',
-        status: 'running',
-        turnId: readString(event, 'turnId'),
-        itemId: itemId,
-        patch: nextPatch,
-        changes: readMapList(event, 'changes').isNotEmpty ? readMapList(event, 'changes') : current?.changes ?? const [],
-        meta: [...(current?.meta ?? const <String>[]), delta].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(8),
-        createdAt: current?.createdAt ?? _eventTime(event),
-        partial: true,
-        raw: event,
-      ));
+    if (method == 'item/fileChange/outputDelta' ||
+        method == 'item/fileChange/patchUpdated') {
+      final details = _entryDetails(current);
+      final nextOutput = method == 'item/fileChange/outputDelta'
+          ? '${_entryOutput(details)}$delta'
+          : _entryOutput(details);
+      final nextPatch = readString(event, 'patch').ifEmpty(
+        nextOutput.trim().isNotEmpty ? nextOutput : current?.patch ?? '',
+      );
+      final nextDetails = _detailsWithOutput(details, nextOutput);
+      _appendEntry(
+        threadId,
+        TimelineEntry(
+          id: id,
+          type: 'file_change',
+          title: current?.title ?? '文件变更',
+          role: 'system',
+          text: current?.text ?? '文件变更处理中',
+          status: 'running',
+          turnId: turnId,
+          itemId: itemId,
+          patch: nextPatch,
+          changes: readMapList(event, 'changes').isNotEmpty
+              ? readMapList(event, 'changes')
+              : current?.changes ?? const [],
+          meta: _cleanProcessMeta(
+            current?.meta ?? const <String>[],
+          ).takeLast(8),
+          createdAt: current?.createdAt ?? _eventTime(event),
+          partial: true,
+          details: nextDetails,
+          raw: event,
+        ),
+      );
       return;
     }
 
-    _appendEntry(threadId, TimelineEntry(
-      id: id,
-      type: 'item_delta',
-      title: _formatMethodLabel(method.ifEmpty('item_delta')),
-      role: 'system',
-      text: delta.ifEmpty(readString(event, 'patch')).ifEmpty(_summarizeMap(event)),
-      status: 'running',
-      turnId: readString(event, 'turnId'),
-      itemId: itemId,
-      patch: readString(event, 'patch'),
-      changes: readMapList(event, 'changes'),
-      meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
-      createdAt: current?.createdAt ?? _eventTime(event),
-      partial: true,
-      raw: event,
-    ));
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: id,
+        type: 'item_delta',
+        title: _formatMethodLabel(method.ifEmpty('item_delta')),
+        role: 'system',
+        text: delta
+            .ifEmpty(readString(event, 'patch'))
+            .ifEmpty(_summarizeMap(event)),
+        status: 'running',
+        turnId: turnId,
+        itemId: itemId,
+        patch: readString(event, 'patch'),
+        changes: readMapList(event, 'changes'),
+        meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        details: {
+          'method': method,
+          'delta': delta,
+          if (event['part'] != null) 'part': event['part'],
+          if (event['changes'] != null) 'changes': event['changes'],
+          if (readString(event, 'patch').isNotEmpty)
+            'patch': readString(event, 'patch'),
+        },
+        raw: event,
+      ),
+    );
   }
 
   void _appendThreadEvent(JsonMap event) {
     final threadId = readString(event, 'threadId');
     final method = readString(event, 'method');
-    final id = readString(event, 'itemId', '$threadId:${readString(event, 'turnId', 'thread')}:$method');
+    final id = readString(
+      event,
+      'itemId',
+      '$threadId:${readString(event, 'turnId', 'thread')}:$method',
+    );
     final current = _findEntry(threadId, id);
-    final params = event['params'] is JsonMap ? event['params'] as JsonMap : const <String, dynamic>{};
-    final streaming = method == 'process/outputDelta' || method == 'command/exec/outputDelta' || method == 'thread/realtime/transcript/delta';
-    final delta = readString(event, 'delta').ifEmpty(readString(event, 'message')).ifEmpty(_extractText(params['text'])).ifEmpty(_summarizeMap(params));
-    _appendEntry(threadId, TimelineEntry(
-      id: id,
-      type: 'thread_event',
-      title: _formatMethodLabel(method),
-      role: 'system',
-      text: streaming ? '${current?.text ?? ''}$delta' : delta,
-      status: readString(event, 'status', streaming ? 'running' : 'completed'),
-      turnId: readString(event, 'turnId'),
-      itemId: readString(event, 'itemId'),
-      meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
-      createdAt: current?.createdAt ?? _eventTime(event),
-      partial: streaming,
-      raw: event,
-    ));
+    final params = event['params'] is JsonMap
+        ? event['params'] as JsonMap
+        : const <String, dynamic>{};
+    final streaming =
+        method == 'process/outputDelta' ||
+        method == 'command/exec/outputDelta' ||
+        method == 'thread/realtime/transcript/delta';
+    final delta = readString(event, 'delta')
+        .ifEmpty(readString(event, 'message'))
+        .ifEmpty(_extractText(params['text']))
+        .ifEmpty(_summarizeMap(params));
+    final currentDetails = _entryDetails(current);
+    final nextText = streaming ? '${current?.text ?? ''}$delta' : delta;
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: id,
+        type: 'thread_event',
+        title: _formatMethodLabel(method),
+        role: 'system',
+        text: nextText,
+        status: readString(
+          event,
+          'status',
+          streaming ? 'running' : 'completed',
+        ),
+        turnId: readString(event, 'turnId'),
+        itemId: readString(event, 'itemId'),
+        meta: [method].where((item) => item.isNotEmpty).toList(growable: false),
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: streaming,
+        details: {
+          ...currentDetails,
+          ...params,
+          if (streaming && nextText.isNotEmpty) 'output': nextText,
+          if (streaming && nextText.isNotEmpty) 'aggregatedOutput': nextText,
+        },
+        raw: event,
+      ),
+    );
   }
 
   void _appendHookEvent(JsonMap event) {
     final threadId = readString(event, 'threadId');
     final run = readMap(event, 'run');
-    final id = readString(run, 'id', '$threadId:${readString(event, 'turnId', 'turn')}:${readString(event, 'type')}');
-    _appendEntry(threadId, TimelineEntry(
-      id: id,
-      type: 'hook',
-      title: 'Hook',
-      role: 'system',
-      text: readString(run, 'command').ifEmpty(readString(event, 'type') == 'hook_started' ? 'Hook 开始' : 'Hook 完成'),
-      status: readString(run, 'status', readString(event, 'type') == 'hook_started' ? 'running' : 'completed'),
-      turnId: readString(event, 'turnId'),
-      itemId: id,
-      meta: [
-        readString(event, 'type') == 'hook_started' ? 'started' : 'completed',
-        run['exitCode'] is num ? '退出码 ${(run['exitCode'] as num).round()}' : '',
-      ].where((item) => item.isNotEmpty).toList(growable: false),
-      createdAt: _eventTime(event),
-      raw: event,
-    ));
+    final id = readString(
+      run,
+      'id',
+      '$threadId:${readString(event, 'turnId', 'turn')}:${readString(event, 'type')}',
+    );
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: id,
+        type: 'hook',
+        title: 'Hook',
+        role: 'system',
+        text: readString(run, 'command').ifEmpty(
+          readString(event, 'type') == 'hook_started' ? 'Hook 开始' : 'Hook 完成',
+        ),
+        status: readString(
+          run,
+          'status',
+          readString(event, 'type') == 'hook_started' ? 'running' : 'completed',
+        ),
+        turnId: readString(event, 'turnId'),
+        itemId: id,
+        meta: [
+          readString(event, 'type') == 'hook_started' ? 'started' : 'completed',
+          run['exitCode'] is num && (run['exitCode'] as num).round() != 0
+              ? '退出码 ${(run['exitCode'] as num).round()}'
+              : '',
+        ].where((item) => item.isNotEmpty).toList(growable: false),
+        createdAt: _eventTime(event),
+        details: run,
+        raw: event,
+      ),
+    );
   }
 
   void _appendGuardianEvent(JsonMap event) {
     final type = readString(event, 'type');
-    _appendEntry(readString(event, 'threadId'), TimelineEntry(
-      id: '${readString(event, 'threadId')}:${readString(event, 'turnId', 'turn')}:$type',
-      type: 'guardian_review',
-      title: 'Guardian 审查',
-      role: 'system',
-      text: type == 'guardian_review_started' ? '审查开始' : '审查完成',
-      status: type == 'guardian_review_started' ? 'running' : 'completed',
-      turnId: readString(event, 'turnId'),
-      createdAt: _eventTime(event),
-      raw: event,
-    ));
+    _appendEntry(
+      readString(event, 'threadId'),
+      TimelineEntry(
+        id: '${readString(event, 'threadId')}:${readString(event, 'turnId', 'turn')}:$type',
+        type: 'guardian_review',
+        title: 'Guardian 审查',
+        role: 'system',
+        text: type == 'guardian_review_started' ? '审查开始' : '审查完成',
+        status: type == 'guardian_review_started' ? 'running' : 'completed',
+        turnId: readString(event, 'turnId'),
+        createdAt: _eventTime(event),
+        raw: event,
+      ),
+    );
   }
 
   void _appendMcpProgress(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    final itemId = readString(event, 'itemId', '${readString(event, 'turnId', 'turn')}:mcp-progress');
-    final id = 'mcp:$itemId';
+    final itemId = readString(
+      event,
+      'itemId',
+      '${readString(event, 'turnId', 'turn')}:mcp-progress',
+    );
+    final id = itemId;
     final current = _findEntry(threadId, id);
-    final nextMeta = [...(current?.meta ?? const <String>[]), readString(event, 'message')].where((item) => item.trim().isNotEmpty).toList(growable: false).takeLast(6);
-    _appendEntry(threadId, TimelineEntry(
-      id: id,
-      type: 'mcp_tool_progress',
-      title: 'MCP 工具',
-      role: 'system',
-      text: current?.text ?? '工具运行中',
-      status: 'running',
-      turnId: readString(event, 'turnId'),
-      itemId: itemId,
-      meta: nextMeta,
-      createdAt: current?.createdAt ?? _eventTime(event),
-      partial: true,
-      raw: event,
-    ));
+    final nextMeta = _cleanProcessMeta([
+      ...(current?.meta ?? const <String>[]),
+      readString(event, 'message'),
+    ]).takeLast(6);
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: id,
+        type: 'mcp_tool_progress',
+        title: 'MCP 工具',
+        role: 'system',
+        text: current?.text ?? '工具运行中',
+        status: 'running',
+        turnId: readString(event, 'turnId'),
+        itemId: itemId,
+        meta: nextMeta,
+        createdAt: current?.createdAt ?? _eventTime(event),
+        partial: true,
+        details: event,
+        raw: event,
+      ),
+    );
   }
 
   void _appendEntry(String threadId, TimelineEntry entry) {
     if (threadId.isEmpty) {
       return;
     }
-    final entries = [...(timelineByThread[threadId] ?? const <TimelineEntry>[])];
-    final index = entries.indexWhere((item) => item.id == entry.id);
+    final entries = [
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
+    final semanticKey = _entrySemanticKey(entry);
+    final index = entries.indexWhere(
+      (item) =>
+          item.id == entry.id ||
+          (entry.itemId.isNotEmpty && item.id == 'agent-${entry.itemId}') ||
+          (semanticKey.isNotEmpty && _entrySemanticKey(item) == semanticKey),
+    );
     if (index >= 0) {
       entries[index] = entry;
     } else {
       entries.add(entry);
     }
     entries.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    timelineByThread[threadId] = entries;
+    timelineByThread[threadId] = _dedupeEntries(entries);
   }
 
   void _handleNotification(JsonMap message) {
     final method = readString(message, 'method');
     final params = message['params'];
-    if (method == 'account/rateLimits/updated' || method == 'skills/changed' || method == 'thread/settings/updated') {
+    if (method == 'account/rateLimits/updated' ||
+        method == 'skills/changed' ||
+        method == 'thread/settings/updated') {
       return;
     }
     final paramsMap = params is JsonMap ? params : const <String, dynamic>{};
     _pushNotice({
       'level': _notificationLevel(method, paramsMap),
       'title': _notificationTitle(method),
-      'message': params is JsonMap ? _notificationMessage(method, params) : params?.toString() ?? method,
+      'message': params is JsonMap
+          ? _notificationMessage(method, params)
+          : params?.toString() ?? method,
       'threadId': readString(paramsMap, 'threadId'),
       'dismissKey': _dismissKeyForMessage(message),
     });
     final threadId = readString(paramsMap, 'threadId');
-    if (threadId.isNotEmpty && (method == 'guardianWarning' || method.startsWith('turn/'))) {
-      _appendNoticeEvent(threadId, _notificationTitle(method), _notificationMessage(method, paramsMap), _notificationLevel(method, paramsMap));
+    if (threadId.isNotEmpty &&
+        (method == 'guardianWarning' || method.startsWith('turn/'))) {
+      _appendNoticeEvent(
+        threadId,
+        _notificationTitle(method),
+        _notificationMessage(method, paramsMap),
+        _notificationLevel(method, paramsMap),
+      );
     }
   }
 
@@ -1626,19 +2133,31 @@ class CodexAppState extends ChangeNotifier {
     }
   }
 
-  void _appendNoticeEvent(String threadId, String title, String text, String level) {
+  void _appendNoticeEvent(
+    String threadId,
+    String title,
+    String text,
+    String level,
+  ) {
     if (threadId.isEmpty || text.trim().isEmpty) {
       return;
     }
-    _appendEntry(threadId, TimelineEntry(
-      id: 'notice:$threadId:${DateTime.now().microsecondsSinceEpoch}',
-      type: 'notice',
-      title: title,
-      role: 'system',
-      text: text,
-      status: level == 'error' ? 'error' : level == 'warning' ? 'warning' : 'completed',
-      createdAt: DateTime.now().millisecondsSinceEpoch,
-    ));
+    _appendEntry(
+      threadId,
+      TimelineEntry(
+        id: 'notice:$threadId:${DateTime.now().microsecondsSinceEpoch}',
+        type: 'notice',
+        title: title,
+        role: 'system',
+        text: text,
+        status: level == 'error'
+            ? 'error'
+            : level == 'warning'
+            ? 'warning'
+            : 'completed',
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
   void _pushNotice(JsonMap notice) {
@@ -1651,8 +2170,13 @@ class CodexAppState extends ChangeNotifier {
     if (dismissKey.isNotEmpty && dismissedNoticeKeys.contains(dismissKey)) {
       return;
     }
-    final id = readString(notice, 'id').ifEmpty(dismissKey).ifEmpty('notice:${DateTime.now().microsecondsSinceEpoch}');
-    notices.removeWhere((item) => readString(item, 'id').isNotEmpty && readString(item, 'id') == id);
+    final id = readString(notice, 'id')
+        .ifEmpty(dismissKey)
+        .ifEmpty('notice:${DateTime.now().microsecondsSinceEpoch}');
+    notices.removeWhere(
+      (item) =>
+          readString(item, 'id').isNotEmpty && readString(item, 'id') == id,
+    );
     notices.insert(0, {
       ...notice,
       'id': id,
@@ -1692,32 +2216,97 @@ class CodexAppState extends ChangeNotifier {
     if (entries == null) {
       return;
     }
-    timelineByThread[threadId] = entries.where((entry) => entry.id != entryId).toList(growable: false);
+    timelineByThread[threadId] = entries
+        .where((entry) => entry.id != entryId)
+        .toList(growable: false);
   }
 
   void _startWorkingTimer() {
-    _workingTimer ??= Timer.periodic(const Duration(seconds: 1), (_) => notifyListeners());
+    _workingTimer ??= Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => notifyListeners(),
+    );
   }
 
   List<TimelineEntry> _dedupeEntries(List<TimelineEntry> entries) {
-    final byId = <String, TimelineEntry>{};
+    final result = <TimelineEntry>[];
+    final indexById = <String, int>{};
+    final indexBySemantic = <String, int>{};
     for (final entry in entries) {
-      byId[entry.id] = entry;
+      final semanticKey = _entrySemanticKey(entry);
+      final existingIndex =
+          indexById[entry.id] ??
+          (semanticKey.isEmpty ? null : indexBySemantic[semanticKey]);
+      if (existingIndex == null) {
+        indexById[entry.id] = result.length;
+        if (semanticKey.isNotEmpty) {
+          indexBySemantic[semanticKey] = result.length;
+        }
+        result.add(entry);
+        continue;
+      }
+      final merged = _mergeDuplicateEntry(result[existingIndex], entry);
+      result[existingIndex] = merged;
+      indexById[merged.id] = existingIndex;
+      final mergedSemanticKey = _entrySemanticKey(merged);
+      if (mergedSemanticKey.isNotEmpty) {
+        indexBySemantic[mergedSemanticKey] = existingIndex;
+      }
     }
-    return byId.values.toList(growable: false)..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return result..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+
+  String _entrySemanticKey(TimelineEntry entry) {
+    if (entry.itemId.isEmpty || entry.type.isEmpty) {
+      return '';
+    }
+    return '${entry.type}:${entry.role}:${entry.itemId}';
+  }
+
+  TimelineEntry _mergeDuplicateEntry(
+    TimelineEntry current,
+    TimelineEntry incoming,
+  ) {
+    final preferIncoming =
+        (!incoming.partial && current.partial) ||
+        incoming.text.length >= current.text.length ||
+        incoming.createdAt >= current.createdAt;
+    final primary = preferIncoming ? incoming : current;
+    final secondary = preferIncoming ? current : incoming;
+    return primary.copyWith(
+      text: primary.text.isNotEmpty ? primary.text : secondary.text,
+      status: primary.status.isNotEmpty ? primary.status : secondary.status,
+      patch: primary.patch.isNotEmpty ? primary.patch : secondary.patch,
+      meta: primary.meta.isNotEmpty
+          ? _cleanProcessMeta(primary.meta)
+          : _cleanProcessMeta(secondary.meta),
+      changes: primary.changes.isNotEmpty ? primary.changes : secondary.changes,
+      attachments: primary.attachments.isNotEmpty
+          ? primary.attachments
+          : secondary.attachments,
+      details: primary.details ?? secondary.details,
+      raw: primary.raw ?? secondary.raw,
+    );
   }
 
   ComposerPrefs? _prefsFromSession(SessionItem? session) {
     if (session == null) {
       return null;
     }
-    if (session.model.isEmpty && session.reasoningEffort.isEmpty && session.approvalPolicy.isEmpty && session.sandboxMode.isEmpty) {
+    if (session.model.isEmpty &&
+        session.reasoningEffort.isEmpty &&
+        session.approvalPolicy.isEmpty &&
+        session.sandboxMode.isEmpty) {
       return null;
     }
     return ComposerPrefs(
       model: session.model,
-      reasoningEffort: session.reasoningEffort.ifEmpty(defaultPrefs.reasoningEffort),
-      approvalPolicy: session.approvalPolicy.ifEmpty(defaultPrefs.approvalPolicy),
+      reasoningEffort: session.reasoningEffort.ifEmpty(
+        defaultPrefs.reasoningEffort,
+      ),
+      approvalPolicy: session.approvalPolicy.ifEmpty(
+        defaultPrefs.approvalPolicy,
+      ),
       sandboxMode: session.sandboxMode.ifEmpty(defaultPrefs.sandboxMode),
     );
   }
@@ -1729,13 +2318,24 @@ class CodexAppState extends ChangeNotifier {
     return value < 100000000000 ? value * 1000 : value;
   }
 
-  int _eventTime(JsonMap event) => _normalizeTimestamp(readInt(event, 'startedAt', readInt(event, 'createdAt', DateTime.now().millisecondsSinceEpoch)));
+  int _eventTime(JsonMap event) => _normalizeTimestamp(
+    readInt(
+      event,
+      'startedAt',
+      readInt(event, 'createdAt', DateTime.now().millisecondsSinceEpoch),
+    ),
+  );
 
   String _eventId(JsonMap event) {
     final type = readString(event, 'type');
     final itemId = readString(event, 'itemId');
     final turnId = readString(event, 'turnId');
-    return [type, turnId, itemId, _eventTime(event).toString()].where((item) => item.isNotEmpty).join('-');
+    return [
+      type,
+      turnId,
+      itemId,
+      _eventTime(event).toString(),
+    ].where((item) => item.isNotEmpty).join('-');
   }
 
   String _eventTitle(JsonMap event) {
@@ -1767,7 +2367,11 @@ class CodexAppState extends ChangeNotifier {
     return readString(event, 'message')
         .ifEmpty(readString(event, 'delta'))
         .ifEmpty(readString(event, 'patch'))
-        .ifEmpty(event['params'] is JsonMap ? _summarizeMap(event['params'] as JsonMap) : '');
+        .ifEmpty(
+          event['params'] is JsonMap
+              ? _summarizeMap(event['params'] as JsonMap)
+              : '',
+        );
   }
 
   String _itemTitle(String type, JsonMap item) {
@@ -1806,14 +2410,30 @@ class CodexAppState extends ChangeNotifier {
       return value;
     }
     if (value is List) {
-      return value.map(_extractText).where((item) => item.trim().isNotEmpty).join('\n');
+      return value
+          .map(_extractText)
+          .where((item) => item.trim().isNotEmpty)
+          .join('\n');
     }
     if (value is JsonMap) {
       final type = readString(value, 'type');
       if (type == 'localImage' || type == 'image' || type == 'input_image') {
         return '';
       }
-      for (final key in ['text', 'outputText', 'output_text', 'inputText', 'input_text', 'value', 'message', 'content', 'parts', 'output', 'input', 'summary']) {
+      for (final key in [
+        'text',
+        'outputText',
+        'output_text',
+        'inputText',
+        'input_text',
+        'value',
+        'message',
+        'content',
+        'parts',
+        'output',
+        'input',
+        'summary',
+      ]) {
         final extracted = _extractText(value[key]);
         if (extracted.isNotEmpty) {
           return extracted;
@@ -1875,15 +2495,20 @@ class CodexAppState extends ChangeNotifier {
 
   String _notificationMessage(String method, JsonMap params) {
     if (method == 'mcpServer/startupStatus/updated') {
-      return [readString(params, 'name', 'MCP'), readString(params, 'status', 'unknown'), readString(params, 'error')]
-          .where((item) => item.isNotEmpty)
-          .join(' · ');
+      return [
+        readString(params, 'name', 'MCP'),
+        readString(params, 'status', 'unknown'),
+        readString(params, 'error'),
+      ].where((item) => item.isNotEmpty).join(' · ');
     }
     if (method == 'mcpServer/oauthLogin/completed') {
       return '${readString(params, 'name', 'MCP')} · ${params['success'] == true ? '登录成功' : '登录失败'}${readString(params, 'error').isNotEmpty ? ' · ${readString(params, 'error')}' : ''}';
     }
     if (method == 'account/updated') {
-      return [readString(params, 'authMode'), readString(params, 'planType')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('账户信息已更新');
+      return [
+        readString(params, 'authMode'),
+        readString(params, 'planType'),
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('账户信息已更新');
     }
     if (method == 'account/login/completed') {
       return '${params['success'] == true ? '登录成功' : '登录失败'}${readString(params, 'error').isNotEmpty ? ' · ${readString(params, 'error')}' : ''}';
@@ -1892,20 +2517,38 @@ class CodexAppState extends ChangeNotifier {
       return readString(params, 'message', 'Guardian 发出警告');
     }
     if (method == 'deprecationNotice' || method == 'deprecated') {
-      return [readString(params, 'summary'), readString(params, 'details')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('存在即将弃用的能力');
+      return [
+        readString(params, 'summary'),
+        readString(params, 'details'),
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('存在即将弃用的能力');
     }
     if (method == 'configWarning') {
-      return [readString(params, 'summary'), readString(params, 'details'), readString(params, 'path')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('配置存在警告');
+      return [
+        readString(params, 'summary'),
+        readString(params, 'details'),
+        readString(params, 'path'),
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('配置存在警告');
     }
     if (method == 'windowsSandbox/setupCompleted') {
-      return [readString(params, 'mode', 'sandbox'), params['success'] == true ? '设置完成' : '设置失败', readString(params, 'error')].where((item) => item.isNotEmpty).join(' · ');
+      return [
+        readString(params, 'mode', 'sandbox'),
+        params['success'] == true ? '设置完成' : '设置失败',
+        readString(params, 'error'),
+      ].where((item) => item.isNotEmpty).join(' · ');
     }
     if (method == 'remoteControl/status/changed') {
-      return [readString(params, 'status'), readString(params, 'environmentId')].where((item) => item.isNotEmpty).join(' · ').ifEmpty('远程控制状态已更新');
+      return [
+        readString(params, 'status'),
+        readString(params, 'environmentId'),
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('远程控制状态已更新');
     }
     if (method == 'turn/moderationMetadata') {
       final metadata = readMap(params, 'metadata');
-      return [readString(metadata, 'category'), readString(metadata, 'outcome'), readString(metadata, 'action')]
+      return [
+            readString(metadata, 'category'),
+            readString(metadata, 'outcome'),
+            readString(metadata, 'action'),
+          ]
           .where((item) => item.isNotEmpty)
           .join(' · ')
           .ifEmpty(_summarizeMap(metadata).ifEmpty('已收到审查元数据'));
@@ -1919,12 +2562,20 @@ class CodexAppState extends ChangeNotifier {
     }
     if (method == 'fs/changed') {
       final changed = params['changedPaths'];
-      final paths = changed is List ? changed.whereType<String>().take(2).toList(growable: false) : const <String>[];
-      return [readString(params, 'watchId'), ...paths].where((item) => item.isNotEmpty).join(' · ').ifEmpty('文件系统事件');
+      final paths = changed is List
+          ? changed.whereType<String>().take(2).toList(growable: false)
+          : const <String>[];
+      return [
+        readString(params, 'watchId'),
+        ...paths,
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('文件系统事件');
     }
     if (method == 'fuzzyFileSearch/sessionUpdated') {
       final files = params['files'];
-      return [readString(params, 'query'), files is List ? '${files.length} 个结果' : ''].where((item) => item.isNotEmpty).join(' · ').ifEmpty('模糊搜索结果已更新');
+      return [
+        readString(params, 'query'),
+        files is List ? '${files.length} 个结果' : '',
+      ].where((item) => item.isNotEmpty).join(' · ').ifEmpty('模糊搜索结果已更新');
     }
     if (method == 'fuzzyFileSearch/sessionCompleted') {
       return readString(params, 'sessionId').ifEmpty('模糊搜索已完成');
@@ -1933,17 +2584,25 @@ class CodexAppState extends ChangeNotifier {
   }
 
   String _notificationLevel(String method, JsonMap params) {
-    if (method == 'guardianWarning' || method == 'configWarning' || method == 'deprecationNotice' || method == 'windows/worldWritableWarning') {
+    if (method == 'guardianWarning' ||
+        method == 'configWarning' ||
+        method == 'deprecationNotice' ||
+        method == 'windows/worldWritableWarning') {
       return 'warning';
     }
-    if ((method == 'mcpServer/startupStatus/updated' || method == 'mcpServer/oauthLogin/completed' || method == 'windowsSandbox/setupCompleted') &&
-        (params['success'] == false || readString(params, 'status') == 'failed' || readString(params, 'error').isNotEmpty)) {
+    if ((method == 'mcpServer/startupStatus/updated' ||
+            method == 'mcpServer/oauthLogin/completed' ||
+            method == 'windowsSandbox/setupCompleted') &&
+        (params['success'] == false ||
+            readString(params, 'status') == 'failed' ||
+            readString(params, 'error').isNotEmpty)) {
       return 'error';
     }
     if (method == 'account/login/completed' && params['success'] == false) {
       return 'error';
     }
-    if (method == 'remoteControl/status/changed' && readString(params, 'status') == 'errored') {
+    if (method == 'remoteControl/status/changed' &&
+        readString(params, 'status') == 'errored') {
       return 'error';
     }
     return 'info';
@@ -1986,7 +2645,11 @@ class CodexAppState extends ChangeNotifier {
     try {
       final decoded = raw.trim().isEmpty ? const [] : jsonDecode(raw);
       if (decoded is List) {
-        return decoded.whereType<String>().map((item) => item.trim()).where((item) => item.isNotEmpty).toSet();
+        return decoded
+            .whereType<String>()
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toSet();
       }
     } catch (_) {
       return {};
@@ -1996,7 +2659,9 @@ class CodexAppState extends ChangeNotifier {
 
   Future<void> _persistDismissedNoticeKeys() async {
     final values = dismissedNoticeKeys.toList(growable: false);
-    final tail = values.length > 200 ? values.sublist(values.length - 200) : values;
+    final tail = values.length > 200
+        ? values.sublist(values.length - 200)
+        : values;
     await bridge.setString('dismissedNoticeKeys', jsonEncode(tail));
   }
 

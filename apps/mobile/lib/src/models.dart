@@ -28,7 +28,9 @@ JsonMap readMap(JsonMap map, String key) {
 
 List<JsonMap> readMapList(JsonMap map, String key) {
   final value = map[key];
-  return value is List ? value.whereType<JsonMap>().toList(growable: false) : const [];
+  return value is List
+      ? value.whereType<JsonMap>().toList(growable: false)
+      : const [];
 }
 
 class AuthSessionItem {
@@ -85,12 +87,30 @@ class SessionItem {
       name: readString(json, 'name', '未命名会话'),
       cwd: readString(json, 'cwd'),
       status: readString(json, 'status'),
-      windowStatus: readString(json, 'windowStatus', readString(json, 'window_status')),
-      approvalPolicy: readString(json, 'approvalPolicy', readString(json, 'approval_policy')),
-      sandboxMode: readString(json, 'sandboxMode', readString(json, 'sandbox_mode')),
+      windowStatus: readString(
+        json,
+        'windowStatus',
+        readString(json, 'window_status'),
+      ),
+      approvalPolicy: readString(
+        json,
+        'approvalPolicy',
+        readString(json, 'approval_policy'),
+      ),
+      sandboxMode: readString(
+        json,
+        'sandboxMode',
+        readString(json, 'sandbox_mode'),
+      ),
       model: readString(json, 'model'),
-      reasoningEffort: readString(json, 'reasoningEffort', readString(json, 'reasoning_effort')),
-      tokenUsage: json['tokenUsage'] is JsonMap ? json['tokenUsage'] as JsonMap : null,
+      reasoningEffort: readString(
+        json,
+        'reasoningEffort',
+        readString(json, 'reasoning_effort'),
+      ),
+      tokenUsage: json['tokenUsage'] is JsonMap
+          ? json['tokenUsage'] as JsonMap
+          : null,
       createdAt: readInt(json, 'createdAt', readInt(json, 'created_at')),
       updatedAt: readInt(json, 'updatedAt', readInt(json, 'updated_at')),
     );
@@ -128,6 +148,7 @@ class TimelineEntry {
     this.attachments = const [],
     this.createdAt = 0,
     this.partial = false,
+    this.details,
     this.raw,
   });
 
@@ -145,6 +166,7 @@ class TimelineEntry {
   final List<AttachmentItem> attachments;
   final int createdAt;
   final bool partial;
+  final JsonMap? details;
   final JsonMap? raw;
 
   TimelineEntry copyWith({
@@ -157,6 +179,7 @@ class TimelineEntry {
     List<String>? meta,
     List<JsonMap>? changes,
     List<AttachmentItem>? attachments,
+    JsonMap? details,
     JsonMap? raw,
   }) {
     return TimelineEntry(
@@ -174,6 +197,7 @@ class TimelineEntry {
       attachments: attachments ?? this.attachments,
       createdAt: createdAt,
       partial: partial ?? this.partial,
+      details: details ?? this.details,
       raw: raw ?? this.raw,
     );
   }
@@ -203,13 +227,22 @@ class ServerRequestItem {
   List<JsonMap> get questions => readMapList(raw, 'questions');
   List<JsonMap> get changes => readMapList(raw, 'changes');
 
-  JsonMap get arguments => raw['arguments'] is JsonMap ? raw['arguments'] as JsonMap : const {};
-  JsonMap get requestedSchema => raw['requestedSchema'] is JsonMap ? raw['requestedSchema'] as JsonMap : const {};
-  JsonMap get responseSchema => raw['responseSchema'] is JsonMap ? raw['responseSchema'] as JsonMap : const {};
-  List<dynamic> get availableDecisions => raw['availableDecisions'] is List ? raw['availableDecisions'] as List<dynamic> : const [];
+  JsonMap get arguments =>
+      raw['arguments'] is JsonMap ? raw['arguments'] as JsonMap : const {};
+  JsonMap get requestedSchema => raw['requestedSchema'] is JsonMap
+      ? raw['requestedSchema'] as JsonMap
+      : const {};
+  JsonMap get responseSchema => raw['responseSchema'] is JsonMap
+      ? raw['responseSchema'] as JsonMap
+      : const {};
+  List<dynamic> get availableDecisions => raw['availableDecisions'] is List
+      ? raw['availableDecisions'] as List<dynamic>
+      : const [];
 
   String get displayTitle {
-    if (kind.contains('command') || method.contains('commandExecution') || method == 'execCommandApproval') {
+    if (kind.contains('command') ||
+        method.contains('commandExecution') ||
+        method == 'execCommandApproval') {
       return '命令审批';
     }
     if (method.contains('fileChange') || method == 'applyPatchApproval') {
@@ -272,7 +305,9 @@ class CodexModelOption {
       description: readString(json, 'description'),
       defaultReasoningEffort: readString(json, 'defaultReasoningEffort'),
       supportedReasoningEfforts: json['supportedReasoningEfforts'] is List
-          ? (json['supportedReasoningEfforts'] as List).whereType<String>().toList(growable: false)
+          ? (json['supportedReasoningEfforts'] as List)
+                .whereType<String>()
+                .toList(growable: false)
           : const [],
       isDefault: json['isDefault'] == true,
     );
@@ -350,7 +385,10 @@ class WorkspaceListing {
 
   factory WorkspaceListing.fromJson(JsonMap json) {
     final entries = json['entries'] is List
-        ? (json['entries'] as List).whereType<JsonMap>().map(WorkspaceEntry.fromJson).toList(growable: false)
+        ? (json['entries'] as List)
+              .whereType<JsonMap>()
+              .map(WorkspaceEntry.fromJson)
+              .toList(growable: false)
         : <WorkspaceEntry>[];
     return WorkspaceListing(
       path: readString(json, 'path'),
