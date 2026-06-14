@@ -20,6 +20,17 @@ void main() {
   });
   _expect(session.threadId == 'thread-1', 'session thread id');
   _expect(session.tokenUsage != null, 'session token usage');
+  _expect(!session.isClosed, 'empty window status falls back to open status');
+
+  final closedSession = SessionItem.fromJson({
+    'threadId': 'thread-closed',
+    'name': 'Closed',
+    'windowStatus': 'closed',
+  });
+  _expect(
+    closedSession.isClosed,
+    'closed window status grouped under unopened',
+  );
 
   final authSession = AuthSessionItem.fromJson({
     'sessionId': 'device-1',

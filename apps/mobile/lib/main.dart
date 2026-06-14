@@ -8,6 +8,9 @@ import 'src/app_state.dart';
 import 'src/models.dart';
 import 'src/native_bridge.dart';
 
+const int _initialRenderableLimit = 120;
+const int _renderablePageSize = 120;
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(CodexRemoteMobileApp(state: CodexAppState(NativeBridge())));
@@ -153,11 +156,6 @@ class _AppShellState extends State<AppShell> {
               child: const Icon(Icons.notifications_outlined),
             ),
             onPressed: () => showNoticesSheet(context, state),
-          ),
-          IconButton(
-            tooltip: '新建会话',
-            icon: const Icon(Icons.add_comment_outlined),
-            onPressed: () => showNewSessionSheet(context, state),
           ),
           IconButton(
             tooltip: '设置',
@@ -494,7 +492,7 @@ class SessionDrawer extends StatelessWidget {
                   if (closed.isNotEmpty)
                     ExpansionTile(
                       leading: const Icon(Icons.archive_outlined),
-                      title: const Text('已关闭'),
+                      title: const Text('未打开'),
                       subtitle: Text('${closed.length} 个会话'),
                       initiallyExpanded: false,
                       children: closed
@@ -594,7 +592,7 @@ class EmptySessionView extends StatelessWidget {
   }
 }
 
-class TimelineView extends StatelessWidget {
+class TimelineView extends StatefulWidget {
   const TimelineView({
     super.key,
     required this.state,
@@ -605,8 +603,31 @@ class TimelineView extends StatelessWidget {
   final ScrollController controller;
 
   @override
+  State<TimelineView> createState() => _TimelineViewState();
+}
+
+class _TimelineViewState extends State<TimelineView> {
+  int _renderLimit = _initialRenderableLimit;
+  String _sessionId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionId = widget.state.activeSessionId;
+  }
+
+  @override
+  void didUpdateWidget(TimelineView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_sessionId != widget.state.activeSessionId) {
+      _sessionId = widget.state.activeSessionId;
+      _renderLimit = _initialRenderableLimit;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final entries = state.activeTimeline
+    final entries = widget.state.activeTimeline
         .where(_shouldRenderTimelineEntry)
         .toList(growable: false);
     if (entries.isEmpty) {
@@ -614,12 +635,35 @@ class TimelineView extends StatelessWidget {
         child: Text('还没有消息', style: Theme.of(context).textTheme.bodyLarge),
       );
     }
+    final hiddenCount = max(0, entries.length - _renderLimit);
+    final visibleEntries = hiddenCount > 0
+        ? entries.sublist(entries.length - _renderLimit)
+        : entries;
     return ListView.builder(
-      controller: controller,
+      controller: widget.controller,
       padding: const EdgeInsets.only(top: 8, bottom: 8),
-      itemCount: entries.length,
-      itemBuilder: (context, index) =>
-          TimelineCard(state: state, entry: entries[index]),
+      itemCount: visibleEntries.length + (hiddenCount > 0 ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (hiddenCount > 0 && index == 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _renderLimit += _renderablePageSize;
+                });
+              },
+              icon: const Icon(Icons.keyboard_arrow_up),
+              label: Text('加载更早 ${min(hiddenCount, _renderablePageSize)} 条'),
+            ),
+          );
+        }
+        final entryIndex = hiddenCount > 0 ? index - 1 : index;
+        return TimelineCard(
+          state: widget.state,
+          entry: visibleEntries[entryIndex],
+        );
+      },
     );
   }
 }
@@ -696,7 +740,7 @@ class _MessageTimelineCard extends StatelessWidget {
                 ),
                 if (entry.text.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  SelectableText(entry.text),
+                  _MarkdownText(text: entry.text, partial: entry.partial),
                 ],
                 if (entry.attachments.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -1190,7 +1234,7 @@ class _DetailLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SelectableText(text, style: Theme.of(context).textTheme.bodySmall);
+    return _MarkdownText(text: text);
   }
 }
 
@@ -1271,6 +1315,199 @@ class _FileChangeList extends StatelessWidget {
           )
           .toList(growable: false),
     );
+  }
+}
+
+class _MarkdownText extends StatelessWidget {
+  const _MarkdownText({required this.text, this.partial = false});
+
+  final String text;
+  final bool partial;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = text.replaceAll('\r\n', '\n');
+    final lines = normalized.split('\n');
+    final blocks = <Widget>[];
+    final paragraph = <String>[];
+    final code = <String>[];
+    var inCode = false;
+
+    void flushParagraph() {
+      if (paragraph.isEmpty) {
+        return;
+      }
+      blocks.add(
+        _InlineMarkdownText(
+          text: paragraph.join('\n'),
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+      );
+      paragraph.clear();
+    }
+
+    void flushCode() {
+      blocks.add(_CodeBlock(text: code.join('\n')));
+      code.clear();
+    }
+
+    for (final rawLine in lines) {
+      final line = rawLine.replaceAll('\t', '  ');
+      if (line.trimLeft().startsWith('```')) {
+        if (inCode) {
+          flushCode();
+          inCode = false;
+        } else {
+          flushParagraph();
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        code.add(rawLine);
+        continue;
+      }
+      if (line.trim().isEmpty) {
+        flushParagraph();
+        continue;
+      }
+      final heading = RegExp(r'^(#{1,3})\s+(.+)$').firstMatch(line);
+      if (heading != null) {
+        flushParagraph();
+        final level = heading.group(1)!.length;
+        final style = switch (level) {
+          1 => Theme.of(context).textTheme.titleLarge,
+          2 => Theme.of(context).textTheme.titleMedium,
+          _ => Theme.of(context).textTheme.titleSmall,
+        };
+        blocks.add(
+          _InlineMarkdownText(text: heading.group(2)!.trim(), style: style),
+        );
+        continue;
+      }
+      final quote = RegExp(r'^>\s?(.*)$').firstMatch(line);
+      if (quote != null) {
+        flushParagraph();
+        blocks.add(
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: Theme.of(context).colorScheme.outline,
+                  width: 3,
+                ),
+              ),
+            ),
+            child: _InlineMarkdownText(
+              text: quote.group(1)!.trim(),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        );
+        continue;
+      }
+      final listItem = RegExp(r'^\s*(?:[-*+]|\d+\.)\s+(.+)$').firstMatch(line);
+      if (listItem != null) {
+        flushParagraph();
+        blocks.add(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(padding: EdgeInsets.only(top: 2), child: Text('•')),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _InlineMarkdownText(
+                  text: listItem.group(1)!.trim(),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+            ],
+          ),
+        );
+        continue;
+      }
+      paragraph.add(line);
+    }
+    if (inCode) {
+      flushCode();
+    }
+    flushParagraph();
+
+    if (partial) {
+      blocks.add(Text('▌', style: Theme.of(context).textTheme.bodyMedium));
+    }
+    if (blocks.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: blocks
+          .map(
+            (block) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: block,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
+class _InlineMarkdownText extends StatelessWidget {
+  const _InlineMarkdownText({required this.text, this.style});
+
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = style ?? Theme.of(context).textTheme.bodyMedium;
+    return SelectableText.rich(
+      TextSpan(style: base, children: _inlineSpans(context, text, base)),
+    );
+  }
+
+  List<TextSpan> _inlineSpans(
+    BuildContext context,
+    String value,
+    TextStyle? base,
+  ) {
+    final spans = <TextSpan>[];
+    var index = 0;
+    final pattern = RegExp(r'(`[^`]+`|\*\*[^*]+\*\*)');
+    for (final match in pattern.allMatches(value)) {
+      if (match.start > index) {
+        spans.add(TextSpan(text: value.substring(index, match.start)));
+      }
+      final token = match.group(0)!;
+      if (token.startsWith('`')) {
+        spans.add(
+          TextSpan(
+            text: token.substring(1, token.length - 1),
+            style: base?.copyWith(
+              fontFamily: 'monospace',
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
+            ),
+          ),
+        );
+      } else {
+        spans.add(
+          TextSpan(
+            text: token.substring(2, token.length - 2),
+            style: base?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        );
+      }
+      index = match.end;
+    }
+    if (index < value.length) {
+      spans.add(TextSpan(text: value.substring(index)));
+    }
+    return spans;
   }
 }
 
@@ -1752,14 +1989,49 @@ Future<void> showSettingsSheet(
   BuildContext context,
   CodexAppState state,
 ) async {
-  final server = TextEditingController(text: state.serverUrl);
-  final token = TextEditingController(text: state.token);
-  unawaited(state.loadAuthSessions());
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => AnimatedBuilder(
+    builder: (context) => _SettingsSheet(state: state),
+  );
+}
+
+class _SettingsSheet extends StatefulWidget {
+  const _SettingsSheet({required this.state});
+
+  final CodexAppState state;
+
+  @override
+  State<_SettingsSheet> createState() => _SettingsSheetState();
+}
+
+class _SettingsSheetState extends State<_SettingsSheet> {
+  late final TextEditingController _server = TextEditingController(
+    text: widget.state.serverUrl,
+  );
+  late final TextEditingController _token = TextEditingController(
+    text: widget.state.token,
+  );
+
+  CodexAppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(state.loadAuthSessions());
+  }
+
+  @override
+  void dispose() {
+    _server.dispose();
+    _token.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
       animation: state,
       builder: (context, _) => Padding(
         padding: EdgeInsets.only(
@@ -1777,7 +2049,7 @@ Future<void> showSettingsSheet(
               Text('连接设置', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
               TextField(
-                controller: server,
+                controller: _server,
                 decoration: const InputDecoration(
                   labelText: '服务地址',
                   border: OutlineInputBorder(),
@@ -1785,7 +2057,7 @@ Future<void> showSettingsSheet(
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: token,
+                controller: _token,
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Token',
@@ -1805,8 +2077,8 @@ Future<void> showSettingsSheet(
                   Expanded(
                     child: FilledButton(
                       onPressed: () async {
-                        state.updateServerDraft(server.text);
-                        state.updateTokenDraft(token.text);
+                        state.updateServerDraft(_server.text);
+                        state.updateTokenDraft(_token.text);
                         await state.login();
                         if (context.mounted) Navigator.pop(context);
                       },
@@ -1884,23 +2156,49 @@ Future<void> showSettingsSheet(
           ),
         ),
       ),
-    ),
-  );
-  server.dispose();
-  token.dispose();
+    );
+  }
 }
 
 Future<void> showNewSessionSheet(
   BuildContext context,
   CodexAppState state,
 ) async {
-  final name = TextEditingController(text: '新会话');
-  final cwd = TextEditingController(text: state.workspacePath);
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => Padding(
+    builder: (context) => _NewSessionSheet(state: state),
+  );
+}
+
+class _NewSessionSheet extends StatefulWidget {
+  const _NewSessionSheet({required this.state});
+
+  final CodexAppState state;
+
+  @override
+  State<_NewSessionSheet> createState() => _NewSessionSheetState();
+}
+
+class _NewSessionSheetState extends State<_NewSessionSheet> {
+  late final TextEditingController _name = TextEditingController(text: '新会话');
+  late final TextEditingController _cwd = TextEditingController(
+    text: widget.state.workspacePath,
+  );
+
+  CodexAppState get state => widget.state;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _cwd.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
       padding: EdgeInsets.only(
         left: 16,
         right: 16,
@@ -1912,7 +2210,7 @@ Future<void> showNewSessionSheet(
           Text('新建会话', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 12),
           TextField(
-            controller: name,
+            controller: _name,
             decoration: const InputDecoration(
               labelText: '名称',
               border: OutlineInputBorder(),
@@ -1920,7 +2218,7 @@ Future<void> showNewSessionSheet(
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: cwd,
+            controller: _cwd,
             decoration: const InputDecoration(
               labelText: '工作区路径',
               border: OutlineInputBorder(),
@@ -1934,7 +2232,7 @@ Future<void> showNewSessionSheet(
                   onPressed: () => showWorkspaceSheet(
                     context,
                     state,
-                    onPick: (path) => cwd.text = path,
+                    onPick: (path) => _cwd.text = path,
                   ),
                   icon: const Icon(Icons.folder_outlined),
                   label: const Text('选择工作区'),
@@ -1946,7 +2244,7 @@ Future<void> showNewSessionSheet(
                   icon: const Icon(Icons.add),
                   label: const Text('创建'),
                   onPressed: () {
-                    state.createSession(name: name.text, cwd: cwd.text);
+                    state.createSession(name: _name.text, cwd: _cwd.text);
                     Navigator.pop(context);
                   },
                 ),
@@ -1955,10 +2253,8 @@ Future<void> showNewSessionSheet(
           ),
         ],
       ),
-    ),
-  );
-  name.dispose();
-  cwd.dispose();
+    );
+  }
 }
 
 Future<void> showWorkspaceSheet(
@@ -1966,14 +2262,40 @@ Future<void> showWorkspaceSheet(
   CodexAppState state, {
   ValueChanged<String>? onPick,
 }) async {
-  final folder = TextEditingController();
   await state.loadWorkspace(state.workspacePath);
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (context) => AnimatedBuilder(
+    builder: (context) => _WorkspaceSheet(state: state, onPick: onPick),
+  );
+}
+
+class _WorkspaceSheet extends StatefulWidget {
+  const _WorkspaceSheet({required this.state, this.onPick});
+
+  final CodexAppState state;
+  final ValueChanged<String>? onPick;
+
+  @override
+  State<_WorkspaceSheet> createState() => _WorkspaceSheetState();
+}
+
+class _WorkspaceSheetState extends State<_WorkspaceSheet> {
+  final TextEditingController _folder = TextEditingController();
+
+  CodexAppState get state => widget.state;
+
+  @override
+  void dispose() {
+    _folder.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
       animation: state,
       builder: (context, _) {
         final listing = state.workspaceListing;
@@ -1996,7 +2318,7 @@ Future<void> showWorkspaceSheet(
                       icon: const Icon(Icons.check),
                       onPressed: () {
                         final path = listing?.path ?? state.workspacePath;
-                        onPick?.call(path);
+                        widget.onPick?.call(path);
                         state.workspacePath = path;
                         Navigator.pop(context);
                       },
@@ -2010,7 +2332,7 @@ Future<void> showWorkspaceSheet(
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: folder,
+                        controller: _folder,
                         decoration: const InputDecoration(
                           labelText: '新文件夹',
                           isDense: true,
@@ -2019,7 +2341,8 @@ Future<void> showWorkspaceSheet(
                     ),
                     IconButton(
                       icon: const Icon(Icons.create_new_folder_outlined),
-                      onPressed: () => state.createWorkspaceFolder(folder.text),
+                      onPressed: () =>
+                          state.createWorkspaceFolder(_folder.text),
                     ),
                   ],
                 ),
@@ -2052,9 +2375,8 @@ Future<void> showWorkspaceSheet(
           ),
         );
       },
-    ),
-  );
-  folder.dispose();
+    );
+  }
 }
 
 Future<void> showApprovalsSheet(

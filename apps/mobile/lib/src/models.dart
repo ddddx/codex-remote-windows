@@ -129,7 +129,18 @@ class SessionItem {
   final int createdAt;
   final int updatedAt;
 
-  bool get isClosed => status == 'closed';
+  bool get isClosed {
+    final normalizedWindowStatus = windowStatus.trim().toLowerCase();
+    if (normalizedWindowStatus.isNotEmpty) {
+      return normalizedWindowStatus != 'attached' &&
+          normalizedWindowStatus != 'opening' &&
+          normalizedWindowStatus != 'pending';
+    }
+    final normalizedStatus = status.trim().toLowerCase();
+    return normalizedStatus == 'closed' ||
+        normalizedStatus == 'detached' ||
+        normalizedStatus == 'archived';
+  }
 }
 
 class TimelineEntry {

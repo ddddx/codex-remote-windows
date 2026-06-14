@@ -112,6 +112,78 @@ void main() {
 
     state.dispose();
   });
+
+  test('dedupes optimistic user message after thread sync', () async {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-1';
+    state.activeSessionId = threadId;
+
+    await state.sendPrompt('Hello **Codex**');
+    state.handleServerMessage({
+      'type': 'turn_started',
+      'threadId': threadId,
+      'turnId': 'turn-user',
+      'startedAt': 1000,
+    });
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [
+        {
+          'id': 'turn-user',
+          'startedAt': 1000,
+          'items': [
+            {
+              'id': 'server-user-1',
+              'type': 'userMessage',
+              'text': 'Hello **Codex**',
+              'createdAt': 1001,
+            },
+          ],
+        },
+      ],
+    });
+
+    final userEntries = state.timelineByThread[threadId]!
+        .where((item) => item.role == 'user' && item.text == 'Hello **Codex**')
+        .toList();
+    expect(userEntries, hasLength(1));
+    expect(userEntries.single.id, isNot(startsWith('local-user:')));
+    state.dispose();
+  });
+
+  test('filters non-rendered thread sync timeline events like web', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-1';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [],
+      'timelineEvents': [
+        {
+          'type': 'thread_event',
+          'threadId': threadId,
+          'method': 'thread/goal/cleared',
+          'turnId': 'turn-1',
+        },
+        {
+          'type': 'notification',
+          'threadId': threadId,
+          'method': 'skills/changed',
+        },
+        {
+          'type': 'warning',
+          'threadId': threadId,
+          'noticeId': 'warn-1',
+          'message': 'warning',
+        },
+      ],
+    });
+
+    expect(state.timelineByThread[threadId], isEmpty);
+    state.dispose();
+  });
 }
 
 class _TestBridge extends NativeBridge {

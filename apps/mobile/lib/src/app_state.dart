@@ -416,6 +416,8 @@ class CodexAppState extends ChangeNotifier {
         role: 'user',
         text: trimmed.isEmpty ? '图片' : trimmed,
         attachments: pendingAttachments,
+        turnId: '$activeSessionId:pending-turn',
+        itemId: clientMessageId,
         createdAt: now,
       ),
     );
@@ -845,8 +847,24 @@ class CodexAppState extends ChangeNotifier {
     _replaceGlobalNotices(message['globalSupplementalItems']);
     final events = message['timelineEvents'];
     if (events is List) {
+      final settledIds = entries
+          .where((entry) => !entry.partial && entry.status != 'running')
+          .expand((entry) => [entry.id, entry.itemId])
+          .where((value) => value.isNotEmpty)
+          .toSet();
       for (final event in events.whereType<JsonMap>()) {
-        entries.add(_entryFromEvent(event));
+        if (!_shouldReplayThreadSyncEvent(
+          threadId,
+          event,
+          entries,
+          settledIds,
+        )) {
+          continue;
+        }
+        final entry = _entryFromEvent(event);
+        if (entry != null) {
+          entries.add(entry);
+        }
       }
     }
     entries.sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -1102,7 +1120,63 @@ class CodexAppState extends ChangeNotifier {
     );
   }
 
-  TimelineEntry _entryFromEvent(JsonMap event) {
+  bool _shouldReplayThreadSyncEvent(
+    String threadId,
+    JsonMap event,
+    List<TimelineEntry> entries,
+    Set<String> settledIds,
+  ) {
+    final eventType = readString(event, 'type');
+    if (eventType.isEmpty || readString(event, 'threadId') != threadId) {
+      return false;
+    }
+    if (eventType == 'thread_event' &&
+        !_shouldDisplayThreadEvent(readString(event, 'method'))) {
+      return false;
+    }
+    const replayable = {
+      'agent_delta',
+      'plan_delta',
+      'mcp_tool_progress',
+      'item_started',
+      'item_delta',
+      'item_completed',
+      'thread_event',
+      'warning',
+      'error_notice',
+    };
+    if (!replayable.contains(eventType)) {
+      return false;
+    }
+
+    final item = event['item'] is JsonMap
+        ? event['item'] as JsonMap
+        : const <String, dynamic>{};
+    final itemId = readString(event, 'itemId').ifEmpty(readString(item, 'id'));
+    if (itemId.isNotEmpty && settledIds.contains(itemId)) {
+      return false;
+    }
+    final turnId = readString(event, 'turnId');
+    final isAssistantEvent =
+        eventType == 'agent_delta' ||
+        (eventType == 'item_completed' &&
+            readString(item, 'type') == 'agentMessage');
+    if (isAssistantEvent && itemId.isEmpty && turnId.isNotEmpty) {
+      final hasSettledAssistant = entries.any(
+        (entry) =>
+            entry.turnId == turnId &&
+            entry.role == 'assistant' &&
+            !entry.partial &&
+            entry.status != 'running',
+      );
+      if (hasSettledAssistant) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  TimelineEntry? _entryFromEvent(JsonMap event) {
     final type = readString(event, 'type');
     if (type == 'agent_delta') {
       final itemId = readString(
@@ -1143,17 +1217,7 @@ class CodexAppState extends ChangeNotifier {
       }
     }
     if (type == 'warning' || type == 'error_notice') {
-      return TimelineEntry(
-        id: readString(event, 'noticeId', _eventId(event)),
-        type: 'notice',
-        title: readString(event, 'noticeKind', type == 'warning' ? '警告' : '错误'),
-        role: 'system',
-        text: readString(event, 'message'),
-        status: type == 'warning' ? 'warning' : 'error',
-        turnId: readString(event, 'turnId'),
-        createdAt: _eventTime(event),
-        raw: event,
-      );
+      return null;
     }
     return _genericEventEntry(event);
   }
@@ -1440,9 +1504,7 @@ class CodexAppState extends ChangeNotifier {
     if (method.isEmpty) {
       return false;
     }
-    if (method == 'account/rateLimits/updated' ||
-        method == 'skills/changed' ||
-        method == 'thread/settings/updated') {
+    if (method == 'thread/goal/cleared') {
       return false;
     }
     return true;
@@ -1516,7 +1578,50 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     activeTurnStartedAt[threadId] = _normalizeTimestamp(startedAt);
+    _promotePendingUserEntries(threadId, turnId, startedAt);
     _startWorkingTimer();
+  }
+
+  void _promotePendingUserEntries(
+    String threadId,
+    String turnId,
+    int startedAt,
+  ) {
+    final resolvedTurnId = turnId.ifEmpty('$threadId:pending-turn');
+    final entries = [
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
+    var changed = false;
+    for (var index = 0; index < entries.length; index += 1) {
+      final entry = entries[index];
+      if (entry.role != 'user' || entry.turnId != '$threadId:pending-turn') {
+        continue;
+      }
+      entries[index] = TimelineEntry(
+        id: entry.id,
+        type: entry.type,
+        title: entry.title,
+        role: entry.role,
+        text: entry.text,
+        status: entry.status,
+        turnId: resolvedTurnId,
+        itemId: entry.itemId,
+        meta: entry.meta,
+        patch: entry.patch,
+        changes: entry.changes,
+        attachments: entry.attachments,
+        createdAt: entry.createdAt == 0
+            ? _normalizeTimestamp(startedAt)
+            : entry.createdAt,
+        partial: entry.partial,
+        details: entry.details,
+        raw: entry.raw,
+      );
+      changed = true;
+    }
+    if (changed) {
+      timelineByThread[threadId] = _dedupeEntries(entries);
+    }
   }
 
   void _setTurnCompleted(String threadId, String turnId) {
@@ -2253,24 +2358,79 @@ class CodexAppState extends ChangeNotifier {
         indexBySemantic[mergedSemanticKey] = existingIndex;
       }
     }
-    return result..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return _dropDuplicateOptimisticUserEntries(result)
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
 
   String _entrySemanticKey(TimelineEntry entry) {
+    if (entry.type == 'message' &&
+        entry.role == 'user' &&
+        entry.turnId.isNotEmpty &&
+        entry.text.trim().isNotEmpty) {
+      return 'message:user:${entry.turnId}:${entry.text.trim()}:${_attachmentSignature(entry.attachments)}';
+    }
     if (entry.itemId.isEmpty || entry.type.isEmpty) {
       return '';
     }
     return '${entry.type}:${entry.role}:${entry.itemId}';
   }
 
+  List<TimelineEntry> _dropDuplicateOptimisticUserEntries(
+    List<TimelineEntry> entries,
+  ) {
+    return entries
+        .where((entry) {
+          if (!entry.id.startsWith('local-user:') || entry.role != 'user') {
+            return true;
+          }
+          final text = entry.text.trim();
+          final attachments = _attachmentSignature(entry.attachments);
+          return !entries.any((candidate) {
+            if (candidate.id == entry.id ||
+                candidate.id.startsWith('local-user:') ||
+                candidate.role != 'user') {
+              return false;
+            }
+            if (candidate.text.trim() != text ||
+                _attachmentSignature(candidate.attachments) != attachments) {
+              return false;
+            }
+            if (!entry.turnId.endsWith(':pending-turn') &&
+                candidate.turnId.isNotEmpty &&
+                entry.turnId.isNotEmpty) {
+              return candidate.turnId == entry.turnId;
+            }
+            return (candidate.createdAt - entry.createdAt).abs() <=
+                const Duration(minutes: 10).inMilliseconds;
+          });
+        })
+        .toList(growable: false);
+  }
+
+  String _attachmentSignature(List<AttachmentItem> attachments) {
+    return attachments
+        .map(
+          (item) => item.id
+              .ifEmpty(item.filePath)
+              .ifEmpty(item.url)
+              .ifEmpty(item.name),
+        )
+        .where((value) => value.isNotEmpty)
+        .join(',');
+  }
+
   TimelineEntry _mergeDuplicateEntry(
     TimelineEntry current,
     TimelineEntry incoming,
   ) {
-    final preferIncoming =
-        (!incoming.partial && current.partial) ||
-        incoming.text.length >= current.text.length ||
-        incoming.createdAt >= current.createdAt;
+    final currentIsLocal = current.id.startsWith('local-user:');
+    final incomingIsLocal = incoming.id.startsWith('local-user:');
+    final preferIncoming = !currentIsLocal && incomingIsLocal
+        ? false
+        : (currentIsLocal && !incomingIsLocal) ||
+              (!incoming.partial && current.partial) ||
+              incoming.text.length >= current.text.length ||
+              incoming.createdAt >= current.createdAt;
     final primary = preferIncoming ? incoming : current;
     final secondary = preferIncoming ? current : incoming;
     return primary.copyWith(
