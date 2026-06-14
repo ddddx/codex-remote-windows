@@ -37,6 +37,8 @@ const STRING_APPROVAL_POLICIES = new Set<Extract<v2.AskForApproval, string>>([
   'never',
 ]);
 
+const INITIAL_TURNS_PAGE_LIMIT = 100;
+
 type RequestResponseMap = {
   initialize: InitializeResponse;
   'thread/list': v2.ThreadListResponse;
@@ -340,6 +342,15 @@ export class CodexAppServerClient extends EventEmitter {
     const result = await this.request('thread/resume', {
       threadId,
       excludeTurns: options.excludeTurns === true,
+      ...(options.excludeTurns === true
+        ? {}
+        : {
+            initialTurnsPage: {
+              limit: INITIAL_TURNS_PAGE_LIMIT,
+              sortDirection: 'desc',
+              itemsView: 'full',
+            },
+          }),
       model: options.model || null,
       approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
       sandbox: normalizeSandboxMode(options.sandbox),
@@ -738,10 +749,15 @@ function buildReasoningConfig(effort: string | null | undefined): Record<string,
 
 function projectRuntimeThread(
   thread: Thread,
-  response: Pick<ThreadStartResponse | ThreadResumeResponse, 'model' | 'serviceTier' | 'approvalPolicy' | 'reasoningEffort' | 'cwd' | 'sandbox'>,
+  response: Pick<ThreadStartResponse | ThreadResumeResponse, 'model' | 'serviceTier' | 'approvalPolicy' | 'reasoningEffort' | 'cwd' | 'sandbox'>
+    & { initialTurnsPage?: v2.TurnsPage | null },
 ): RuntimeThread {
+  const initialTurns = Array.isArray(response.initialTurnsPage?.data)
+    ? [...response.initialTurnsPage.data].reverse()
+    : [];
   return {
     ...thread,
+    turns: mergeInitialTurns(thread.turns, initialTurns),
     model: response.model,
     serviceTier: response.serviceTier,
     approvalPolicy: stringifyApprovalPolicy(response.approvalPolicy),
@@ -751,6 +767,39 @@ function projectRuntimeThread(
     sandboxMode: normalizeSandboxModeFromPolicy(response.sandbox) || undefined,
     sandboxPolicy: response.sandbox,
   };
+}
+
+function mergeInitialTurns(threadTurns: Turn[] | undefined, initialTurns: Turn[]): Turn[] {
+  const currentTurns = Array.isArray(threadTurns) ? threadTurns : [];
+  if (!initialTurns.length) {
+    return currentTurns;
+  }
+
+  const merged = [...initialTurns];
+  const indexById = new Map<string, number>();
+  for (let index = 0; index < merged.length; index += 1) {
+    const turnId = merged[index]?.id;
+    if (typeof turnId === 'string' && turnId) {
+      indexById.set(turnId, index);
+    }
+  }
+
+  for (const turn of currentTurns) {
+    const turnId = typeof turn?.id === 'string' ? turn.id : '';
+    const existingIndex = turnId ? indexById.get(turnId) : undefined;
+    if (existingIndex === undefined) {
+      merged.push(turn);
+      continue;
+    }
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      ...turn,
+      items: Array.isArray(turn.items) && turn.items.length ? turn.items : existing.items,
+    };
+  }
+
+  return merged;
 }
 
 function stringifyApprovalPolicy(value: AskForApproval | null | undefined): string | undefined {

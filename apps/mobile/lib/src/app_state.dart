@@ -813,8 +813,11 @@ class CodexAppState extends ChangeNotifier {
     ];
     final turns = message['turns'];
     if (turns is List) {
-      for (final rawTurn in turns.whereType<JsonMap>()) {
-        entries.addAll(_entriesFromTurn(rawTurn));
+      for (var index = 0; index < turns.length; index += 1) {
+        final rawTurn = turns[index];
+        if (rawTurn is JsonMap) {
+          entries.addAll(_entriesFromTurn(threadId, rawTurn, index));
+        }
       }
     }
     final turnPlans = message['turnPlans'];
@@ -877,13 +880,51 @@ class CodexAppState extends ChangeNotifier {
     unreadThreadIds.remove(threadId);
   }
 
-  List<TimelineEntry> _entriesFromTurn(JsonMap turn) {
+  List<TimelineEntry> _entriesFromTurn(
+    String threadId,
+    JsonMap turn,
+    int index,
+  ) {
     final threadEntries = <TimelineEntry>[];
-    final turnId = readString(turn, 'id');
-    final startedAt = readInt(turn, 'startedAt', readInt(turn, 'createdAt'));
+    final turnId = readString(turn, 'id', '$threadId-$index');
+    final syntheticTurnTime = 1700000000000 + ((index + 1) * 1000);
+    final createdAt = _normalizeTimestamp(
+      readInt(
+        turn,
+        'createdAt',
+        readInt(
+          turn,
+          'updatedAt',
+          readInt(turn, 'startedAt', syntheticTurnTime),
+        ),
+      ),
+    );
+    var hasUserMessage = false;
+    var hasAssistantMessage = false;
+    final items = turn['items'];
+    var itemCount = 0;
+    if (items is List) {
+      itemCount = items.length;
+      for (var itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+        final item = items[itemIndex];
+        if (item is! JsonMap) {
+          continue;
+        }
+        final entry = _entryFromItem(item, turnId, createdAt + itemIndex);
+        if (entry == null) {
+          continue;
+        }
+        threadEntries.add(entry);
+        if (entry.type == 'message' && entry.role == 'user') {
+          hasUserMessage = true;
+        } else if (entry.type == 'message' && entry.role == 'assistant') {
+          hasAssistantMessage = true;
+        }
+      }
+    }
     final inputText = _extractTurnUserText(turn);
     final inputAttachments = _attachmentsFromInput(turn['input']);
-    if (inputText.isNotEmpty) {
+    if (!hasUserMessage && inputText.isNotEmpty) {
       threadEntries.add(
         TimelineEntry(
           id: 'turn-$turnId-user',
@@ -893,10 +934,10 @@ class CodexAppState extends ChangeNotifier {
           text: inputText,
           attachments: inputAttachments,
           turnId: turnId,
-          createdAt: _normalizeTimestamp(startedAt),
+          createdAt: createdAt,
         ),
       );
-    } else if (inputAttachments.isNotEmpty) {
+    } else if (!hasUserMessage && inputAttachments.isNotEmpty) {
       threadEntries.add(
         TimelineEntry(
           id: 'turn-$turnId-user',
@@ -906,20 +947,11 @@ class CodexAppState extends ChangeNotifier {
           text: '图片',
           attachments: inputAttachments,
           turnId: turnId,
-          createdAt: _normalizeTimestamp(startedAt),
+          createdAt: createdAt,
         ),
       );
     }
-    final items = turn['items'];
-    if (items is List) {
-      for (final item in items.whereType<JsonMap>()) {
-        threadEntries.add(_entryFromItem(item, turnId, startedAt));
-      }
-    }
     final outputText = _extractTurnAssistantText(turn);
-    final hasAssistantMessage = threadEntries.any(
-      (entry) => entry.type == 'message' && entry.role == 'assistant',
-    );
     if (outputText.isNotEmpty && !hasAssistantMessage) {
       threadEntries.add(
         TimelineEntry(
@@ -930,7 +962,11 @@ class CodexAppState extends ChangeNotifier {
           text: outputText,
           turnId: turnId,
           createdAt: _normalizeTimestamp(
-            readInt(turn, 'completedAt', startedAt + 1),
+            readInt(
+              turn,
+              'completedAt',
+              readInt(turn, 'updatedAt', createdAt + itemCount),
+            ),
           ),
         ),
       );
@@ -985,7 +1021,9 @@ class CodexAppState extends ChangeNotifier {
             (type == 'message' && role == 'assistant')) {
           final text = _extractText(item['text'])
               .ifEmpty(_extractText(item['content']))
-              .ifEmpty(_extractText(item['output']));
+              .ifEmpty(_extractText(item['output']))
+              .ifEmpty(_extractText(item['message']))
+              .ifEmpty(_extractText(item['parts']));
           if (text.isNotEmpty) {
             return text;
           }
@@ -1011,12 +1049,24 @@ class CodexAppState extends ChangeNotifier {
     final path = readString(value, 'path')
         .ifEmpty(readString(value, 'filePath'))
         .ifEmpty(readString(value, 'file_path'))
+        .ifEmpty(readString(value, 'image_url'))
+        .ifEmpty(readString(value, 'imageUrl'))
         .ifEmpty(readString(value, 'url'));
+    final url = readString(value, 'url')
+        .ifEmpty(readString(value, 'image_url'))
+        .ifEmpty(readString(value, 'imageUrl'))
+        .ifEmpty(
+          type == 'localImage' && path.isNotEmpty
+              ? '/api/uploads/${Uri.encodeComponent(_basename(path))}'
+              : '',
+        );
     final nested = [
       ..._attachmentsFromInput(value['content']),
       ..._attachmentsFromInput(value['parts']),
       ..._attachmentsFromInput(value['input']),
       ..._attachmentsFromInput(value['message']),
+      ..._attachmentsFromInput(value['output']),
+      ..._attachmentsFromInput(value['attachments']),
     ];
     if (type == 'localImage' ||
         type == 'image' ||
@@ -1031,10 +1081,14 @@ class CodexAppState extends ChangeNotifier {
           contentType: readString(
             value,
             'contentType',
-            readString(value, 'mimeType', 'image/*'),
+            readString(
+              value,
+              'mimeType',
+              readString(value, 'mime_type', 'image/*'),
+            ),
           ),
           filePath: path,
-          url: readString(value, 'url'),
+          url: url,
         ),
         ...nested,
       ]);
@@ -1078,32 +1132,58 @@ class CodexAppState extends ChangeNotifier {
     return parts.isEmpty ? normalized : parts.last;
   }
 
-  TimelineEntry _entryFromItem(JsonMap item, String turnId, int fallbackTime) {
+  TimelineEntry? _entryFromItem(JsonMap item, String turnId, int fallbackTime) {
     final type = readString(item, 'type');
     final id = readString(
       item,
       'id',
-      'item-$turnId-${timelineByThread.length}-${Random().nextInt(99999)}',
+      'item-$turnId-${type.ifEmpty('item')}-$fallbackTime',
     );
     final status = readString(item, 'status', 'completed');
     final title = _itemTitle(type, item);
-    final text = _itemText(item);
     final timelineType = _timelineTypeForItem(type);
-    final patchSource = readString(
-      item,
-      'patch',
-    ).ifEmpty(readString(item, 'diff')).ifEmpty(readString(item, 'output'));
-    final patch = timelineType == 'command' ? '' : patchSource;
-    final attachments = [
+    final role = _roleForItem(type, item);
+    final attachments = _dedupeAttachments([
       ..._attachmentsFromInput(item['content']),
       ..._attachmentsFromInput(item['input']),
       ..._attachmentsFromInput(item['parts']),
-    ];
+      ..._attachmentsFromInput(item['message']),
+      ..._attachmentsFromInput(item['attachments']),
+    ]);
+    if (timelineType == 'message' && (role == 'user' || role == 'assistant')) {
+      final text = _messageItemText(item);
+      if (text.isEmpty && attachments.isEmpty) {
+        return null;
+      }
+      return TimelineEntry(
+        id: id,
+        type: 'message',
+        title: role == 'user' ? '你' : 'Codex',
+        role: role,
+        text: text.ifEmpty(role == 'user' ? '图片' : ''),
+        status: status,
+        turnId: turnId,
+        itemId: id,
+        attachments: attachments,
+        createdAt: _normalizeTimestamp(
+          readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime)),
+        ),
+        details: item,
+        raw: item,
+      );
+    }
+    final text = _itemText(item);
+    final patchSource = readString(item, 'patch')
+        .ifEmpty(readString(item, 'diff'))
+        .ifEmpty(readString(item, 'output'))
+        .ifEmpty(_extractText(item['output']))
+        .ifEmpty(readString(item, 'aggregatedOutput'));
+    final patch = timelineType == 'command' ? '' : patchSource;
     return TimelineEntry(
       id: id,
       type: timelineType,
       title: title,
-      role: _roleForItem(type, item),
+      role: role,
       text: text,
       status: status,
       turnId: turnId,
@@ -1111,7 +1191,7 @@ class CodexAppState extends ChangeNotifier {
       meta: _itemMeta(type, item),
       patch: patch,
       changes: readMapList(item, 'changes'),
-      attachments: _dedupeAttachments(attachments),
+      attachments: attachments,
       createdAt: _normalizeTimestamp(
         readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime)),
       ),
@@ -1787,13 +1867,17 @@ class CodexAppState extends ChangeNotifier {
   void _appendItemStarted(JsonMap event) {
     final item = event['item'];
     if (item is JsonMap) {
+      final entry = _entryFromItem(
+        item,
+        readString(event, 'turnId'),
+        _eventTime(event),
+      );
+      if (entry == null) {
+        return;
+      }
       _appendEntry(
         readString(event, 'threadId'),
-        _entryFromItem(
-          item,
-          readString(event, 'turnId'),
-          _eventTime(event),
-        ).copyWith(partial: true),
+        entry.copyWith(partial: true),
       );
     }
   }
@@ -1812,9 +1896,7 @@ class CodexAppState extends ChangeNotifier {
     );
     if (itemType == 'agentMessage' ||
         (itemType == 'message' && readString(item, 'role') == 'assistant')) {
-      final finalText = _extractText(item['text'])
-          .ifEmpty(_extractText(item['content']))
-          .ifEmpty(_extractText(item['output']));
+      final finalText = _messageItemText(item);
       final entryId = itemId.ifEmpty(
         '${threadId}:${readString(event, 'turnId', 'turn')}:assistant',
       );
@@ -1848,14 +1930,14 @@ class CodexAppState extends ChangeNotifier {
       }
       return;
     }
-    _appendEntry(
-      threadId,
-      _entryFromItem(
-        item,
-        readString(event, 'turnId'),
-        _eventTime(event),
-      ).copyWith(partial: false),
+    final entry = _entryFromItem(
+      item,
+      readString(event, 'turnId'),
+      _eventTime(event),
     );
+    if (entry != null) {
+      _appendEntry(threadId, entry.copyWith(partial: false));
+    }
   }
 
   void _appendItemDelta(JsonMap event) {
@@ -2554,12 +2636,31 @@ class CodexAppState extends ChangeNotifier {
     return type.ifEmpty(readString(item, 'id', '事件'));
   }
 
+  String _messageItemText(JsonMap item) {
+    return _extractText(item['text'])
+        .ifEmpty(_extractText(item['content']))
+        .ifEmpty(_extractText(item['input']))
+        .ifEmpty(_extractText(item['output']))
+        .ifEmpty(_extractText(item['message']))
+        .ifEmpty(_extractText(item['parts']));
+  }
+
   String _itemText(JsonMap item) {
+    final type = readString(item, 'type');
+    if (type == 'contextCompaction') {
+      return _extractText(
+        item['summary'],
+      ).ifEmpty(_extractText(item['text'])).ifEmpty('上下文已压缩');
+    }
     return readString(item, 'text')
         .ifEmpty(readString(item, 'command'))
+        .ifEmpty(readString(item, 'input'))
+        .ifEmpty(readString(item, 'output'))
+        .ifEmpty(readString(item, 'aggregatedOutput'))
         .ifEmpty(readString(item, 'message'))
         .ifEmpty(readString(item, 'patch'))
         .ifEmpty(_extractText(item['content']))
+        .ifEmpty(_extractText(item['parts']))
         .ifEmpty(readString(item, 'id'));
   }
 
