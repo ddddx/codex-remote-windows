@@ -184,6 +184,33 @@ void main() {
     expect(state.timelineByThread[threadId], isEmpty);
     state.dispose();
   });
+
+  test('replays thread sync events that inherit outer thread id', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-1';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [],
+      'timelineEvents': [
+        {
+          'type': 'item_completed',
+          'turnId': 'turn-1',
+          'item': {
+            'id': 'assistant-1',
+            'type': 'agentMessage',
+            'text': 'Restored message',
+          },
+        },
+      ],
+    });
+
+    final entries = state.timelineByThread[threadId] ?? const [];
+    expect(entries.where((item) => item.role == 'assistant'), hasLength(1));
+    expect(entries.single.text, 'Restored message');
+    state.dispose();
+  });
 }
 
 class _TestBridge extends NativeBridge {

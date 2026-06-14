@@ -1127,7 +1127,8 @@ class CodexAppState extends ChangeNotifier {
     Set<String> settledIds,
   ) {
     final eventType = readString(event, 'type');
-    if (eventType.isEmpty || readString(event, 'threadId') != threadId) {
+    final eventThreadId = readString(event, 'threadId', threadId);
+    if (eventType.isEmpty || eventThreadId != threadId) {
       return false;
     }
     if (eventType == 'thread_event' &&
