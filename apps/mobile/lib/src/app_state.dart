@@ -295,14 +295,22 @@ class CodexAppState extends ChangeNotifier {
       notifyListeners();
     });
     await socket.connect();
+    _syncActiveThread();
   }
 
   void selectSession(String threadId) {
     activeSessionId = threadId;
     unreadThreadIds.remove(threadId);
     unawaited(bridge.setString('activeSessionId', threadId));
-    _socket?.send({'type': 'thread_sync', 'threadId': threadId});
+    _syncActiveThread();
     notifyListeners();
+  }
+
+  void _syncActiveThread() {
+    if (activeSessionId.isEmpty) {
+      return;
+    }
+    _socket?.send({'type': 'thread_sync', 'threadId': activeSessionId});
   }
 
   Future<void> createSession({required String name, required String cwd}) async {
@@ -353,7 +361,8 @@ class CodexAppState extends ChangeNotifier {
 
   Future<void> sendPrompt(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || activeSessionId.isEmpty) {
+    final pendingAttachments = activeAttachments;
+    if ((trimmed.isEmpty && pendingAttachments.isEmpty) || activeSessionId.isEmpty) {
       return;
     }
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -363,7 +372,8 @@ class CodexAppState extends ChangeNotifier {
       type: 'message',
       title: '你',
       role: 'user',
-      text: trimmed,
+      text: trimmed.isEmpty ? '图片' : trimmed,
+      attachments: pendingAttachments,
       createdAt: now,
     ));
     if (trimmed.startsWith('/') || trimmed.startsWith('!')) {
@@ -377,7 +387,7 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     final prefs = activePrefs;
-    final attachments = activeAttachments.map((item) => {'path': item.filePath, 'name': item.name}).toList(growable: false);
+    final attachments = pendingAttachments.map((item) => {'path': item.filePath, 'name': item.name}).toList(growable: false);
     attachmentsByThread[activeSessionId] = [];
     _socket?.send({
       'type': 'turn_send',
@@ -597,7 +607,12 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     sessions = value.whereType<JsonMap>().map(SessionItem.fromJson).where((item) => item.threadId.isNotEmpty).toList(growable: false);
-    if (activeSessionId.isEmpty && sessions.isNotEmpty) {
+    if (sessions.isEmpty) {
+      activeSessionId = '';
+      unawaited(bridge.remove('activeSessionId'));
+      return;
+    }
+    if (activeSessionId.isEmpty || !sessions.any((item) => item.threadId == activeSessionId)) {
       activeSessionId = sessions.first.threadId;
       unawaited(bridge.setString('activeSessionId', activeSessionId));
     }
@@ -607,6 +622,7 @@ class CodexAppState extends ChangeNotifier {
         tokenUsageByThread[session.threadId] = session.tokenUsage!;
       }
     }
+    _syncActiveThread();
   }
 
   void _replaceApprovals(dynamic value) {
@@ -746,7 +762,8 @@ class CodexAppState extends ChangeNotifier {
     final threadEntries = <TimelineEntry>[];
     final turnId = readString(turn, 'id');
     final startedAt = readInt(turn, 'startedAt', readInt(turn, 'createdAt'));
-    final inputText = _extractText(turn['input']);
+    final inputText = _extractTurnUserText(turn);
+    final inputAttachments = _attachmentsFromInput(turn['input']);
     if (inputText.isNotEmpty) {
       threadEntries.add(TimelineEntry(
         id: 'turn-$turnId-user',
@@ -754,6 +771,18 @@ class CodexAppState extends ChangeNotifier {
         title: '你',
         role: 'user',
         text: inputText,
+        attachments: inputAttachments,
+        turnId: turnId,
+        createdAt: _normalizeTimestamp(startedAt),
+      ));
+    } else if (inputAttachments.isNotEmpty) {
+      threadEntries.add(TimelineEntry(
+        id: 'turn-$turnId-user',
+        type: 'message',
+        title: '你',
+        role: 'user',
+        text: '图片',
+        attachments: inputAttachments,
         turnId: turnId,
         createdAt: _normalizeTimestamp(startedAt),
       ));
@@ -764,7 +793,7 @@ class CodexAppState extends ChangeNotifier {
         threadEntries.add(_entryFromItem(item, turnId, startedAt));
       }
     }
-    final outputText = _extractText(turn['output']);
+    final outputText = _extractTurnAssistantText(turn);
     if (outputText.isNotEmpty) {
       threadEntries.add(TimelineEntry(
         id: 'turn-$turnId-assistant',
@@ -779,6 +808,119 @@ class CodexAppState extends ChangeNotifier {
     return threadEntries;
   }
 
+  String _extractTurnUserText(JsonMap turn) {
+    final direct = readString(turn, 'text');
+    if (direct.trim().isNotEmpty) {
+      return direct.trim();
+    }
+    final items = turn['items'];
+    if (items is List) {
+      final parts = <String>[];
+      for (final item in items.whereType<JsonMap>()) {
+        final type = readString(item, 'type');
+        final role = readString(item, 'role');
+        if (type == 'userMessage' || (type == 'message' && role == 'user')) {
+          parts.add(_extractText(item['text'])
+              .ifEmpty(_extractText(item['content']))
+              .ifEmpty(_extractText(item['input']))
+              .ifEmpty(_extractText(item['message']))
+              .ifEmpty(_extractText(item['parts'])));
+        }
+      }
+      final joined = parts.where((item) => item.trim().isNotEmpty).join('\n');
+      if (joined.isNotEmpty) {
+        return joined;
+      }
+    }
+    final inputText = _extractText(turn['input']);
+    if (inputText.isNotEmpty) {
+      return inputText;
+    }
+    return readString(turn, 'summary');
+  }
+
+  String _extractTurnAssistantText(JsonMap turn) {
+    final outputText = _extractText(turn['output']);
+    if (outputText.isNotEmpty) {
+      return outputText;
+    }
+    final items = turn['items'];
+    if (items is List) {
+      for (final item in items.whereType<JsonMap>()) {
+        final type = readString(item, 'type');
+        final role = readString(item, 'role');
+        if (type == 'agentMessage' || (type == 'message' && role == 'assistant')) {
+          final text = _extractText(item['text']).ifEmpty(_extractText(item['content'])).ifEmpty(_extractText(item['output']));
+          if (text.isNotEmpty) {
+            return text;
+          }
+        }
+      }
+    }
+    return '';
+  }
+
+  List<AttachmentItem> _attachmentsFromInput(dynamic value) {
+    if (value == null) {
+      return const [];
+    }
+    if (value is List) {
+      return _dedupeAttachments(value.expand(_attachmentsFromInput).toList(growable: false));
+    }
+    if (value is! JsonMap) {
+      return const [];
+    }
+    final type = readString(value, 'type');
+    final path = readString(value, 'path')
+        .ifEmpty(readString(value, 'filePath'))
+        .ifEmpty(readString(value, 'file_path'))
+        .ifEmpty(readString(value, 'url'));
+    final nested = [
+      ..._attachmentsFromInput(value['content']),
+      ..._attachmentsFromInput(value['parts']),
+      ..._attachmentsFromInput(value['input']),
+      ..._attachmentsFromInput(value['message']),
+    ];
+    if (type == 'localImage' || type == 'image' || type == 'input_image' || (path.isNotEmpty && _looksLikeImagePath(path))) {
+      return _dedupeAttachments([
+        AttachmentItem(
+          id: path.isEmpty ? 'image-${DateTime.now().microsecondsSinceEpoch}' : path,
+          name: _basename(path).ifEmpty('image'),
+          contentType: readString(value, 'contentType', readString(value, 'mimeType', 'image/*')),
+          filePath: path,
+          url: readString(value, 'url'),
+        ),
+        ...nested,
+      ]);
+    }
+    return nested;
+  }
+
+  List<AttachmentItem> _dedupeAttachments(List<AttachmentItem> items) {
+    final byId = <String, AttachmentItem>{};
+    for (final item in items) {
+      final key = item.id.ifEmpty(item.filePath).ifEmpty(item.url).ifEmpty(item.name);
+      if (key.isNotEmpty) {
+        byId[key] = item;
+      }
+    }
+    return byId.values.toList(growable: false);
+  }
+
+  bool _looksLikeImagePath(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif') || lower.endsWith('.bmp');
+  }
+
+  String _basename(String path) {
+    final normalized = path.trim().replaceAll(RegExp(r'[\\/]+$'), '');
+    if (normalized.isEmpty) {
+      return '';
+    }
+    final parts = normalized.split(RegExp(r'[\\/]')).where((item) => item.isNotEmpty).toList(growable: false);
+    return parts.isEmpty ? normalized : parts.last;
+  }
+
   TimelineEntry _entryFromItem(JsonMap item, String turnId, int fallbackTime) {
     final type = readString(item, 'type');
     final id = readString(item, 'id', 'item-$turnId-${timelineByThread.length}-${Random().nextInt(99999)}');
@@ -786,6 +928,11 @@ class CodexAppState extends ChangeNotifier {
     final title = _itemTitle(type, item);
     final text = _itemText(item);
     final patch = readString(item, 'patch').ifEmpty(readString(item, 'diff')).ifEmpty(readString(item, 'output'));
+    final attachments = [
+      ..._attachmentsFromInput(item['content']),
+      ..._attachmentsFromInput(item['input']),
+      ..._attachmentsFromInput(item['parts']),
+    ];
     return TimelineEntry(
       id: id,
       type: _timelineTypeForItem(type),
@@ -798,6 +945,7 @@ class CodexAppState extends ChangeNotifier {
       meta: _itemMeta(type, item),
       patch: patch,
       changes: readMapList(item, 'changes'),
+      attachments: _dedupeAttachments(attachments),
       createdAt: _normalizeTimestamp(readInt(item, 'startedAt', readInt(item, 'createdAt', fallbackTime))),
       raw: item,
     );
@@ -1661,7 +1809,11 @@ class CodexAppState extends ChangeNotifier {
       return value.map(_extractText).where((item) => item.trim().isNotEmpty).join('\n');
     }
     if (value is JsonMap) {
-      for (final key in ['text', 'message', 'content', 'input', 'summary']) {
+      final type = readString(value, 'type');
+      if (type == 'localImage' || type == 'image' || type == 'input_image') {
+        return '';
+      }
+      for (final key in ['text', 'outputText', 'output_text', 'inputText', 'input_text', 'value', 'message', 'content', 'parts', 'output', 'input', 'summary']) {
         final extracted = _extractText(value[key]);
         if (extracted.isNotEmpty) {
           return extracted;

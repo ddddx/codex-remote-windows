@@ -63,8 +63,18 @@ void main() {
     changes: [
       {'path': 'app.dart', 'addedLines': 1},
     ],
+    attachments: [
+      AttachmentItem(
+        id: 'upload.png',
+        name: 'upload.png',
+        contentType: 'image/png',
+        filePath: r'C:\repo\upload.png',
+        url: '/api/uploads/upload.png',
+      ),
+    ],
   ).copyWith(status: 'completed', partial: false);
   _expect(entry.changes.single['path'] == 'app.dart', 'timeline changes preserved');
+  _expect(entry.attachments.single.url == '/api/uploads/upload.png', 'timeline attachments preserved');
 }
 
 void _expect(bool condition, String label) {

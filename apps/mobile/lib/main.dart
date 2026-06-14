@@ -23,30 +23,41 @@ class CodexRemoteMobileApp extends StatefulWidget {
 }
 
 class _CodexRemoteMobileAppState extends State<CodexRemoteMobileApp> {
+  late String _theme = widget.state.theme;
+
   @override
   void initState() {
     super.initState();
+    widget.state.addListener(_handleStateChanged);
     widget.state.initialize();
   }
 
   @override
   void dispose() {
+    widget.state.removeListener(_handleStateChanged);
     widget.state.dispose();
     super.dispose();
   }
 
+  void _handleStateChanged() {
+    if (_theme == widget.state.theme) {
+      return;
+    }
+    setState(() {
+      _theme = widget.state.theme;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.state,
-      builder: (context, _) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'Codex Remote',
-          theme: _themeFor(widget.state.theme),
-          home: AppShell(state: widget.state),
-        );
-      },
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Codex Remote',
+      theme: _themeFor(_theme),
+      home: AnimatedBuilder(
+        animation: widget.state,
+        builder: (context, _) => AppShell(state: widget.state),
+      ),
     );
   }
 }
@@ -293,11 +304,13 @@ class SessionDrawer extends StatelessWidget {
                 children: [
                   ...open.map((item) => SessionTile(state: state, session: item)),
                   if (closed.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 18, 16, 6),
-                      child: Text('已关闭', style: Theme.of(context).textTheme.labelMedium),
+                    ExpansionTile(
+                      leading: const Icon(Icons.archive_outlined),
+                      title: const Text('已关闭'),
+                      subtitle: Text('${closed.length} 个会话'),
+                      initiallyExpanded: false,
+                      children: closed.map((item) => SessionTile(state: state, session: item)).toList(growable: false),
                     ),
-                  ...closed.map((item) => SessionTile(state: state, session: item)),
                 ],
               ),
             ),
@@ -392,14 +405,15 @@ class TimelineView extends StatelessWidget {
       controller: controller,
       padding: const EdgeInsets.only(top: 8, bottom: 8),
       itemCount: entries.length,
-      itemBuilder: (context, index) => TimelineCard(entry: entries[index]),
+      itemBuilder: (context, index) => TimelineCard(state: state, entry: entries[index]),
     );
   }
 }
 
 class TimelineCard extends StatelessWidget {
-  const TimelineCard({super.key, required this.entry});
+  const TimelineCard({super.key, required this.state, required this.entry});
 
+  final CodexAppState state;
   final TimelineEntry entry;
 
   @override
@@ -442,6 +456,10 @@ class TimelineCard extends StatelessWidget {
                   const SizedBox(height: 8),
                   SelectableText(entry.text),
                 ],
+                if (entry.attachments.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  AttachmentStrip(state: state, attachments: entry.attachments),
+                ],
                 if (entry.meta.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Wrap(
@@ -476,6 +494,109 @@ class TimelineCard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class AttachmentStrip extends StatelessWidget {
+  const AttachmentStrip({
+    super.key,
+    required this.state,
+    required this.attachments,
+    this.onRemove,
+  });
+
+  final CodexAppState state;
+  final List<AttachmentItem> attachments;
+  final ValueChanged<AttachmentItem>? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 88,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: attachments.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final item = attachments[index];
+          return SizedBox(
+            width: 92,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _attachmentImage(context, item),
+                  ),
+                ),
+                Positioned(
+                  left: 4,
+                  right: 4,
+                  bottom: 4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      child: Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ),
+                if (onRemove != null)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: IconButton.filled(
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 14,
+                      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => onRemove!(item),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _attachmentImage(BuildContext context, AttachmentItem item) {
+    if (item.url.isNotEmpty) {
+      return Image.network(
+        state.api.url(item.url).toString(),
+        headers: state.cookie.isEmpty ? null : {'Cookie': state.cookie},
+        fit: BoxFit.cover,
+        errorBuilder: (context, _, _) => _attachmentFallback(context, item),
+      );
+    }
+    return _attachmentFallback(context, item);
+  }
+
+  Widget _attachmentFallback(BuildContext context, AttachmentItem item) {
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.image_outlined),
+            const SizedBox(height: 4),
+            Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center),
+          ],
         ),
       ),
     );
@@ -572,20 +693,12 @@ class ComposerBar extends StatelessWidget {
                 ),
                 SlashCommandSuggestions(controller: controller),
                 if (state.activeAttachments.isNotEmpty)
-                  SizedBox(
-                    height: 44,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      children: state.activeAttachments.map((item) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8, top: 8),
-                          child: InputChip(
-                            avatar: const Icon(Icons.image_outlined, size: 18),
-                            label: Text(item.name, overflow: TextOverflow.ellipsis),
-                            onDeleted: () => state.removeAttachment(item.id),
-                          ),
-                        );
-                      }).toList(growable: false),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: AttachmentStrip(
+                      state: state,
+                      attachments: state.activeAttachments,
+                      onRemove: (item) => state.removeAttachment(item.id),
                     ),
                   ),
                 const SizedBox(height: 6),

@@ -125,6 +125,7 @@ class TimelineEntry {
     this.meta = const [],
     this.patch = '',
     this.changes = const [],
+    this.attachments = const [],
     this.createdAt = 0,
     this.partial = false,
     this.raw,
@@ -141,6 +142,7 @@ class TimelineEntry {
   final List<String> meta;
   final String patch;
   final List<JsonMap> changes;
+  final List<AttachmentItem> attachments;
   final int createdAt;
   final bool partial;
   final JsonMap? raw;
@@ -154,6 +156,7 @@ class TimelineEntry {
     bool? partial,
     List<String>? meta,
     List<JsonMap>? changes,
+    List<AttachmentItem>? attachments,
     JsonMap? raw,
   }) {
     return TimelineEntry(
@@ -168,6 +171,7 @@ class TimelineEntry {
       meta: meta ?? this.meta,
       patch: patch ?? this.patch,
       changes: changes ?? this.changes,
+      attachments: attachments ?? this.attachments,
       createdAt: createdAt,
       partial: partial ?? this.partial,
       raw: raw ?? this.raw,
