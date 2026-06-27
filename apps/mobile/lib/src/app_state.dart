@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -17,6 +18,7 @@ class CodexAppState extends ChangeNotifier {
   StreamSubscription<JsonMap>? _messageSub;
   StreamSubscription<String>? _statusSub;
   Timer? _workingTimer;
+  bool _reauthenticating = false;
 
   String serverUrl = 'http://127.0.0.1:18637';
   String token = '';
@@ -76,6 +78,7 @@ class CodexAppState extends ChangeNotifier {
   JsonMap? get activeTokenUsage =>
       tokenUsageByThread[activeSessionId] ?? activeSession?.tokenUsage;
 
+  bool get requiresSetup => cookie.isEmpty || _usesAndroidLoopbackServerUrl();
   bool get isConfigured =>
       serverUrl.trim().isNotEmpty && token.trim().isNotEmpty;
   bool get isConnected => connectionStatus == 'connected';
@@ -109,6 +112,14 @@ class CodexAppState extends ChangeNotifier {
           'android-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(999999)}';
       await bridge.setString('deviceId', deviceId);
     }
+    if (_usesAndroidLoopbackServerUrl()) {
+      cookie = '';
+      await bridge.remove('cookie');
+      errorMessage =
+          'Android APP 不能使用 127.0.0.1 连接电脑服务，请改成电脑局域网 IP，例如 http://电脑IP:18637。';
+      notifyListeners();
+      return;
+    }
     _configureApi();
     await refreshHealth();
     if (token.isNotEmpty && cookie.isNotEmpty) {
@@ -140,35 +151,104 @@ class CodexAppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> login() async {
+  Future<bool> login() async {
     busy = true;
     errorMessage = '';
     notifyListeners();
     try {
+      _validateLoginConfig();
       _configureApi();
       await api.postJson('/api/auth/session', {
-        'token': token,
+        'token': token.trim(),
         'deviceName': 'Android App',
         'deviceId': deviceId,
-      }, token: token);
+      }, token: token.trim());
       cookie = api.cookie;
       if (cookie.isEmpty) {
         throw ApiException('服务没有返回登录 Cookie');
       }
-      await bridge.setString('serverUrl', serverUrl);
-      await bridge.setString('token', token);
+      await bridge.setString('serverUrl', serverUrl.trim());
+      await bridge.setString('token', token.trim());
       await bridge.setString('cookie', cookie);
       await connectSocket();
       await refreshHealth();
       await loadCodexOptions();
       await loadWorkspace();
       await loadAuthSessions();
+      return true;
     } catch (error) {
-      errorMessage = error.toString();
+      errorMessage = _friendlyErrorMessage(error);
+      return false;
     } finally {
       busy = false;
       notifyListeners();
     }
+  }
+
+  void _validateLoginConfig() {
+    serverUrl = serverUrl.trim();
+    token = token.trim();
+    if (serverUrl.isEmpty) {
+      throw ApiException('请填写服务地址，例如 http://电脑IP:18637。');
+    }
+    if (token.isEmpty) {
+      throw ApiException('请填写访问 Token。');
+    }
+    if (_usesAndroidLoopbackServerUrl()) {
+      throw ApiException(
+        'Android APP 不能使用 127.0.0.1 连接电脑服务，请改成电脑局域网 IP，例如 http://电脑IP:18637。',
+      );
+    }
+  }
+
+  String _friendlyErrorMessage(Object error) {
+    if (error is ApiException) {
+      return error.message;
+    }
+    if (error is TimeoutException) {
+      return '连接超时，请确认电脑服务正在运行，并且手机能访问这个地址。';
+    }
+    if (error is SocketException) {
+      final message = error.message.toLowerCase();
+      if (message.contains('failed host lookup')) {
+        return '找不到服务地址，请检查 IP 或域名是否正确。';
+      }
+      if (message.contains('connection refused') ||
+          message.contains('actively refused') ||
+          message.contains('connection failed')) {
+        return '服务拒绝连接，请确认 Windows 端服务已启动并监听 18637 端口。';
+      }
+      if (message.contains('network is unreachable') ||
+          message.contains('no route to host')) {
+        return '手机无法访问该网络地址，请确认手机和电脑在同一网络或使用 Tailscale 地址。';
+      }
+      return '连接失败：${error.message}';
+    }
+    if (error is FormatException) {
+      return '服务地址格式不正确，请填写类似 http://电脑IP:18637 的地址。';
+    }
+    final text = error.toString();
+    return text.isEmpty ? '连接失败，请检查服务地址和 Token。' : text;
+  }
+
+  bool _usesAndroidLoopbackServerUrl() {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+    final trimmed = serverUrl.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    final withScheme =
+        trimmed.startsWith('http://') ||
+            trimmed.startsWith('https://') ||
+            trimmed.startsWith('ws://') ||
+            trimmed.startsWith('wss://')
+        ? trimmed
+        : 'http://$trimmed';
+    final uri = Uri.tryParse(withScheme);
+    final host = uri?.host.toLowerCase() ?? '';
+    return host == '127.0.0.1' || host == 'localhost' || host == '::1';
   }
 
   Future<void> logout() async {
@@ -230,17 +310,30 @@ class CodexAppState extends ChangeNotifier {
     }
   }
 
-  Future<void> refreshHealth() async {
+  Future<bool> refreshHealth() async {
     healthStatus = 'loading';
+    errorMessage = '';
     notifyListeners();
     try {
+      if (serverUrl.trim().isEmpty) {
+        throw ApiException('请填写服务地址，例如 http://电脑IP:18637。');
+      }
+      if (_usesAndroidLoopbackServerUrl()) {
+        throw ApiException(
+          'Android APP 不能使用 127.0.0.1 连接电脑服务，请改成电脑局域网 IP，例如 http://电脑IP:18637。',
+        );
+      }
+      _configureApi();
       final payload = await api.getJson('/health');
       healthStatus = readString(payload, 'status', 'ok');
+      notifyListeners();
+      return true;
     } catch (error) {
       healthStatus = 'error';
-      errorMessage = error.toString();
+      errorMessage = _friendlyErrorMessage(error);
+      notifyListeners();
+      return false;
     }
-    notifyListeners();
   }
 
   Future<void> loadCodexOptions() async {
@@ -674,6 +767,7 @@ class CodexAppState extends ChangeNotifier {
 
   void _configureApi() {
     _api?.close();
+    serverUrl = serverUrl.trim();
     _api = CodexApi(baseUrl: serverUrl, cookie: cookie);
   }
 
@@ -808,14 +902,15 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty) {
       return;
     }
+    _ensureThreadVisible(threadId);
     var entries = <TimelineEntry>[
       ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
     ];
     final turns = message['turns'];
     if (turns is List) {
       for (var index = 0; index < turns.length; index += 1) {
-        final rawTurn = turns[index];
-        if (rawTurn is JsonMap) {
+        final rawTurn = _asJsonMap(turns[index]);
+        if (rawTurn != null) {
           entries.addAll(_entriesFromTurn(threadId, rawTurn, index));
         }
       }
@@ -880,6 +975,17 @@ class CodexAppState extends ChangeNotifier {
     unreadThreadIds.remove(threadId);
   }
 
+  void _ensureThreadVisible(String threadId) {
+    if (!sessions.any((item) => item.threadId == threadId)) {
+      sessions = [...sessions, SessionItem(threadId: threadId, name: '未命名会话')];
+    }
+    if (activeSessionId.isEmpty ||
+        !sessions.any((item) => item.threadId == activeSessionId)) {
+      activeSessionId = threadId;
+      unawaited(bridge.setString('activeSessionId', activeSessionId));
+    }
+  }
+
   List<TimelineEntry> _entriesFromTurn(
     String threadId,
     JsonMap turn,
@@ -906,8 +1012,8 @@ class CodexAppState extends ChangeNotifier {
     if (items is List) {
       itemCount = items.length;
       for (var itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-        final item = items[itemIndex];
-        if (item is! JsonMap) {
+        final item = _asJsonMap(items[itemIndex]);
+        if (item == null) {
           continue;
         }
         final entry = _entryFromItem(item, turnId, createdAt + itemIndex);
@@ -982,10 +1088,14 @@ class CodexAppState extends ChangeNotifier {
     final items = turn['items'];
     if (items is List) {
       final parts = <String>[];
-      for (final item in items.whereType<JsonMap>()) {
+      for (final rawItem in items) {
+        final item = _asJsonMap(rawItem);
+        if (item == null) {
+          continue;
+        }
         final type = readString(item, 'type');
         final role = readString(item, 'role');
-        if (type == 'userMessage' || (type == 'message' && role == 'user')) {
+        if (_isUserMessageItem(type, role)) {
           parts.add(
             _extractText(item['text'])
                 .ifEmpty(_extractText(item['content']))
@@ -1014,11 +1124,14 @@ class CodexAppState extends ChangeNotifier {
     }
     final items = turn['items'];
     if (items is List) {
-      for (final item in items.whereType<JsonMap>()) {
+      for (final rawItem in items) {
+        final item = _asJsonMap(rawItem);
+        if (item == null) {
+          continue;
+        }
         final type = readString(item, 'type');
         final role = readString(item, 'role');
-        if (type == 'agentMessage' ||
-            (type == 'message' && role == 'assistant')) {
+        if (_isAssistantMessageItem(type, role)) {
           final text = _extractText(item['text'])
               .ifEmpty(_extractText(item['content']))
               .ifEmpty(_extractText(item['output']))
@@ -1230,9 +1343,7 @@ class CodexAppState extends ChangeNotifier {
       return false;
     }
 
-    final item = event['item'] is JsonMap
-        ? event['item'] as JsonMap
-        : const <String, dynamic>{};
+    final item = _asJsonMap(event['item']) ?? const <String, dynamic>{};
     final itemId = readString(event, 'itemId').ifEmpty(readString(item, 'id'));
     if (itemId.isNotEmpty && settledIds.contains(itemId)) {
       return false;
@@ -1241,7 +1352,10 @@ class CodexAppState extends ChangeNotifier {
     final isAssistantEvent =
         eventType == 'agent_delta' ||
         (eventType == 'item_completed' &&
-            readString(item, 'type') == 'agentMessage');
+            _isAssistantMessageItem(
+              readString(item, 'type'),
+              readString(item, 'role'),
+            ));
     if (isAssistantEvent && itemId.isEmpty && turnId.isNotEmpty) {
       final hasSettledAssistant = entries.any(
         (entry) =>
@@ -1288,8 +1402,8 @@ class CodexAppState extends ChangeNotifier {
       return _entryFromTurnDiff(event) ?? _genericEventEntry(event);
     }
     if (type == 'item_started' || type == 'item_completed') {
-      final item = event['item'];
-      if (item is JsonMap) {
+      final item = _asJsonMap(event['item']);
+      if (item != null) {
         return _entryFromItem(
           item,
           readString(event, 'turnId'),
@@ -1511,10 +1625,18 @@ class CodexAppState extends ChangeNotifier {
 
   String _timelineTypeForItem(String type) {
     return switch (type) {
-      'userMessage' || 'agentMessage' || 'message' => 'message',
+      'userMessage' ||
+      'user_message' ||
+      'agentMessage' ||
+      'agent_message' ||
+      'assistantMessage' ||
+      'assistant_message' ||
+      'message' => 'message',
       'commandExecution' => 'command',
       'fileChange' => 'file_change',
-      'contextCompaction' => 'context_compaction',
+      'contextCompaction' ||
+      'context_compaction' ||
+      'compaction' => 'context_compaction',
       'hookPrompt' => 'hook',
       'mcpToolCall' => 'mcp_tool',
       'dynamicToolCall' => 'dynamic_tool',
@@ -1527,15 +1649,34 @@ class CodexAppState extends ChangeNotifier {
     };
   }
 
+  bool _isUserMessageItem(String type, String role) {
+    return type == 'userMessage' ||
+        type == 'user_message' ||
+        (type == 'message' && role == 'user');
+  }
+
+  bool _isAssistantMessageItem(String type, String role) {
+    return type == 'agentMessage' ||
+        type == 'agent_message' ||
+        type == 'assistantMessage' ||
+        type == 'assistant_message' ||
+        (type == 'message' && role == 'assistant');
+  }
+
   String _roleForItem(String type, JsonMap item) {
     final role = readString(item, 'role');
     if (role.isNotEmpty) {
       return role == 'assistant' ? 'assistant' : role;
     }
-    if (type == 'userMessage') {
+    if (type == 'userMessage' || type == 'user_message') {
       return 'user';
     }
-    if (type == 'agentMessage' || type == 'reasoning' || type == 'plan') {
+    if (type == 'agentMessage' ||
+        type == 'agent_message' ||
+        type == 'assistantMessage' ||
+        type == 'assistant_message' ||
+        type == 'reasoning' ||
+        type == 'plan') {
       return 'assistant';
     }
     return 'system';
@@ -1865,8 +2006,8 @@ class CodexAppState extends ChangeNotifier {
   }
 
   void _appendItemStarted(JsonMap event) {
-    final item = event['item'];
-    if (item is JsonMap) {
+    final item = _asJsonMap(event['item']);
+    if (item != null) {
       final entry = _entryFromItem(
         item,
         readString(event, 'turnId'),
@@ -1884,8 +2025,8 @@ class CodexAppState extends ChangeNotifier {
 
   void _appendItemCompleted(JsonMap event) {
     final threadId = readString(event, 'threadId');
-    final item = event['item'];
-    if (item is! JsonMap) {
+    final item = _asJsonMap(event['item']);
+    if (item == null) {
       return;
     }
     final itemType = readString(item, 'type');
@@ -1894,8 +2035,7 @@ class CodexAppState extends ChangeNotifier {
       'id',
       readString(event, 'itemId', readString(event, 'turnId', 'assistant')),
     );
-    if (itemType == 'agentMessage' ||
-        (itemType == 'message' && readString(item, 'role') == 'assistant')) {
+    if (_isAssistantMessageItem(itemType, readString(item, 'role'))) {
       final finalText = _messageItemText(item);
       final entryId = itemId.ifEmpty(
         '${threadId}:${readString(event, 'turnId', 'turn')}:assistant',
@@ -2276,6 +2416,10 @@ class CodexAppState extends ChangeNotifier {
   }
 
   void _handleErrorMessage(JsonMap message) {
+    if (readString(message, 'code') == 'AUTH_FAILED') {
+      unawaited(_handleAuthFailed(readString(message, 'message')));
+      return;
+    }
     final threadId = readString(message, 'threadId');
     final clientMessageId = readString(message, 'clientMessageId');
     if (threadId.isNotEmpty && clientMessageId.isNotEmpty) {
@@ -2286,6 +2430,29 @@ class CodexAppState extends ChangeNotifier {
       _appendNoticeEvent(threadId, '请求错误', text, 'error');
     } else {
       _pushNotice({'level': 'error', 'title': '请求错误', 'message': text});
+    }
+  }
+
+  Future<void> _handleAuthFailed(String message) async {
+    if (_reauthenticating) {
+      return;
+    }
+    _reauthenticating = true;
+    try {
+      await _socket?.close();
+      cookie = '';
+      connectionStatus = 'idle';
+      await bridge.remove('cookie');
+      if (token.trim().isEmpty) {
+        errorMessage = message.ifEmpty('登录已过期，请重新登录。');
+        notifyListeners();
+        return;
+      }
+      errorMessage = '登录已过期，正在重新登录...';
+      notifyListeners();
+      await login();
+    } finally {
+      _reauthenticating = false;
     }
   }
 
@@ -2627,10 +2794,13 @@ class CodexAppState extends ChangeNotifier {
     if (type == 'reasoning') {
       return '思考';
     }
-    if (type == 'agentMessage') {
+    if (type == 'agentMessage' ||
+        type == 'agent_message' ||
+        type == 'assistantMessage' ||
+        type == 'assistant_message') {
       return 'Codex';
     }
-    if (type == 'userMessage') {
+    if (type == 'userMessage' || type == 'user_message') {
       return '你';
     }
     return type.ifEmpty(readString(item, 'id', '事件'));
@@ -2647,10 +2817,13 @@ class CodexAppState extends ChangeNotifier {
 
   String _itemText(JsonMap item) {
     final type = readString(item, 'type');
-    if (type == 'contextCompaction') {
-      return _extractText(
-        item['summary'],
-      ).ifEmpty(_extractText(item['text'])).ifEmpty('上下文已压缩');
+    if (type == 'contextCompaction' ||
+        type == 'context_compaction' ||
+        type == 'compaction') {
+      return _extractText(item['summary'])
+          .ifEmpty(_extractText(item['text']))
+          .ifEmpty(_extractText(item['encrypted_content']))
+          .ifEmpty('上下文已压缩');
     }
     return readString(item, 'text')
         .ifEmpty(readString(item, 'command'))
@@ -2677,8 +2850,9 @@ class CodexAppState extends ChangeNotifier {
           .where((item) => item.trim().isNotEmpty)
           .join('\n');
     }
-    if (value is JsonMap) {
-      final type = readString(value, 'type');
+    final mapValue = _asJsonMap(value);
+    if (mapValue != null) {
+      final type = readString(mapValue, 'type');
       if (type == 'localImage' || type == 'image' || type == 'input_image') {
         return '';
       }
@@ -2696,14 +2870,24 @@ class CodexAppState extends ChangeNotifier {
         'input',
         'summary',
       ]) {
-        final extracted = _extractText(value[key]);
+        final extracted = _extractText(mapValue[key]);
         if (extracted.isNotEmpty) {
           return extracted;
         }
       }
-      return _summarizeMap(value);
+      return _summarizeMap(mapValue);
     }
     return value.toString();
+  }
+
+  JsonMap? _asJsonMap(dynamic value) {
+    if (value is JsonMap) {
+      return value;
+    }
+    if (value is Map) {
+      return JsonMap.from(value);
+    }
+    return null;
   }
 
   String _notificationTitle(String method) {

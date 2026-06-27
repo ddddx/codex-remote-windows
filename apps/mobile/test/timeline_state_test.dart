@@ -1,6 +1,7 @@
 import 'package:codex_remote_mobile/src/app_state.dart';
 import 'package:codex_remote_mobile/src/models.dart';
 import 'package:codex_remote_mobile/src/native_bridge.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -152,6 +153,90 @@ void main() {
     state.dispose();
   });
 
+  test(
+    'auth failure clears stale cookie instead of staying connected',
+    () async {
+      final bridge = _TestBridge();
+      final state = CodexAppState(bridge)
+        ..cookie = 'stale-cookie'
+        ..connectionStatus = 'connected';
+      bridge.values['cookie'] = 'stale-cookie';
+
+      state.handleServerMessage({
+        'type': 'error',
+        'code': 'AUTH_FAILED',
+        'message': 'WebSocket 鉴权失败，请先重新登录。',
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(state.cookie, isEmpty);
+      expect(state.connectionStatus, 'idle');
+      expect(bridge.values.containsKey('cookie'), isFalse);
+      expect(state.errorMessage, contains('鉴权失败'));
+      state.dispose();
+    },
+  );
+
+  test(
+    'android setup rejects loopback server urls with stale cookies',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final bridge = _TestBridge()
+        ..values['serverUrl'] = 'http://127.0.0.1:18637'
+        ..values['token'] = 'token'
+        ..values['cookie'] = 'stale-cookie';
+      final state = CodexAppState(bridge);
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        state.dispose();
+      });
+
+      await state.initialize();
+
+      expect(state.requiresSetup, isTrue);
+      expect(state.cookie, isEmpty);
+      expect(bridge.values.containsKey('cookie'), isFalse);
+      expect(state.errorMessage, contains('不能使用 127.0.0.1'));
+    },
+  );
+
+  test('login validates required setup fields before networking', () async {
+    final state = CodexAppState(_TestBridge())
+      ..serverUrl = ''
+      ..token = '';
+    addTearDown(state.dispose);
+
+    expect(await state.login(), isFalse);
+    expect(state.busy, isFalse);
+    expect(state.errorMessage, contains('服务地址'));
+
+    state
+      ..serverUrl = 'http://192.168.2.15:18637'
+      ..token = '';
+
+    expect(await state.login(), isFalse);
+    expect(state.busy, isFalse);
+    expect(state.errorMessage, contains('访问 Token'));
+  });
+
+  test(
+    'android login rejects loopback server urls before networking',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final state = CodexAppState(_TestBridge())
+        ..serverUrl = 'http://127.0.0.1:18637'
+        ..token = 'token';
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        state.dispose();
+      });
+
+      expect(await state.login(), isFalse);
+      expect(state.busy, isFalse);
+      expect(state.errorMessage, contains('不能使用 127.0.0.1'));
+    },
+  );
+
   test('filters non-rendered thread sync timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
@@ -267,6 +352,86 @@ void main() {
     expect(assistantEntries, hasLength(1));
     expect(assistantEntries.single.id, 'assistant-v2');
     expect(assistantEntries.single.text, '助手回复');
+    state.dispose();
+  });
+
+  test('thread sync can activate an unknown session and show messages', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-from-sync';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [
+        {
+          'id': 'turn-from-sync',
+          'status': 'completed',
+          'items': [
+            {
+              'id': 'assistant-from-sync',
+              'type': 'agentMessage',
+              'text': '同步回复',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(state.activeSessionId, threadId);
+    expect(state.activeSession?.threadId, threadId);
+    expect(
+      state.activeTimeline.any(
+        (entry) => entry.id == 'assistant-from-sync' && entry.text == '同步回复',
+      ),
+      isTrue,
+    );
+    state.dispose();
+  });
+
+  test('restores alternate message item names and loose map payloads', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-alternate-message';
+    state.activeSessionId = threadId;
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [
+        <String, Object?>{
+          'id': 'turn-alternate-message',
+          'status': 'completed',
+          'items': [
+            <String, Object?>{
+              'id': 'user-snake',
+              'type': 'user_message',
+              'content': [
+                <String, Object?>{'type': 'text', 'text': '蛇形用户消息'},
+              ],
+            },
+            <String, Object?>{
+              'id': 'assistant-snake',
+              'type': 'assistant_message',
+              'content': [
+                <String, Object?>{'type': 'output_text', 'text': '蛇形助手回复'},
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      state.activeTimeline.any(
+        (entry) => entry.id == 'user-snake' && entry.text == '蛇形用户消息',
+      ),
+      isTrue,
+    );
+    expect(
+      state.activeTimeline.any(
+        (entry) => entry.id == 'assistant-snake' && entry.text == '蛇形助手回复',
+      ),
+      isTrue,
+    );
     state.dispose();
   });
 

@@ -1,0 +1,191 @@
+name: Mobile Android Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "mobile-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build signed Android APKs
+    runs-on: ubuntu-latest
+    environment: mobile-release
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.5"
+          channel: stable
+          cache: true
+
+      - name: Validate signing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::$name is required"
+              exit 1
+            fi
+          done
+
+      - name: Write signing files
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keystore_path="$RUNNER_TEMP/codex-remote-release-signing.jks"
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n' | base64 --decode > "$keystore_path"
+          {
+            printf 'storeFile=%s\n' "$keystore_path"
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > android/key.properties
+          chmod 600 android/key.properties "$keystore_path"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Test
+        run: flutter test --no-pub
+
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      - name: Build ABI split APKs
+        run: flutter build apk --release --split-per-abi --no-pub
+
+      - name: Build universal APK
+        run: flutter build apk --release --no-pub
+
+      - name: Prepare release files
+        id: prepare
+        shell: bash
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          app_version="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
+          version_name="${app_version%%+*}"
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          target_sdk="$(sed -nE 's/^[[:space:]]*targetSdk[[:space:]]*=[[:space:]]*([0-9]+).*$/\1/p' android/app/build.gradle.kts | head -n 1)"
+          if [ -z "$target_sdk" ]; then
+            target_sdk="unknown"
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/mobile-v* ]]; then
+            release_tag="$GITHUB_REF_NAME"
+            release_title="Codex Remote Android $GITHUB_REF_NAME"
+          else
+            release_tag="mobile-build-v${version_name}-${GITHUB_RUN_NUMBER}-${short_sha}"
+            release_title="Codex Remote Android v${version_name} (${short_sha})"
+          fi
+          release_dir="release-apks"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          cp build/app/outputs/flutter-apk/app-release.apk "$release_dir/codex-remote-v${version_name}-universal-sdk${target_sdk}-release.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$release_dir/codex-remote-v${version_name}-arm64-v8a-sdk${target_sdk}-release.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "$release_dir/codex-remote-v${version_name}-armeabi-v7a-sdk${target_sdk}-release.apk"
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk "$release_dir/codex-remote-v${version_name}-x86_64-sdk${target_sdk}-release.apk"
+          notes_file="$release_dir/RELEASE_NOTES.md"
+          {
+            echo "## Changes in this push"
+            if [ -n "${PUSH_BEFORE:-}" ] && [[ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+              git log --pretty=format:'- %s (%h)' "$PUSH_BEFORE..$GITHUB_SHA" || git log -1 --pretty=format:'- %s (%h)'
+            else
+              git log -1 --pretty=format:'- %s (%h)'
+            fi
+            echo
+            echo
+            echo "## APKs"
+            echo "- Universal APK: recommended fallback for most users"
+            echo "- arm64-v8a APK: most modern Android phones"
+            echo "- armeabi-v7a APK: older 32-bit Android devices"
+            echo "- x86_64 APK: Android emulators and x86 devices"
+            echo
+            echo "Version: ${version_name}"
+            echo "Target SDK: ${target_sdk}"
+            echo "Commit: ${GITHUB_SHA}"
+          } > "$notes_file"
+          {
+            echo "version_name=$version_name"
+            echo "target_sdk=$target_sdk"
+            echo "release_tag=$release_tag"
+            echo "release_title=$release_title"
+            echo "notes_file=apps/mobile/$notes_file"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify APK signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          aapt2="$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -n 1)"
+          for apk in release-apks/*.apk; do
+            echo "== $apk =="
+            "$apksigner" verify --verbose --print-certs "$apk" | grep -E 'Verified using v2|Signer #1 certificate SHA-256 digest'
+            "$aapt2" dump badging "$apk" | grep -E '^package:|sdkVersion|native-code'
+          done
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-remote-android-${{ steps.prepare.outputs.version_name }}-sdk${{ steps.prepare.outputs.target_sdk }}
+          path: apps/mobile/release-apks/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        shell: bash
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.prepare.outputs.release_tag }}
+          RELEASE_TITLE: ${{ steps.prepare.outputs.release_title }}
+          NOTES_FILE: ${{ steps.prepare.outputs.notes_file }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" apps/mobile/release-apks/*.apk --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$RELEASE_TAG" apps/mobile/release-apks/*.apk \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --generate-notes
+          fi

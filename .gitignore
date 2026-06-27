@@ -10,6 +10,9 @@ tmp-bindings/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+*.jks
+*.keystore
+*signing-info*.txt
 .env
 config.local.json
 .window-map.json

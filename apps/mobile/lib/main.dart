@@ -122,7 +122,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    if (state.cookie.isEmpty) {
+    if (state.requiresSetup) {
       return SetupScreen(state: state);
     }
     final active = state.activeSession;
@@ -376,79 +376,132 @@ class _SetupScreenState extends State<SetupScreen> {
   late final TextEditingController _token = TextEditingController(
     text: widget.state.token,
   );
+  bool _serverEdited = false;
+  bool _tokenEdited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_syncControllerDrafts);
+  }
+
+  @override
+  void didUpdateWidget(covariant SetupScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state == widget.state) {
+      return;
+    }
+    oldWidget.state.removeListener(_syncControllerDrafts);
+    widget.state.addListener(_syncControllerDrafts);
+    _syncControllerDrafts();
+  }
 
   @override
   void dispose() {
+    widget.state.removeListener(_syncControllerDrafts);
     _server.dispose();
     _token.dispose();
     super.dispose();
+  }
+
+  void _syncControllerDrafts() {
+    if (!_serverEdited && _server.text != widget.state.serverUrl) {
+      _setControllerText(_server, widget.state.serverUrl);
+    }
+    if (!_tokenEdited && _token.text != widget.state.token) {
+      _setControllerText(_token, widget.state.token);
+    }
+  }
+
+  void _setControllerText(TextEditingController controller, String value) {
+    controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  Future<void> _submitLogin() async {
+    FocusScope.of(context).unfocus();
+    widget.state.updateServerDraft(_server.text);
+    widget.state.updateTokenDraft(_token.text);
+    final ok = await widget.state.login();
+    if (!ok && mounted) {
+      _showStateError(context, widget.state);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Codex Remote')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text(
-              '连接 Windows 服务',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '手机端只作为客户端，Codex CLI 仍运行在你的 Windows 电脑上。',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _server,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: '服务地址',
-                hintText: 'http://电脑IP:18637',
-                prefixIcon: Icon(Icons.dns_outlined),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: widget.state.updateServerDraft,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _token,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '访问 Token',
-                prefixIcon: Icon(Icons.key_outlined),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: widget.state.updateTokenDraft,
-            ),
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: widget.state.busy
-                  ? null
-                  : () async {
-                      widget.state.updateServerDraft(_server.text);
-                      widget.state.updateTokenDraft(_token.text);
-                      await widget.state.login();
-                    },
-              icon: widget.state.busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.login),
-              label: const Text('连接并登录'),
-            ),
-            if (widget.state.errorMessage.isNotEmpty) ...[
-              const SizedBox(height: 12),
+      body: AnimatedBuilder(
+        animation: widget.state,
+        builder: (context, _) => SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
               Text(
-                widget.state.errorMessage,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                '连接 Windows 服务',
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
+              const SizedBox(height: 8),
+              Text(
+                '手机端只作为客户端，Codex CLI 仍运行在你的 Windows 电脑上。',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _server,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: '服务地址',
+                  hintText: 'http://电脑IP:18637',
+                  prefixIcon: Icon(Icons.dns_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  _serverEdited = true;
+                  widget.state.updateServerDraft(value);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _token,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: '访问 Token',
+                  prefixIcon: Icon(Icons.key_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  _tokenEdited = true;
+                  widget.state.updateTokenDraft(value);
+                },
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: widget.state.busy ? null : _submitLogin,
+                icon: widget.state.busy
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.login),
+                label: Text(widget.state.busy ? '正在连接...' : '连接并登录'),
+              ),
+              if (widget.state.busy) ...[
+                const SizedBox(height: 12),
+                const Text('正在连接服务，请稍候。'),
+              ],
+              if (widget.state.errorMessage.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  widget.state.errorMessage,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -1985,6 +2038,16 @@ class ErrorBanner extends StatelessWidget {
   }
 }
 
+void _showStateError(BuildContext context, CodexAppState state) {
+  final message = state.errorMessage.trim();
+  if (message.isEmpty) {
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+  );
+}
+
 Future<void> showSettingsSheet(
   BuildContext context,
   CodexAppState state,
@@ -2069,24 +2132,74 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: state.refreshHealth,
-                      child: const Text('检查服务'),
+                      onPressed: state.busy || state.healthStatus == 'loading'
+                          ? null
+                          : () async {
+                              FocusScope.of(context).unfocus();
+                              state.updateServerDraft(_server.text);
+                              final ok = await state.refreshHealth();
+                              if (!context.mounted) {
+                                return;
+                              }
+                              if (ok) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('服务可访问'),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else {
+                                _showStateError(context, state);
+                              }
+                            },
+                      child: state.healthStatus == 'loading'
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('检查服务'),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton(
-                      onPressed: () async {
-                        state.updateServerDraft(_server.text);
-                        state.updateTokenDraft(_token.text);
-                        await state.login();
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                      child: const Text('保存并登录'),
+                      onPressed: state.busy
+                          ? null
+                          : () async {
+                              FocusScope.of(context).unfocus();
+                              state.updateServerDraft(_server.text);
+                              state.updateTokenDraft(_token.text);
+                              final ok = await state.login();
+                              if (!context.mounted) {
+                                return;
+                              }
+                              if (ok) {
+                                Navigator.pop(context);
+                              } else {
+                                _showStateError(context, state);
+                              }
+                            },
+                      child: state.busy
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('保存并登录'),
                     ),
                   ),
                 ],
               ),
+              if (state.busy || state.healthStatus == 'loading') ...[
+                const SizedBox(height: 10),
+                Text(state.busy ? '正在连接服务，请稍候。' : '正在检查服务。'),
+              ],
+              if (state.errorMessage.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  state.errorMessage,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
               const SizedBox(height: 18),
               Row(
                 children: [

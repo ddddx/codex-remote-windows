@@ -15,18 +15,21 @@ class ApiException implements Exception {
 }
 
 class CodexApi {
-  CodexApi({
-    required String baseUrl,
-    this.cookie = '',
-  }) : baseUri = _normalizeBaseUri(baseUrl);
+  CodexApi({required String baseUrl, this.cookie = ''})
+    : baseUri = _normalizeBaseUri(baseUrl);
+
+  static const Duration _requestTimeout = Duration(seconds: 12);
 
   final Uri baseUri;
   String cookie;
-  final HttpClient _client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+  final HttpClient _client = HttpClient()..connectionTimeout = _requestTimeout;
 
   static Uri _normalizeBaseUri(String value) {
     final trimmed = value.trim();
-    final withScheme = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : 'http://$trimmed';
+    final withScheme =
+        trimmed.startsWith('http://') || trimmed.startsWith('https://')
+        ? trimmed
+        : 'http://$trimmed';
     final parsed = Uri.parse(withScheme);
     return parsed.path.isEmpty ? parsed.replace(path: '/') : parsed;
   }
@@ -39,7 +42,9 @@ class CodexApi {
         cleanQuery[entry.key] = value;
       }
     }
-    return baseUri.resolve(path).replace(queryParameters: cleanQuery.isEmpty ? null : cleanQuery);
+    return baseUri
+        .resolve(path)
+        .replace(queryParameters: cleanQuery.isEmpty ? null : cleanQuery);
   }
 
   Uri wsUrl() {
@@ -47,14 +52,23 @@ class CodexApi {
     return baseUri.replace(scheme: scheme).resolve('/ws');
   }
 
-  Future<JsonMap> getJson(String path, {Map<String, String?> query = const {}}) async {
-    final request = await _client.getUrl(url(path, query));
+  Future<JsonMap> getJson(
+    String path, {
+    Map<String, String?> query = const {},
+  }) async {
+    final request = await _client
+        .getUrl(url(path, query))
+        .timeout(_requestTimeout);
     _applyCommonHeaders(request);
-    return _readJson(await request.close());
+    return _readJson(await request.close().timeout(_requestTimeout));
   }
 
-  Future<JsonMap> postJson(String path, JsonMap body, {String token = ''}) async {
-    final request = await _client.postUrl(url(path));
+  Future<JsonMap> postJson(
+    String path,
+    JsonMap body, {
+    String token = '',
+  }) async {
+    final request = await _client.postUrl(url(path)).timeout(_requestTimeout);
     _applyCommonHeaders(request);
     if (token.isNotEmpty) {
       request.headers.set('x-codex-remote-token', token);
@@ -63,13 +77,19 @@ class CodexApi {
     request.headers.contentType = ContentType.json;
     request.contentLength = payload.length;
     request.add(payload);
-    return _readJson(await request.close(), captureCookie: true);
+    return _readJson(
+      await request.close().timeout(_requestTimeout),
+      captureCookie: true,
+    );
   }
 
   Future<JsonMap> deleteJson(String path) async {
-    final request = await _client.deleteUrl(url(path));
+    final request = await _client.deleteUrl(url(path)).timeout(_requestTimeout);
     _applyCommonHeaders(request);
-    return _readJson(await request.close(), captureCookie: true);
+    return _readJson(
+      await request.close().timeout(_requestTimeout),
+      captureCookie: true,
+    );
   }
 
   Future<JsonMap> uploadImage({
@@ -77,13 +97,18 @@ class CodexApi {
     required String fileName,
     required String contentType,
   }) async {
-    final request = await _client.postUrl(url('/api/uploads/image'));
+    final request = await _client
+        .postUrl(url('/api/uploads/image'))
+        .timeout(_requestTimeout);
     _applyCommonHeaders(request);
-    request.headers.set(HttpHeaders.contentTypeHeader, contentType.isEmpty ? 'application/octet-stream' : contentType);
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      contentType.isEmpty ? 'application/octet-stream' : contentType,
+    );
     request.headers.set('x-upload-filename', Uri.encodeComponent(fileName));
     request.contentLength = bytes.length;
     request.add(bytes);
-    return _readJson(await request.close());
+    return _readJson(await request.close().timeout(_requestTimeout));
   }
 
   Future<WebSocket> connectWebSocket() {
@@ -91,7 +116,10 @@ class CodexApi {
     if (cookie.isNotEmpty) {
       headers[HttpHeaders.cookieHeader] = cookie;
     }
-    return WebSocket.connect(wsUrl().toString(), headers: headers);
+    return WebSocket.connect(
+      wsUrl().toString(),
+      headers: headers,
+    ).timeout(_requestTimeout);
   }
 
   void _applyCommonHeaders(HttpClientRequest request) {
@@ -101,11 +129,17 @@ class CodexApi {
     }
   }
 
-  Future<JsonMap> _readJson(HttpClientResponse response, {bool captureCookie = false}) async {
+  Future<JsonMap> _readJson(
+    HttpClientResponse response, {
+    bool captureCookie = false,
+  }) async {
     if (captureCookie) {
       _captureCookie(response);
     }
-    final text = await response.transform(utf8.decoder).join();
+    final text = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(_requestTimeout);
     JsonMap payload = const {};
     if (text.trim().isNotEmpty) {
       final decoded = jsonDecode(text);
@@ -114,7 +148,9 @@ class CodexApi {
       }
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ApiException(readString(payload, 'message', '请求失败：${response.statusCode}'));
+      throw ApiException(
+        readString(payload, 'message', '请求失败：${response.statusCode}'),
+      );
     }
     return payload;
   }
@@ -141,7 +177,8 @@ class CodexSocket {
   final CodexApi api;
   WebSocket? _socket;
   bool _closed = false;
-  final StreamController<JsonMap> _messages = StreamController<JsonMap>.broadcast();
+  final StreamController<JsonMap> _messages =
+      StreamController<JsonMap>.broadcast();
   final StreamController<String> _status = StreamController<String>.broadcast();
 
   Stream<JsonMap> get messages => _messages.stream;
