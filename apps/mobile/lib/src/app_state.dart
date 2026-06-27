@@ -9,6 +9,27 @@ import 'api.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 
+const String githubReleaseApiUrl =
+    'https://api.github.com/repos/ddddx/codex-remote-windows/releases/latest';
+const String githubReleasePageUrl =
+    'https://github.com/ddddx/codex-remote-windows/releases';
+
+class MobileUpdateInfo {
+  const MobileUpdateInfo({
+    required this.versionName,
+    required this.tagName,
+    required this.releaseUrl,
+    required this.apkName,
+    required this.apkUrl,
+  });
+
+  final String versionName;
+  final String tagName;
+  final String releaseUrl;
+  final String apkName;
+  final String apkUrl;
+}
+
 class CodexAppState extends ChangeNotifier {
   CodexAppState(this.bridge);
 
@@ -30,6 +51,13 @@ class CodexAppState extends ChangeNotifier {
   String activeSessionId = '';
   String theme = 'paper';
   String workspacePath = '';
+  String packageName = '';
+  String appVersionName = '';
+  int appVersionCode = 0;
+  bool updateChecking = false;
+  bool updateDownloading = false;
+  String updateMessage = '';
+  MobileUpdateInfo? availableUpdate;
   WorkspaceListing? workspaceListing;
   List<SessionItem> sessions = [];
   List<AuthSessionItem> authSessions = [];
@@ -98,6 +126,7 @@ class CodexAppState extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    await _loadAppVersion();
     serverUrl = await bridge.getString('serverUrl') ?? serverUrl;
     token = await bridge.getString('token') ?? '';
     cookie = await bridge.getString('cookie') ?? '';
@@ -128,6 +157,18 @@ class CodexAppState extends ChangeNotifier {
       unawaited(loadWorkspace());
       unawaited(loadAuthSessions());
     }
+    unawaited(checkForUpdate(silent: true));
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final version = await bridge.getAppVersion();
+      packageName = version.packageName;
+      appVersionName = version.versionName;
+      appVersionCode = version.versionCode;
+    } catch (_) {
+      // Unit tests and non-Android shells may not have the platform channel.
+    }
   }
 
   void updateServerDraft(String value) {
@@ -149,6 +190,151 @@ class CodexAppState extends ChangeNotifier {
   void clearError() {
     errorMessage = '';
     notifyListeners();
+  }
+
+  Future<bool> checkForUpdate({bool silent = false}) async {
+    updateChecking = true;
+    if (!silent) {
+      updateMessage = '正在检查更新...';
+    }
+    notifyListeners();
+    try {
+      if (appVersionName.isEmpty) {
+        await _loadAppVersion();
+      }
+      final info = await _fetchLatestRelease();
+      final currentVersion = appVersionName.ifEmpty('0.0.0');
+      if (compareVersionNames(info.versionName, currentVersion) > 0) {
+        availableUpdate = info;
+        updateMessage = '发现新版本 ${info.versionName}';
+        return true;
+      }
+      availableUpdate = null;
+      if (!silent) {
+        updateMessage = '当前已经是最新版本';
+      }
+      return false;
+    } catch (error) {
+      if (!silent) {
+        updateMessage = _friendlyErrorMessage(error);
+      }
+      return false;
+    } finally {
+      updateChecking = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> openReleasePage() async {
+    final url = availableUpdate?.releaseUrl ?? githubReleasePageUrl;
+    try {
+      await bridge.openUrl(url);
+    } catch (error) {
+      updateMessage = _friendlyErrorMessage(error);
+      notifyListeners();
+    }
+  }
+
+  Future<void> downloadAvailableUpdate() async {
+    var info = availableUpdate;
+    if (info == null) {
+      final hasUpdate = await checkForUpdate();
+      if (!hasUpdate) {
+        return;
+      }
+      info = availableUpdate;
+    }
+    if (info == null) {
+      return;
+    }
+    updateDownloading = true;
+    updateMessage = '正在下载 ${info.versionName}...';
+    notifyListeners();
+    try {
+      await bridge.downloadAndInstallApk(
+        url: info.apkUrl,
+        fileName: info.apkName,
+      );
+      updateMessage = '安装器已打开，请按系统提示完成安装';
+    } catch (error) {
+      updateMessage = _friendlyErrorMessage(error);
+    } finally {
+      updateDownloading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<MobileUpdateInfo> _fetchLatestRelease() async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final request = await client
+          .getUrl(Uri.parse(githubReleaseApiUrl))
+          .timeout(const Duration(seconds: 12));
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'application/vnd.github+json',
+      );
+      request.headers.set(HttpHeaders.userAgentHeader, 'CodexRemoteMobile');
+      final response = await request.close().timeout(
+        const Duration(seconds: 12),
+      );
+      final text = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException('检查更新失败：HTTP ${response.statusCode}');
+      }
+      final decoded = jsonDecode(text);
+      if (decoded is! JsonMap) {
+        throw ApiException('GitHub 发布信息格式不正确');
+      }
+      final assets = decoded['assets'];
+      if (assets is! List) {
+        throw ApiException('GitHub 发布页没有 APK 文件');
+      }
+      JsonMap? selectedAsset;
+      for (final asset in assets.whereType<JsonMap>()) {
+        final name = readString(asset, 'name');
+        if (name.endsWith('.apk') && name.contains('-universal-')) {
+          selectedAsset = asset;
+          break;
+        }
+        if (selectedAsset == null && name.endsWith('.apk')) {
+          selectedAsset = asset;
+        }
+      }
+      if (selectedAsset == null) {
+        throw ApiException('GitHub 发布页没有可下载的 APK');
+      }
+      final apkName = readString(selectedAsset, 'name');
+      final apkUrl = readString(selectedAsset, 'browser_download_url');
+      if (apkUrl.isEmpty) {
+        throw ApiException('GitHub 发布页缺少 APK 下载地址');
+      }
+      final tagName = readString(decoded, 'tag_name');
+      final versionName = extractVersionNameFromRelease(
+        assetName: apkName,
+        tagName: tagName,
+        releaseName: readString(decoded, 'name'),
+      );
+      if (versionName.isEmpty) {
+        throw ApiException('无法识别 GitHub 发布版本号');
+      }
+      return MobileUpdateInfo(
+        versionName: versionName,
+        tagName: tagName,
+        releaseUrl: readString(
+          decoded,
+          'html_url',
+        ).ifEmpty(githubReleasePageUrl),
+        apkName: apkName,
+        apkUrl: apkUrl,
+      );
+    } finally {
+      client.close(force: true);
+    }
   }
 
   Future<bool> login() async {
@@ -3120,6 +3306,43 @@ class CodexAppState extends ChangeNotifier {
     _api?.close();
     super.dispose();
   }
+}
+
+String extractVersionNameFromRelease({
+  required String assetName,
+  required String tagName,
+  required String releaseName,
+}) {
+  for (final value in [assetName, tagName, releaseName]) {
+    final match = RegExp(r'v(\d+(?:\.\d+){1,3})').firstMatch(value);
+    if (match != null) {
+      return match.group(1) ?? '';
+    }
+  }
+  return '';
+}
+
+int compareVersionNames(String left, String right) {
+  final leftParts = _versionParts(left);
+  final rightParts = _versionParts(right);
+  final maxLength = max(leftParts.length, rightParts.length);
+  for (var index = 0; index < maxLength; index += 1) {
+    final a = index < leftParts.length ? leftParts[index] : 0;
+    final b = index < rightParts.length ? rightParts[index] : 0;
+    if (a != b) {
+      return a.compareTo(b);
+    }
+  }
+  return 0;
+}
+
+List<int> _versionParts(String value) {
+  final match = RegExp(r'(\d+(?:\.\d+){0,3})').firstMatch(value);
+  final raw = match?.group(1) ?? '0';
+  return raw
+      .split('.')
+      .map((item) => int.tryParse(item) ?? 0)
+      .toList(growable: false);
 }
 
 extension _StringFallback on String {

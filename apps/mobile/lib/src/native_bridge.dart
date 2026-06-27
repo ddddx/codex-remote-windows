@@ -12,15 +12,32 @@ class PickedImage {
   final Uint8List bytes;
 }
 
+class AppVersionInfo {
+  const AppVersionInfo({
+    required this.packageName,
+    required this.versionName,
+    required this.versionCode,
+  });
+
+  final String packageName;
+  final String versionName;
+  final int versionCode;
+}
+
 class NativeBridge {
-  static const MethodChannel _channel = MethodChannel('codex_remote_mobile/native');
+  static const MethodChannel _channel = MethodChannel(
+    'codex_remote_mobile/native',
+  );
 
   Future<String?> getString(String key) async {
     return _channel.invokeMethod<String>('getString', {'key': key});
   }
 
   Future<void> setString(String key, String value) async {
-    await _channel.invokeMethod<void>('setString', {'key': key, 'value': value});
+    await _channel.invokeMethod<void>('setString', {
+      'key': key,
+      'value': value,
+    });
   }
 
   Future<void> remove(String key) async {
@@ -37,9 +54,38 @@ class NativeBridge {
       return null;
     }
     return PickedImage(
-      name: (result['name'] as String?)?.trim().isNotEmpty == true ? result['name'] as String : 'image',
-      mimeType: (result['mimeType'] as String?)?.trim().isNotEmpty == true ? result['mimeType'] as String : 'image/*',
+      name: (result['name'] as String?)?.trim().isNotEmpty == true
+          ? result['name'] as String
+          : 'image',
+      mimeType: (result['mimeType'] as String?)?.trim().isNotEmpty == true
+          ? result['mimeType'] as String
+          : 'image/*',
       bytes: bytes,
     );
+  }
+
+  Future<AppVersionInfo> getAppVersion() async {
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'getAppVersion',
+    );
+    return AppVersionInfo(
+      packageName: (result?['packageName'] as String?) ?? '',
+      versionName: (result?['versionName'] as String?) ?? '',
+      versionCode: (result?['versionCode'] as num?)?.round() ?? 0,
+    );
+  }
+
+  Future<void> openUrl(String url) async {
+    await _channel.invokeMethod<void>('openUrl', {'url': url});
+  }
+
+  Future<void> downloadAndInstallApk({
+    required String url,
+    required String fileName,
+  }) async {
+    await _channel.invokeMethod<void>('downloadAndInstallApk', {
+      'url': url,
+      'fileName': fileName,
+    });
   }
 }

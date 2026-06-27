@@ -5,6 +5,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('extracts and compares GitHub mobile release versions', () {
+    expect(
+      extractVersionNameFromRelease(
+        assetName: 'codex-remote-v1.0.11-universal-sdk35-release.apk',
+        tagName: 'mobile-build-v1.0.11-1-abcdef',
+        releaseName: 'Codex Remote Android v1.0.11',
+      ),
+      '1.0.11',
+    );
+    expect(compareVersionNames('1.0.12', '1.0.11'), greaterThan(0));
+    expect(compareVersionNames('1.0.11', '1.0.11'), 0);
+    expect(compareVersionNames('1.0.9', '1.0.11'), lessThan(0));
+  });
+
   test('merges streaming timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';

@@ -2201,6 +2201,8 @@ class _SettingsSheetState extends State<_SettingsSheet> {
                 ),
               ],
               const SizedBox(height: 18),
+              _buildUpdateSection(context),
+              const SizedBox(height: 18),
               Row(
                 children: [
                   Expanded(
@@ -2269,6 +2271,75 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildUpdateSection(BuildContext context) {
+    final update = state.availableUpdate;
+    final current = state.appVersionName.isEmpty
+        ? '当前版本'
+        : '当前版本 ${state.appVersionName}';
+    final subtitle = update == null
+        ? current
+        : '$current · 最新 ${update.versionName}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('应用更新', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.system_update_alt),
+          title: Text(
+            update == null ? '检查 GitHub 发布页' : '发现新版本 ${update.versionName}',
+          ),
+          subtitle: Text(
+            state.updateMessage.isEmpty ? subtitle : state.updateMessage,
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: state.updateChecking
+                    ? null
+                    : () => state.checkForUpdate(),
+                icon: state.updateChecking
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh),
+                label: const Text('检查'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: state.updateDownloading
+                    ? null
+                    : update == null
+                    ? null
+                    : state.downloadAvailableUpdate,
+                icon: state.updateDownloading
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download),
+                label: const Text('下载安装'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: '发布页',
+              onPressed: state.openReleasePage,
+              icon: const Icon(Icons.open_in_new),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
