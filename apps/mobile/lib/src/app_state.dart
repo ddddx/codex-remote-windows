@@ -1149,7 +1149,11 @@ class CodexAppState extends ChangeNotifier {
     }
     final turnPlans = message['turnPlans'];
     if (turnPlans is List) {
-      for (final plan in turnPlans.whereType<JsonMap>()) {
+      for (final rawPlan in turnPlans) {
+        final plan = _asJsonMap(rawPlan);
+        if (plan == null) {
+          continue;
+        }
         final entry = _entryFromTurnPlan(plan);
         if (entry != null) {
           entries.add(entry);
@@ -1158,7 +1162,11 @@ class CodexAppState extends ChangeNotifier {
     }
     final turnDiffs = message['turnDiffs'];
     if (turnDiffs is List) {
-      for (final diff in turnDiffs.whereType<JsonMap>()) {
+      for (final rawDiff in turnDiffs) {
+        final diff = _asJsonMap(rawDiff);
+        if (diff == null) {
+          continue;
+        }
         final entry = _entryFromTurnDiff(diff);
         if (entry != null) {
           entries = _mergeTurnDiffEntry(entries, entry);
@@ -1167,7 +1175,11 @@ class CodexAppState extends ChangeNotifier {
     }
     final supplemental = message['supplementalItems'];
     if (supplemental is List) {
-      for (final item in supplemental.whereType<JsonMap>()) {
+      for (final rawItem in supplemental) {
+        final item = _asJsonMap(rawItem);
+        if (item == null) {
+          continue;
+        }
         final entry = _entryFromSupplemental(item);
         if (entry != null) {
           entries.add(entry);
@@ -1182,7 +1194,11 @@ class CodexAppState extends ChangeNotifier {
           .expand((entry) => [entry.id, entry.itemId])
           .where((value) => value.isNotEmpty)
           .toSet();
-      for (final event in events.whereType<JsonMap>()) {
+      for (final rawEvent in events) {
+        final event = _asJsonMap(rawEvent);
+        if (event == null) {
+          continue;
+        }
         if (!_shouldReplayThreadSyncEvent(
           threadId,
           event,
@@ -1563,6 +1579,8 @@ class CodexAppState extends ChangeNotifier {
     const replayable = {
       'agent_delta',
       'plan_delta',
+      'turn_plan_updated',
+      'turn_diff_updated',
       'mcp_tool_progress',
       'item_started',
       'item_delta',
@@ -1669,11 +1687,16 @@ class CodexAppState extends ChangeNotifier {
   }
 
   TimelineEntry? _entryFromTurnPlan(JsonMap planEntry) {
-    final turnId = readString(planEntry, 'turnId');
-    final plan = planEntry['plan'];
-    if (turnId.isEmpty || plan is! List || plan.isEmpty) {
+    final turnId = readString(
+      planEntry,
+      'turnId',
+      readString(planEntry, 'turn_id'),
+    );
+    final plan = _planStepsFromEntry(planEntry);
+    if (turnId.isEmpty || plan.isEmpty) {
       return null;
     }
+    final normalizedDetails = {...planEntry, 'plan': plan};
     return TimelineEntry(
       id: 'turn-plan:$turnId',
       type: 'turn_plan',
@@ -1683,16 +1706,72 @@ class CodexAppState extends ChangeNotifier {
       status: 'completed',
       turnId: turnId,
       meta: plan
-          .whereType<JsonMap>()
           .map(_formatPlanStep)
           .where((item) => item.isNotEmpty)
           .toList(growable: false),
       createdAt: _normalizeTimestamp(
-        readInt(planEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch),
+        readInt(
+          planEntry,
+          'updatedAt',
+          readInt(
+            planEntry,
+            'createdAt',
+            readInt(
+              planEntry,
+              'startedAt',
+              DateTime.now().millisecondsSinceEpoch,
+            ),
+          ),
+        ),
       ),
-      details: planEntry,
-      raw: planEntry,
+      details: normalizedDetails,
+      raw: normalizedDetails,
     );
+  }
+
+  List<JsonMap> _planStepsFromEntry(JsonMap planEntry) {
+    for (final key in ['plan', 'steps', 'items']) {
+      final steps = _normalizePlanSteps(planEntry[key]);
+      if (steps.isNotEmpty) {
+        return steps;
+      }
+    }
+    return const [];
+  }
+
+  List<JsonMap> _normalizePlanSteps(dynamic value) {
+    if (value is! List) {
+      return const [];
+    }
+    final result = <JsonMap>[];
+    for (final rawItem in value) {
+      if (rawItem is String) {
+        final step = rawItem.trim();
+        if (step.isNotEmpty) {
+          result.add({'step': step, 'status': 'pending'});
+        }
+        continue;
+      }
+      final item = _asJsonMap(rawItem);
+      if (item == null) {
+        continue;
+      }
+      final step = readString(item, 'step')
+          .ifEmpty(readString(item, 'text'))
+          .ifEmpty(readString(item, 'title'))
+          .ifEmpty(readString(item, 'description'))
+          .ifEmpty(readString(item, 'message'))
+          .trim();
+      if (step.isEmpty) {
+        continue;
+      }
+      result.add({
+        ...item,
+        'step': step,
+        'status': readString(item, 'status').ifEmpty('pending'),
+      });
+    }
+    return result;
   }
 
   TimelineEntry? _entryFromTurnDiff(JsonMap diffEntry) {
@@ -1835,7 +1914,11 @@ class CodexAppState extends ChangeNotifier {
   }
 
   String _formatPlanStep(JsonMap item) {
-    final step = readString(item, 'step');
+    final step = readString(item, 'step')
+        .ifEmpty(readString(item, 'text'))
+        .ifEmpty(readString(item, 'title'))
+        .ifEmpty(readString(item, 'description'))
+        .ifEmpty(readString(item, 'message'));
     if (step.isEmpty) {
       return '';
     }

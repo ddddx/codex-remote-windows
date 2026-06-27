@@ -314,6 +314,48 @@ void main() {
     state.dispose();
   });
 
+  test('restores turn plans from loose maps and replayed updates', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-plan';
+    state.activeSessionId = threadId;
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [],
+      'turnPlans': [
+        <String, Object?>{
+          'turnId': 'turn-plan-sync',
+          'steps': [
+            <String, Object?>{'text': '同步计划步骤', 'status': 'completed'},
+          ],
+          'updatedAt': 1000,
+        },
+      ],
+      'timelineEvents': [
+        <String, Object?>{
+          'type': 'turn_plan_updated',
+          'threadId': threadId,
+          'turnId': 'turn-plan-event',
+          'plan': [
+            '字符串计划步骤',
+            <String, Object?>{'title': '事件计划步骤', 'status': 'inProgress'},
+          ],
+          'updatedAt': 1001,
+        },
+      ],
+    });
+
+    final plans = state.activeTimeline
+        .where((entry) => entry.type == 'turn_plan')
+        .toList(growable: false);
+    expect(plans, hasLength(2));
+    expect(plans.first.meta.single, '已完成 · 同步计划步骤');
+    expect(plans.last.meta, contains('待处理 · 字符串计划步骤'));
+    expect(plans.last.meta, contains('进行中 · 事件计划步骤'));
+    state.dispose();
+  });
+
   test('replays thread sync events that inherit outer thread id', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
@@ -649,6 +691,45 @@ void main() {
       (entry) => entry.id == 'file-structured',
     );
     expect(fileEntry.patch, contains('src/a.ts'));
+    state.dispose();
+  });
+
+  test('preserves per-file diffs from file change payloads', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-file-diff';
+    state.activeSessionId = threadId;
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [
+        {
+          'id': 'turn-file-diff',
+          'status': 'completed',
+          'items': [
+            {
+              'id': 'file-diff',
+              'type': 'fileChange',
+              'status': 'completed',
+              'changes': [
+                <String, Object?>{
+                  'path': 'lib/main.dart',
+                  'kind': 'update',
+                  'diff': '@@ -1,1 +1,1 @@\n-old\n+new',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    final fileEntry = state.activeTimeline.singleWhere(
+      (entry) => entry.id == 'file-diff',
+    );
+    expect(fileEntry.type, 'file_change');
+    expect(fileEntry.patch, isEmpty);
+    expect(fileEntry.changes.single['diff'], contains('+new'));
     state.dispose();
   });
 }

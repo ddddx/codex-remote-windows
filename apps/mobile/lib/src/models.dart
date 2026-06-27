@@ -23,14 +23,45 @@ bool readBool(JsonMap map, String key, [bool fallback = false]) {
 
 JsonMap readMap(JsonMap map, String key) {
   final value = map[key];
-  return value is JsonMap ? value : const {};
+  if (value is JsonMap) {
+    return value;
+  }
+  if (value is Map) {
+    final converted = <String, dynamic>{};
+    for (final entry in value.entries) {
+      if (entry.key is String) {
+        converted[entry.key as String] = entry.value;
+      }
+    }
+    return converted;
+  }
+  return const {};
 }
 
 List<JsonMap> readMapList(JsonMap map, String key) {
   final value = map[key];
-  return value is List
-      ? value.whereType<JsonMap>().toList(growable: false)
-      : const [];
+  if (value is! List) {
+    return const [];
+  }
+  final result = <JsonMap>[];
+  for (final item in value) {
+    if (item is JsonMap) {
+      result.add(item);
+      continue;
+    }
+    if (item is Map) {
+      final converted = <String, dynamic>{};
+      for (final entry in item.entries) {
+        if (entry.key is String) {
+          converted[entry.key as String] = entry.value;
+        }
+      }
+      if (converted.isNotEmpty || item.isEmpty) {
+        result.add(converted);
+      }
+    }
+  }
+  return result;
 }
 
 class AuthSessionItem {

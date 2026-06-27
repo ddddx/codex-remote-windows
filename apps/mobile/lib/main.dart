@@ -1055,14 +1055,20 @@ Color _processColor(BuildContext context, TimelineEntry entry) {
 
 String _processHeadline(TimelineEntry entry) {
   final label = _timelineLabel(entry);
+  late final String base;
   if (entry.partial) {
-    return '$label · 进行中';
+    base = '$label · 进行中';
+  } else {
+    final status = _formatStatus(entry.status);
+    base = status.isNotEmpty && status != '完成' ? '$label · $status' : label;
   }
-  final status = _formatStatus(entry.status);
-  if (status.isNotEmpty && status != '完成') {
-    return '$label · $status';
+  if (entry.type == 'file_change' || entry.type == 'turn_diff') {
+    final stats = _changeStats(_changeTotals(_renderableChanges(entry)));
+    if (stats.isNotEmpty) {
+      return '$base $stats';
+    }
   }
-  return label;
+  return base;
 }
 
 String _timelineLabel(TimelineEntry entry) {
@@ -1153,9 +1159,15 @@ List<Widget> _processDetailWidgets(BuildContext context, TimelineEntry entry) {
     widgets.add(_MetaWrap(meta: meta));
   }
 
-  final patch = entry.patch.trim();
+  final patch = entry.type == 'file_change' || entry.type == 'turn_diff'
+      ? _diffTextFromEntry(entry)
+      : entry.patch.trim();
   if (patch.isNotEmpty) {
-    widgets.add(_CodeBlock(text: patch));
+    widgets.add(
+      entry.type == 'file_change' || entry.type == 'turn_diff'
+          ? _DiffBlock(text: patch)
+          : _CodeBlock(text: patch),
+    );
   }
 
   return widgets
@@ -1180,10 +1192,72 @@ List<String> _displayMeta(List<String> meta) {
 }
 
 List<JsonMap> _renderableChanges(TimelineEntry entry) {
-  if (entry.changes.isNotEmpty) {
-    return entry.changes;
+  final explicit = entry.changes
+      .map(_normalizeFileChange)
+      .where((change) => readString(change, 'path').isNotEmpty)
+      .toList(growable: false);
+  final derived = _changesFromPatch(entry.patch);
+  if (explicit.isEmpty) {
+    return derived;
   }
-  return _changesFromPatch(entry.patch);
+  if (derived.isEmpty) {
+    return _dedupeRenderableChanges(
+      explicit
+          .map((change) {
+            final stats = _diffStats(_changeDiff(change));
+            return {
+              ...change,
+              'addedLines':
+                  _changeStat(change, 'addedLines', 'added_lines') ??
+                  stats['addedLines'],
+              'deletedLines':
+                  _changeStat(change, 'deletedLines', 'deleted_lines') ??
+                  stats['deletedLines'],
+            };
+          })
+          .toList(growable: false),
+    );
+  }
+
+  final derivedByPath = <String, JsonMap>{
+    for (final change in derived) readString(change, 'path'): change,
+  };
+  final merged = explicit
+      .map((change) {
+        final fallback = derivedByPath[readString(change, 'path')];
+        final diffStats = _diffStats(_changeDiff(change));
+        return {
+          ...?fallback,
+          ...change,
+          'kind': readString(change, 'kind').ifEmpty(
+            fallback == null
+                ? 'update'
+                : readString(fallback, 'kind', 'update'),
+          ),
+          'addedLines':
+              _changeStat(change, 'addedLines', 'added_lines') ??
+              (fallback == null
+                  ? null
+                  : _changeStat(fallback, 'addedLines', 'added_lines')) ??
+              diffStats['addedLines'],
+          'deletedLines':
+              _changeStat(change, 'deletedLines', 'deleted_lines') ??
+              (fallback == null
+                  ? null
+                  : _changeStat(fallback, 'deletedLines', 'deleted_lines')) ??
+              diffStats['deletedLines'],
+        };
+      })
+      .toList(growable: true);
+
+  for (final change in derived) {
+    if (!merged.any(
+      (item) => readString(item, 'path') == readString(change, 'path'),
+    )) {
+      merged.add(change);
+    }
+  }
+  return _dedupeRenderableChanges(merged);
 }
 
 List<JsonMap> _changesFromPatch(String patch) {
@@ -1193,8 +1267,10 @@ List<JsonMap> _changesFromPatch(String patch) {
   }
   final lines = patch.replaceAll('\r\n', '\n').split('\n');
   String currentPath = '';
+  String currentKind = 'update';
   var added = 0;
   var deleted = 0;
+  var currentDiff = <String>[];
 
   void flush() {
     if (currentPath.isEmpty) {
@@ -1202,39 +1278,74 @@ List<JsonMap> _changesFromPatch(String patch) {
     }
     changes.add({
       'path': currentPath,
-      'kind': 'update',
+      'kind': currentKind,
       'addedLines': added,
       'deletedLines': deleted,
+      if (currentDiff.isNotEmpty) 'diff': currentDiff.join('\n'),
     });
     currentPath = '';
+    currentKind = 'update';
     added = 0;
     deleted = 0;
+    currentDiff = <String>[];
+  }
+
+  void startChange(String path, String kind, String headerLine) {
+    flush();
+    currentPath = path.trim();
+    currentKind = kind;
+    currentDiff = headerLine.isEmpty ? <String>[] : <String>[headerLine];
   }
 
   for (final line in lines) {
-    if (line.startsWith('*** Add File:')) {
-      flush();
-      currentPath = line.substring('*** Add File:'.length).trim();
+    final addMatch = RegExp(r'^\*\*\* Add File:\s+(.+)$').firstMatch(line);
+    if (addMatch != null) {
+      startChange(addMatch.group(1) ?? '', 'add', line);
       continue;
     }
-    if (line.startsWith('*** Delete File:')) {
-      flush();
-      currentPath = line.substring('*** Delete File:'.length).trim();
+    final deleteMatch = RegExp(
+      r'^\*\*\* Delete File:\s+(.+)$',
+    ).firstMatch(line);
+    if (deleteMatch != null) {
+      startChange(deleteMatch.group(1) ?? '', 'delete', line);
       continue;
     }
-    if (line.startsWith('*** Update File:')) {
-      flush();
-      currentPath = line.substring('*** Update File:'.length).trim();
+    final updateMatch = RegExp(
+      r'^\*\*\* Update File:\s+(.+)$',
+    ).firstMatch(line);
+    if (updateMatch != null) {
+      startChange(updateMatch.group(1) ?? '', 'update', line);
+      continue;
+    }
+    final gitMatch = RegExp(r'^diff --git a\/(.+?) b\/(.+)$').firstMatch(line);
+    if (gitMatch != null) {
+      startChange(gitMatch.group(2) ?? gitMatch.group(1) ?? '', 'update', line);
       continue;
     }
     if (line.startsWith('diff --git ')) {
-      flush();
       final parts = line.split(RegExp(r'\s+'));
-      currentPath = parts.length >= 4
-          ? parts[3].replaceFirst(RegExp(r'^b/'), '')
-          : line;
+      startChange(
+        parts.length >= 4 ? parts[3].replaceFirst(RegExp(r'^b/'), '') : line,
+        'update',
+        line,
+      );
       continue;
     }
+    final plusPlusMatch = RegExp(r'^\+\+\+\s+(?:b\/)?(.+)$').firstMatch(line);
+    final minusMinusMatch = RegExp(r'^---\s+(?:a\/)?(.+)$').firstMatch(line);
+    if ((plusPlusMatch != null || minusMinusMatch != null) &&
+        currentPath.isEmpty) {
+      startChange(
+        (plusPlusMatch?.group(1) ?? minusMinusMatch?.group(1) ?? '').trim(),
+        'update',
+        line,
+      );
+      continue;
+    }
+    if (currentPath.isEmpty) {
+      continue;
+    }
+    currentDiff.add(line);
     if (line.startsWith('+') && !line.startsWith('+++')) {
       added += 1;
     } else if (line.startsWith('-') && !line.startsWith('---')) {
@@ -1243,6 +1354,189 @@ List<JsonMap> _changesFromPatch(String patch) {
   }
   flush();
   return changes;
+}
+
+JsonMap _normalizeFileChange(JsonMap change) {
+  final path = readString(change, 'path')
+      .ifEmpty(readString(change, 'name'))
+      .ifEmpty(readString(change, 'file'))
+      .ifEmpty(readString(change, 'filePath'))
+      .ifEmpty(readString(change, 'file_path'))
+      .trim();
+  final kind = readString(
+    change,
+    'kind',
+  ).ifEmpty(readString(change, 'type')).ifEmpty('update');
+  return {...change, if (path.isNotEmpty) 'path': path, 'kind': kind};
+}
+
+List<JsonMap> _dedupeRenderableChanges(List<JsonMap> changes) {
+  final byKey = <String, JsonMap>{};
+  for (final change in changes) {
+    final normalized = _normalizeFileChange(change);
+    final path = readString(normalized, 'path');
+    if (path.isEmpty) {
+      continue;
+    }
+    final key = '${readString(normalized, 'kind').toLowerCase()}::$path';
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = normalized;
+      continue;
+    }
+    byKey[key] = {
+      ...existing,
+      ...normalized,
+      'path': readString(existing, 'path').ifEmpty(path),
+      'kind': readString(
+        existing,
+        'kind',
+      ).ifEmpty(readString(normalized, 'kind', 'update')),
+      'addedLines': max(
+        _changeStat(existing, 'addedLines', 'added_lines') ?? 0,
+        _changeStat(normalized, 'addedLines', 'added_lines') ?? 0,
+      ),
+      'deletedLines': max(
+        _changeStat(existing, 'deletedLines', 'deleted_lines') ?? 0,
+        _changeStat(normalized, 'deletedLines', 'deleted_lines') ?? 0,
+      ),
+      'diff': _changeDiff(existing).ifEmpty(_changeDiff(normalized)),
+    };
+  }
+  return byKey.values.toList(growable: false);
+}
+
+JsonMap _changeTotals(List<JsonMap> changes) {
+  var added = 0;
+  var deleted = 0;
+  for (final change in changes) {
+    added += _changeStat(change, 'addedLines', 'added_lines') ?? 0;
+    deleted += _changeStat(change, 'deletedLines', 'deleted_lines') ?? 0;
+  }
+  return {'addedLines': added, 'deletedLines': deleted};
+}
+
+int? _changeStat(JsonMap change, String camelKey, String snakeKey) {
+  final value = _num(change[camelKey]) ?? _num(change[snakeKey]);
+  return value == null ? null : max(0, value.round());
+}
+
+JsonMap _diffStats(String diff) {
+  var added = 0;
+  var deleted = 0;
+  for (final line in diff.replaceAll('\r\n', '\n').split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      added += 1;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deleted += 1;
+    }
+  }
+  return {'addedLines': added, 'deletedLines': deleted};
+}
+
+String _changeDiff(JsonMap change) {
+  return readString(change, 'diff')
+      .ifEmpty(readString(change, 'patch'))
+      .ifEmpty(readString(change, 'output'))
+      .ifEmpty(readString(change, 'aggregatedOutput'));
+}
+
+String _diffTextFromEntry(TimelineEntry entry) {
+  final patch = entry.patch.trim();
+  if (patch.isNotEmpty) {
+    return patch;
+  }
+  return _renderableChanges(entry)
+      .map(_changeDiff)
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .join('\n');
+}
+
+String _classifyDiffLine(String line) {
+  if (line.startsWith('+++ ') || line.startsWith('--- ')) {
+    return 'file';
+  }
+  if (line.startsWith('*** Add File:') ||
+      line.startsWith('*** Delete File:') ||
+      line.startsWith('*** Update File:')) {
+    return 'file';
+  }
+  if (line.startsWith('diff --git ')) {
+    return 'file';
+  }
+  if (line.startsWith('@@')) {
+    return 'hunk';
+  }
+  if (line.startsWith('+')) {
+    return 'add';
+  }
+  if (line.startsWith('-')) {
+    return 'delete';
+  }
+  return 'context';
+}
+
+List<_DiffLineView> _buildDiffLineViews(String text) {
+  final lines = text.replaceAll('\r\n', '\n').split('\n');
+  int? oldLine;
+  int? newLine;
+  return lines
+      .map((line) {
+        final kind = _classifyDiffLine(line);
+        final hunkMatch = RegExp(
+          r'^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@',
+        ).firstMatch(line);
+        if (hunkMatch != null) {
+          oldLine = int.tryParse(hunkMatch.group(1) ?? '');
+          newLine = int.tryParse(hunkMatch.group(2) ?? '');
+          return _DiffLineView(text: line, kind: kind);
+        }
+        if (kind == 'add') {
+          final view = _DiffLineView(text: line, kind: kind, newLine: newLine);
+          newLine = newLine == null ? null : newLine! + 1;
+          return view;
+        }
+        if (kind == 'delete') {
+          final view = _DiffLineView(text: line, kind: kind, oldLine: oldLine);
+          oldLine = oldLine == null ? null : oldLine! + 1;
+          return view;
+        }
+        if (kind == 'context') {
+          final view = _DiffLineView(
+            text: line,
+            kind: kind,
+            oldLine: oldLine,
+            newLine: newLine,
+          );
+          oldLine = oldLine == null ? null : oldLine! + 1;
+          newLine = newLine == null ? null : newLine! + 1;
+          return view;
+        }
+        return _DiffLineView(text: line, kind: kind);
+      })
+      .toList(growable: false);
+}
+
+Color _diffLineBackground(BuildContext context, String kind) {
+  final colors = Theme.of(context).colorScheme;
+  return switch (kind) {
+    'add' => Colors.green.withValues(alpha: 0.12),
+    'delete' => colors.error.withValues(alpha: 0.10),
+    'hunk' => colors.secondaryContainer.withValues(alpha: 0.45),
+    'file' => colors.surfaceContainerHighest,
+    _ => Colors.transparent,
+  };
+}
+
+Color _diffLineTextColor(BuildContext context, String kind) {
+  final colors = Theme.of(context).colorScheme;
+  return switch (kind) {
+    'add' => Colors.green.shade700,
+    'delete' => colors.error,
+    'hunk' || 'file' => colors.primary,
+    _ => colors.onSurface,
+  };
 }
 
 String _fileChangePrefix(String kind) {
@@ -1322,6 +1616,100 @@ class _CodeBlock extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DiffBlock extends StatelessWidget {
+  const _DiffBlock({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = _buildDiffLineViews(text);
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: lines
+                .map((line) => _DiffLineRow(line: line))
+                .toList(growable: false),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiffLineRow extends StatelessWidget {
+  const _DiffLineRow({required this.line});
+
+  final _DiffLineView line;
+
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      fontFamily: 'monospace',
+      color: _diffLineTextColor(context, line.kind),
+    );
+    return Container(
+      constraints: const BoxConstraints(minWidth: 360),
+      color: _diffLineBackground(context, line.kind),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _DiffLineNumber(value: line.oldLine),
+          _DiffLineNumber(value: line.newLine),
+          const SizedBox(width: 8),
+          Text(line.text.isEmpty ? ' ' : line.text, style: textStyle),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiffLineNumber extends StatelessWidget {
+  const _DiffLineNumber({required this.value});
+
+  final int? value;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 36,
+      child: Text(
+        value?.toString() ?? '',
+        textAlign: TextAlign.right,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          fontFamily: 'monospace',
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+class _DiffLineView {
+  const _DiffLineView({
+    required this.text,
+    required this.kind,
+    this.oldLine,
+    this.newLine,
+  });
+
+  final String text;
+  final String kind;
+  final int? oldLine;
+  final int? newLine;
 }
 
 class _MetaWrap extends StatelessWidget {
