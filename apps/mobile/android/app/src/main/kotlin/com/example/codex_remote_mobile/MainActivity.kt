@@ -1,9 +1,15 @@
 package com.example.codex_remote_mobile
 
+import android.Manifest
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
@@ -24,6 +30,8 @@ class MainActivity : FlutterActivity() {
     private val channelName = "codex_remote_mobile/native"
     private val preferencesName = "codex_remote_mobile"
     private val pickImageRequestCode = 42017
+    private val notificationPermissionRequestCode = 42019
+    private val taskNotificationChannelId = "codex_remote_task_events"
     private val downloadExecutor = Executors.newSingleThreadExecutor()
     private var pendingPickResult: MethodChannel.Result? = null
 
@@ -40,6 +48,8 @@ class MainActivity : FlutterActivity() {
                 "downloadAndInstallApk" -> downloadAndInstallApk(call, result)
                 "startBackgroundKeepAlive" -> startBackgroundKeepAlive(call, result)
                 "stopBackgroundKeepAlive" -> stopBackgroundKeepAlive(result)
+                "requestNotificationPermission" -> requestNotificationPermission(result)
+                "showNotification" -> showNotification(call, result)
                 else -> result.notImplemented()
             }
         }
@@ -190,6 +200,77 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             result.error("keep_alive_stop_failed", error.message, null)
         }
+    }
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(null)
+            return
+        }
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationPermissionRequestCode)
+        result.success(null)
+    }
+
+    private fun showNotification(call: MethodCall, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            result.error("notification_permission_denied", "通知权限未开启", null)
+            return
+        }
+        val title = call.argument<String>("title")?.takeIf { it.isNotBlank() } ?: "Codex Remote"
+        val body = call.argument<String>("body")?.takeIf { it.isNotBlank() } ?: "任务已完成"
+        val id = call.argument<Int>("id") ?: 42020
+        try {
+            createTaskNotificationChannel()
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.notify(id, buildTaskNotification(title, body))
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("notification_failed", error.message, null)
+        }
+    }
+
+    private fun createTaskNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            taskNotificationChannelId,
+            "Codex Remote 任务通知",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Codex 任务完成提醒"
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun buildTaskNotification(title: String, body: String): Notification {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        } ?: Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, taskNotificationChannelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        return builder
+            .setContentTitle(title)
+            .setContentText(body)
+            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
     }
 
     private fun sanitizeApkName(value: String?): String {

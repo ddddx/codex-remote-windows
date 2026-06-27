@@ -251,6 +251,36 @@ void main() {
     },
   );
 
+  test('notifies when a background turn completes once', () async {
+    final bridge = _TestBridge();
+    final state = CodexAppState(bridge)
+      ..appInForeground = false
+      ..sessions = [SessionItem(threadId: 'thread-1', name: '测试会话')];
+    addTearDown(state.dispose);
+
+    state.handleServerMessage({
+      'type': 'turn_started',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'startedAt': 1000,
+    });
+    state.handleServerMessage({
+      'type': 'turn_completed',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+    });
+    state.handleServerMessage({
+      'type': 'turn_completed',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+    });
+    await Future<void>.delayed(Duration.zero);
+
+    expect(bridge.notifications, hasLength(1));
+    expect(bridge.notifications.single['title'], 'Codex 任务已完成');
+    expect(bridge.notifications.single['body'], contains('测试会话'));
+  });
+
   test('filters non-rendered thread sync timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
@@ -625,6 +655,7 @@ void main() {
 
 class _TestBridge extends NativeBridge {
   final Map<String, String> values = {};
+  final List<Map<String, Object?>> notifications = [];
 
   @override
   Future<String?> getString(String key) async => values[key];
@@ -641,4 +672,16 @@ class _TestBridge extends NativeBridge {
 
   @override
   Future<PickedImage?> pickImage() async => null;
+
+  @override
+  Future<void> requestNotificationPermission() async {}
+
+  @override
+  Future<void> showNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    notifications.add({'id': id, 'title': title, 'body': body});
+  }
 }

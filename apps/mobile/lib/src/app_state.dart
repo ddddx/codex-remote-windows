@@ -40,6 +40,7 @@ class CodexAppState extends ChangeNotifier {
   StreamSubscription<String>? _statusSub;
   Timer? _workingTimer;
   bool _reauthenticating = false;
+  final Set<String> _completedTurnNotifications = {};
 
   String serverUrl = 'http://127.0.0.1:18637';
   String token = '';
@@ -57,6 +58,7 @@ class CodexAppState extends ChangeNotifier {
   bool updateChecking = false;
   bool updateDownloading = false;
   bool backgroundKeepAliveActive = false;
+  bool appInForeground = true;
   String updateMessage = '';
   MobileUpdateInfo? availableUpdate;
   WorkspaceListing? workspaceListing;
@@ -610,6 +612,7 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     try {
+      unawaited(bridge.requestNotificationPermission());
       await bridge.startBackgroundKeepAlive(
         title: 'Codex Remote 已连接',
         body: '后台保持与 Windows 服务通信',
@@ -833,6 +836,10 @@ class CodexAppState extends ChangeNotifier {
   void toggleControls() {
     controlsExpanded = !controlsExpanded;
     notifyListeners();
+  }
+
+  void setAppForeground(bool value) {
+    appInForeground = value;
   }
 
   void handleServerMessage(JsonMap message) {
@@ -2075,6 +2082,7 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty) {
       return;
     }
+    final wasRunning = activeTurnStartedAt.containsKey(threadId);
     activeTurnStartedAt.remove(threadId);
     final entries = [
       ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
@@ -2100,6 +2108,34 @@ class CodexAppState extends ChangeNotifier {
     }
     if (changed) {
       timelineByThread[threadId] = entries;
+    }
+    if (wasRunning) {
+      unawaited(_showTurnCompletedNotification(threadId, turnId));
+    }
+  }
+
+  Future<void> _showTurnCompletedNotification(
+    String threadId,
+    String turnId,
+  ) async {
+    if (appInForeground) {
+      return;
+    }
+    final key = '$threadId:${turnId.ifEmpty('turn')}';
+    if (!_completedTurnNotifications.add(key)) {
+      return;
+    }
+    final index = sessions.indexWhere((item) => item.threadId == threadId);
+    final sessionName = index >= 0 ? sessions[index].name.trim() : '';
+    final name = sessionName.isEmpty ? '当前对话' : sessionName;
+    try {
+      await bridge.showNotification(
+        id: key.hashCode & 0x7fffffff,
+        title: 'Codex 任务已完成',
+        body: '$name 已完成',
+      );
+    } catch (_) {
+      // Notification permission may be denied. The timeline still has the result.
     }
   }
 

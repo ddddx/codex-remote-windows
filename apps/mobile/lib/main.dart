@@ -25,21 +25,30 @@ class CodexRemoteMobileApp extends StatefulWidget {
   State<CodexRemoteMobileApp> createState() => _CodexRemoteMobileAppState();
 }
 
-class _CodexRemoteMobileAppState extends State<CodexRemoteMobileApp> {
+class _CodexRemoteMobileAppState extends State<CodexRemoteMobileApp>
+    with WidgetsBindingObserver {
   late String _theme = widget.state.theme;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.state.addListener(_handleStateChanged);
+    widget.state.setAppForeground(true);
     widget.state.initialize();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.state.removeListener(_handleStateChanged);
     widget.state.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    widget.state.setAppForeground(state == AppLifecycleState.resumed);
   }
 
   void _handleStateChanged() {

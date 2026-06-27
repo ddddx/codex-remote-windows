@@ -102,4 +102,20 @@ class NativeBridge {
   Future<void> stopBackgroundKeepAlive() async {
     await _channel.invokeMethod<void>('stopBackgroundKeepAlive');
   }
+
+  Future<void> requestNotificationPermission() async {
+    await _channel.invokeMethod<void>('requestNotificationPermission');
+  }
+
+  Future<void> showNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    await _channel.invokeMethod<void>('showNotification', {
+      'id': id,
+      'title': title,
+      'body': body,
+    });
+  }
 }
