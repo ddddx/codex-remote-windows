@@ -187,6 +187,19 @@ class _AppShellState extends State<AppShell> {
                   item.threadId == state.activeSessionId,
             ))
               ApprovalStrip(state: state),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              child: state.isWorking
+                  ? _WorkingStatusBanner(
+                      key: const ValueKey('working-status-banner'),
+                      label: state.workingLabel,
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('working-status-empty'),
+                    ),
+            ),
             _buildTimelineArea(context, active),
             ComposerBar(
               state: state,
@@ -748,6 +761,121 @@ class TimelineCard extends StatelessWidget {
   }
 }
 
+class _WorkingStatusBanner extends StatelessWidget {
+  const _WorkingStatusBanner({super.key, required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      decoration: BoxDecoration(
+        color: colors.primaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 5,
+            child: ColoredBox(color: colors.primary),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+            child: Row(
+              children: [
+                SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    color: colors.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '正在执行任务',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: colors.onPrimaryContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (label.trim().isNotEmpty)
+                        Text(
+                          label,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(color: colors.onPrimaryContainer),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimelineStatusBadge extends StatelessWidget {
+  const _TimelineStatusBadge({required this.entry});
+
+  final TimelineEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = _timelineStatusForeground(context, entry);
+    final running = _isRunningEntry(entry);
+    return Container(
+      constraints: const BoxConstraints(minHeight: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _timelineStatusBackground(context, entry),
+        borderRadius: BorderRadius.circular(6),
+        border: running
+            ? null
+            : Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (running)
+            SizedBox.square(
+              dimension: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: foreground,
+              ),
+            )
+          else
+            Icon(_entryStateIcon(entry), size: 14, color: foreground),
+          const SizedBox(width: 5),
+          Text(
+            _timelineStatusLabel(entry),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MessageTimelineCard extends StatelessWidget {
   const _MessageTimelineCard({required this.state, required this.entry});
 
@@ -759,6 +887,8 @@ class _MessageTimelineCard extends StatelessWidget {
     final isUser = entry.role == 'user';
     final isAssistant = entry.role == 'assistant';
     final color = isUser
+        ? Theme.of(context).colorScheme.primaryContainer
+        : isAssistant && _isRunningEntry(entry)
         ? Theme.of(context).colorScheme.primaryContainer
         : isAssistant
         ? Theme.of(context).colorScheme.surfaceContainerHighest
@@ -786,17 +916,18 @@ class _MessageTimelineCard extends StatelessWidget {
                       child: Text(
                         [
                           entry.title,
-                          _formatStatus(entry.status),
+                          if (!_isRunningEntry(entry))
+                            _formatStatus(entry.status),
                         ].where((item) => item.isNotEmpty).join(' · '),
                         style: Theme.of(context).textTheme.labelMedium,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (entry.partial)
-                      const SizedBox.square(
-                        dimension: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    if (_isRunningEntry(entry))
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: _TimelineStatusBadge(entry: entry),
                       ),
                   ],
                 ),
@@ -967,69 +1098,91 @@ class _ProcessTimelineCard extends StatelessWidget {
         ),
         child: Card(
           clipBehavior: Clip.antiAlias,
+          elevation: _isRunningEntry(entry) ? 2 : 0,
           color: _processColor(context, entry),
-          child: details.isEmpty
-              ? ListTile(
-                  dense: true,
-                  leading: Icon(_entryIcon(entry), size: 18),
-                  title: Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 5,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: _timelineStateColor(context, entry),
                   ),
-                  subtitle: summary.isEmpty
-                      ? null
-                      : Text(
-                          summary,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 5),
+                child: details.isEmpty
+                    ? ListTile(
+                        dense: true,
+                        leading: Icon(
+                          _entryStateIcon(entry),
+                          size: 18,
+                          color: _timelineStateColor(context, entry),
+                        ),
+                        title: Text(
+                          title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                  trailing: entry.partial
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : null,
-                )
-              : Theme(
-                  data: Theme.of(
-                    context,
-                  ).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    tilePadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 2,
-                    ),
-                    childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                    leading: Icon(_entryIcon(entry), size: 18),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        subtitle: summary.isEmpty
+                            ? null
+                            : Text(
+                                summary,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                        trailing: _TimelineStatusBadge(entry: entry),
+                      )
+                    : Theme(
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 2,
                           ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            12,
+                            0,
+                            12,
+                            12,
+                          ),
+                          leading: Icon(
+                            _entryStateIcon(entry),
+                            size: 18,
+                            color: _timelineStateColor(context, entry),
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _TimelineStatusBadge(entry: entry),
+                            ],
+                          ),
+                          subtitle: summary.isEmpty
+                              ? null
+                              : Text(
+                                  summary,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                          children: details,
                         ),
-                        if (entry.partial) ...[
-                          const SizedBox(width: 8),
-                          const SizedBox.square(
-                            dimension: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ],
-                      ],
-                    ),
-                    subtitle: summary.isEmpty
-                        ? null
-                        : Text(
-                            summary,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                    children: details,
-                  ),
-                ),
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1043,11 +1196,111 @@ bool _isMessageEntry(TimelineEntry entry) =>
     entry.type == 'message' &&
     (entry.role == 'user' || entry.role == 'assistant');
 
+bool _isRunningEntry(TimelineEntry entry) {
+  final normalized = entry.status
+      .replaceAll(RegExp(r'[\s_-]'), '')
+      .toLowerCase();
+  return entry.partial ||
+      normalized == 'running' ||
+      normalized == 'inprogress' ||
+      normalized == 'active';
+}
+
+bool _isErrorEntry(TimelineEntry entry) {
+  final normalized = entry.status
+      .replaceAll(RegExp(r'[\s_-]'), '')
+      .toLowerCase();
+  return normalized == 'error' ||
+      normalized == 'failed' ||
+      normalized == 'failure';
+}
+
+bool _isWarningEntry(TimelineEntry entry) {
+  final normalized = entry.status
+      .replaceAll(RegExp(r'[\s_-]'), '')
+      .toLowerCase();
+  return normalized == 'warning' ||
+      normalized == 'pendingapproval' ||
+      normalized == 'pending';
+}
+
+Color _timelineStateColor(BuildContext context, TimelineEntry entry) {
+  final colors = Theme.of(context).colorScheme;
+  if (_isRunningEntry(entry)) {
+    return colors.primary;
+  }
+  if (_isErrorEntry(entry)) {
+    return colors.error;
+  }
+  if (_isWarningEntry(entry)) {
+    return colors.tertiary;
+  }
+  return Colors.green.shade600;
+}
+
+Color _timelineStatusBackground(BuildContext context, TimelineEntry entry) {
+  final colors = Theme.of(context).colorScheme;
+  if (_isRunningEntry(entry)) {
+    return colors.primary;
+  }
+  if (_isErrorEntry(entry)) {
+    return colors.error;
+  }
+  if (_isWarningEntry(entry)) {
+    return colors.tertiaryContainer;
+  }
+  return colors.surfaceContainerHighest;
+}
+
+Color _timelineStatusForeground(BuildContext context, TimelineEntry entry) {
+  final colors = Theme.of(context).colorScheme;
+  if (_isRunningEntry(entry)) {
+    return colors.onPrimary;
+  }
+  if (_isErrorEntry(entry)) {
+    return colors.onError;
+  }
+  if (_isWarningEntry(entry)) {
+    return colors.onTertiaryContainer;
+  }
+  return colors.onSurfaceVariant;
+}
+
+IconData _entryStateIcon(TimelineEntry entry) {
+  if (_isRunningEntry(entry)) {
+    return Icons.sync;
+  }
+  if (_isErrorEntry(entry)) {
+    return Icons.error_outline;
+  }
+  if (_isWarningEntry(entry)) {
+    return Icons.warning_amber_outlined;
+  }
+  return Icons.check_circle_outline;
+}
+
+String _timelineStatusLabel(TimelineEntry entry) {
+  if (_isRunningEntry(entry)) {
+    return '运行中';
+  }
+  if (_isErrorEntry(entry)) {
+    return '异常';
+  }
+  if (_isWarningEntry(entry)) {
+    final status = _formatStatus(entry.status);
+    return status.isEmpty || status == entry.status ? '待处理' : status;
+  }
+  return '完成';
+}
+
 Color _processColor(BuildContext context, TimelineEntry entry) {
-  if (entry.status == 'error' || entry.status == 'failed') {
+  if (_isRunningEntry(entry)) {
+    return Theme.of(context).colorScheme.primaryContainer;
+  }
+  if (_isErrorEntry(entry)) {
     return Theme.of(context).colorScheme.errorContainer;
   }
-  if (entry.status == 'warning' || entry.status == 'pendingApproval') {
+  if (_isWarningEntry(entry)) {
     return Theme.of(context).colorScheme.tertiaryContainer;
   }
   return Theme.of(context).colorScheme.surfaceContainerLow;

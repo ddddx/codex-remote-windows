@@ -59,6 +59,54 @@ void main() {
     expect(find.textContaining('@@ -1,1 +1,1 @@'), findsOneWidget);
     expect(find.textContaining('+new line'), findsOneWidget);
   });
+
+  testWidgets('highlights running tasks apart from completed tasks', (
+    tester,
+  ) async {
+    final state = CodexAppState(_TestBridge())
+      ..cookie = 'cookie'
+      ..serverUrl = 'http://192.168.2.15:18637'
+      ..token = 'token'
+      ..connectionStatus = 'connected'
+      ..activeSessionId = 'thread-1'
+      ..sessions = [SessionItem(threadId: 'thread-1', name: '测试会话')];
+    addTearDown(state.dispose);
+
+    state.activeTurnStartedAt['thread-1'] =
+        DateTime.now().millisecondsSinceEpoch - 2000;
+    state.timelineByThread['thread-1'] = [
+      TimelineEntry(
+        id: 'command-running',
+        type: 'command',
+        title: '命令',
+        role: 'system',
+        text: 'npm test',
+        status: 'running',
+        turnId: 'turn-1',
+        partial: true,
+        createdAt: 1,
+      ),
+      TimelineEntry(
+        id: 'command-completed',
+        type: 'command',
+        title: '命令',
+        role: 'system',
+        text: 'npm run build',
+        status: 'completed',
+        turnId: 'turn-1',
+        createdAt: 2,
+      ),
+    ];
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(state: state)));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('正在执行任务'), findsOneWidget);
+    expect(find.textContaining('Working'), findsAtLeastNWidgets(1));
+    expect(find.text('运行中'), findsOneWidget);
+    expect(find.text('完成'), findsOneWidget);
+  });
 }
 
 class _TestBridge extends NativeBridge {}
