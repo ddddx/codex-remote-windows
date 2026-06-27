@@ -19,6 +19,29 @@ void main() {
     expect(compareVersionNames('1.0.9', '1.0.11'), lessThan(0));
   });
 
+  test('extracts mobile release info from GitHub html fallback', () {
+    final info = extractMobileUpdateInfoFromReleaseHtml(
+      finalUrl:
+          'https://github.com/ddddx/codex-remote-windows/releases/tag/mobile-build-v1.0.15-1-abcdef',
+      html: '''
+        <html>
+          <head><title>Codex Remote Android v1.0.15 · Release</title></head>
+          <body>
+            <a href="/ddddx/codex-remote-windows/releases/download/mobile-build-v1.0.15-1-abcdef/codex-remote-v1.0.15-arm64-sdk35-release.apk">arm64</a>
+            <a href="/ddddx/codex-remote-windows/releases/download/mobile-build-v1.0.15-1-abcdef/codex-remote-v1.0.15-universal-sdk35-release.apk?download=1&amp;x=2">universal</a>
+          </body>
+        </html>
+      ''',
+    );
+
+    expect(info, isNotNull);
+    expect(info!.versionName, '1.0.15');
+    expect(info.tagName, 'mobile-build-v1.0.15-1-abcdef');
+    expect(info.apkName, 'codex-remote-v1.0.15-universal-sdk35-release.apk');
+    expect(info.apkUrl, contains('https://github.com/'));
+    expect(info.apkUrl, contains('&x=2'));
+  });
+
   test('merges streaming timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
@@ -380,6 +403,95 @@ void main() {
     final entries = state.timelineByThread[threadId] ?? const [];
     expect(entries.where((item) => item.role == 'assistant'), hasLength(1));
     expect(entries.single.text, 'Restored message');
+    state.dispose();
+  });
+
+  test(
+    'orders replayed timeline events by server sequence when timestamps tie',
+    () {
+      final state = CodexAppState(_TestBridge());
+      const threadId = 'thread-sequence';
+      state.activeSessionId = threadId;
+
+      state.handleServerMessage({
+        'type': 'thread_sync',
+        'threadId': threadId,
+        'turns': [],
+        'timelineEvents': [
+          {
+            'type': 'thread_event',
+            'threadId': threadId,
+            'itemId': 'event-2',
+            'method': 'process/outputDelta',
+            'message': 'second',
+            'createdAt': 1000,
+            'sequence': 2,
+          },
+          {
+            'type': 'thread_event',
+            'threadId': threadId,
+            'itemId': 'event-1',
+            'method': 'process/outputDelta',
+            'message': 'first',
+            'createdAt': 1000,
+            'sequence': 1,
+          },
+        ],
+      });
+
+      final entries = state.activeTimeline
+          .where((entry) => entry.type == 'thread_event')
+          .toList(growable: false);
+      expect(entries.map((entry) => entry.text), ['first', 'second']);
+      state.dispose();
+    },
+  );
+
+  test('restores working state from replayed turn events', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-working-replay';
+    state.activeSessionId = threadId;
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [],
+      'timelineEvents': [
+        {
+          'type': 'turn_started',
+          'threadId': threadId,
+          'turnId': 'turn-working',
+          'startedAt': 2000,
+          'sequence': 1,
+        },
+      ],
+    });
+
+    expect(state.isWorking, isTrue);
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'turns': [],
+      'timelineEvents': [
+        {
+          'type': 'turn_started',
+          'threadId': threadId,
+          'turnId': 'turn-working',
+          'startedAt': 2000,
+          'sequence': 1,
+        },
+        {
+          'type': 'turn_completed',
+          'threadId': threadId,
+          'turnId': 'turn-working',
+          'createdAt': 3000,
+          'sequence': 2,
+        },
+      ],
+    });
+
+    expect(state.isWorking, isFalse);
     state.dispose();
   });
 

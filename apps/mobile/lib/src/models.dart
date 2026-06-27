@@ -189,6 +189,7 @@ class TimelineEntry {
     this.changes = const [],
     this.attachments = const [],
     this.createdAt = 0,
+    this.sequence = 0,
     this.partial = false,
     this.details,
     this.raw,
@@ -207,6 +208,7 @@ class TimelineEntry {
   final List<JsonMap> changes;
   final List<AttachmentItem> attachments;
   final int createdAt;
+  final int sequence;
   final bool partial;
   final JsonMap? details;
   final JsonMap? raw;
@@ -221,6 +223,7 @@ class TimelineEntry {
     List<String>? meta,
     List<JsonMap>? changes,
     List<AttachmentItem>? attachments,
+    int? sequence,
     JsonMap? details,
     JsonMap? raw,
   }) {
@@ -238,6 +241,7 @@ class TimelineEntry {
       changes: changes ?? this.changes,
       attachments: attachments ?? this.attachments,
       createdAt: createdAt,
+      sequence: sequence ?? this.sequence,
       partial: partial ?? this.partial,
       details: details ?? this.details,
       raw: raw ?? this.raw,

@@ -32,6 +32,12 @@ function createAppStub() {
     upsertPendingRequest: [] as unknown[],
     removePendingRequest: [] as unknown[],
     upsertThreadPreference: [] as unknown[],
+    appendTimelineEvent: [] as Array<{
+      threadId: string;
+      eventJson: string;
+      createdAt: number;
+      sequence: number;
+    }>,
   };
 
   const app = {
@@ -88,6 +94,25 @@ function createAppStub() {
           return null;
         },
         setAppState() {},
+      },
+      timelineEvents: {
+        appendTimelineEvent(record: {
+          threadId: string;
+          eventJson: string;
+          createdAt: number;
+        }) {
+          const saved = {
+            ...record,
+            sequence: calls.appendTimelineEvent.length + 1,
+          };
+          calls.appendTimelineEvent.push(saved);
+          return saved;
+        },
+        listTimelineEvents(threadId: string) {
+          return calls.appendTimelineEvent.filter(
+            (event) => event.threadId === threadId,
+          );
+        },
       },
     },
     windowAttachments: {
@@ -194,6 +219,7 @@ function createAppStub() {
     },
   };
 
+  runtimeState.repositories = app.repositories as any;
   (app as any).services = createAppServices(app as any);
 
   return {
@@ -206,38 +232,61 @@ function createAppStub() {
 test('thread_sync returns tab update and thread snapshot', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
-  app.runtimeState.turnPlansByThread.set('00000000-0000-0000-0000-000000000999', new Map([
-    ['turn-1', {
-      turnId: 'turn-1',
-      explanation: 'Explain',
-      plan: [{ step: 'Do it', status: 'in_progress' }],
-      updatedAt: 1,
-    }],
-  ]));
-  app.runtimeState.turnDiffsByThread.set('00000000-0000-0000-0000-000000000999', new Map([
-    ['turn-1', {
-      turnId: 'turn-1',
-      diff: '*** Begin Patch\n*** End Patch',
-      updatedAt: 1,
-    }],
-  ]));
-  app.runtimeState.supplementalItemsByThread.set('00000000-0000-0000-0000-000000000999', new Map([
-    ['hook-1', {
-      id: 'hook-1',
-      type: 'hookEvent',
-      phase: 'completed',
-      status: 'completed',
-      createdAt: 1,
-    }],
-  ]));
-  app.runtimeState.timelineEventsByThread.set('00000000-0000-0000-0000-000000000999', [{
-    type: 'agent_delta',
-    threadId: '00000000-0000-0000-0000-000000000999',
-    turnId: 'turn-live',
-    itemId: 'assistant-live',
-    delta: 'partial',
-    startedAt: 1,
-  }]);
+  app.runtimeState.turnPlansByThread.set(
+    '00000000-0000-0000-0000-000000000999',
+    new Map([
+      [
+        'turn-1',
+        {
+          turnId: 'turn-1',
+          explanation: 'Explain',
+          plan: [{ step: 'Do it', status: 'in_progress' }],
+          updatedAt: 1,
+        },
+      ],
+    ]),
+  );
+  app.runtimeState.turnDiffsByThread.set(
+    '00000000-0000-0000-0000-000000000999',
+    new Map([
+      [
+        'turn-1',
+        {
+          turnId: 'turn-1',
+          diff: '*** Begin Patch\n*** End Patch',
+          updatedAt: 1,
+        },
+      ],
+    ]),
+  );
+  app.runtimeState.supplementalItemsByThread.set(
+    '00000000-0000-0000-0000-000000000999',
+    new Map([
+      [
+        'hook-1',
+        {
+          id: 'hook-1',
+          type: 'hookEvent',
+          phase: 'completed',
+          status: 'completed',
+          createdAt: 1,
+        },
+      ],
+    ]),
+  );
+  app.runtimeState.timelineEventsByThread.set(
+    '00000000-0000-0000-0000-000000000999',
+    [
+      {
+        type: 'agent_delta',
+        threadId: '00000000-0000-0000-0000-000000000999',
+        turnId: 'turn-live',
+        itemId: 'assistant-live',
+        delta: 'partial',
+        startedAt: 1,
+      },
+    ],
+  );
   app.runtimeState.globalNotices.push({
     id: 'notice-1',
     type: '_warning',
@@ -252,7 +301,10 @@ test('thread_sync returns tab update and thread snapshot', async () => {
 
   assert.equal(calls.resumeThread.length, 1);
   assert.equal(calls.refreshTabWindowStatus.length, 1);
-  assert.equal((calls.refreshTabWindowStatus[0] as any).options.allowLaunch, true);
+  assert.equal(
+    (calls.refreshTabWindowStatus[0] as any).options.allowLaunch,
+    true,
+  );
   assert.equal(socket.sent.length, 2);
   assert.equal((socket.sent[0] as any).type, 'tab_updated');
   assert.equal((socket.sent[1] as any).type, 'thread_sync');
@@ -325,8 +377,16 @@ test('thread_sync preserves existing permission preset when codex resume omits i
 
   assert.equal((socket.sent[0] as any).tab.approvalPolicy, 'never');
   assert.equal((socket.sent[0] as any).tab.sandboxMode, 'danger-full-access');
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')?.approvalPolicy, 'never');
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')?.sandboxMode, 'danger-full-access');
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')
+      ?.approvalPolicy,
+    'never',
+  );
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000555')
+      ?.sandboxMode,
+    'danger-full-access',
+  );
 });
 
 test('tab_create creates thread and replies with tab_created', async () => {
@@ -367,7 +427,11 @@ test('turn_send starts a turn and updates runtime tab status', async () => {
   });
 
   assert.equal(calls.startTurn.length, 1);
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.status, 'running');
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')
+      ?.status,
+    'running',
+  );
 });
 
 test('turn_send maps permission overrides to codex approval and sandbox settings', async () => {
@@ -392,7 +456,9 @@ test('turn_send maps permission overrides to codex approval and sandbox settings
     approvalPolicy: 'never',
   });
 
-  assert.deepEqual((calls.startTurn[0] as any)?.options?.sandboxPolicy, { type: 'dangerFullAccess' });
+  assert.deepEqual((calls.startTurn[0] as any)?.options?.sandboxPolicy, {
+    type: 'dangerFullAccess',
+  });
   assert.equal((calls.startTurn[0] as any)?.options?.approvalPolicy, 'never');
 });
 
@@ -428,11 +494,22 @@ test('thread_options_update uses thread settings update with host-visible option
     approvalPolicy: 'never',
     sandbox: 'danger-full-access',
   });
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.model, 'gpt-5.5');
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.reasoningEffort, 'high');
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')
+      ?.model,
+    'gpt-5.5',
+  );
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')
+      ?.reasoningEffort,
+    'high',
+  );
   assert.equal((socket.sent[0] as any).type, 'tab_updated');
   assert.equal((calls.upsertThreadPreference.at(-1) as any)?.model, 'gpt-5.5');
-  assert.equal((calls.upsertThreadPreference.at(-1) as any)?.reasoningEffort, 'high');
+  assert.equal(
+    (calls.upsertThreadPreference.at(-1) as any)?.reasoningEffort,
+    'high',
+  );
 });
 
 test('thread settings updated notifications refresh runtime tab state', () => {
@@ -514,7 +591,10 @@ test('tab_close closes host window but keeps session', async () => {
   assert.equal(calls.closeWindowForThread.length, 1);
   assert.equal((socket.sent[0] as any).type, 'tab_updated');
   assert.equal((socket.sent[0] as any).tab.windowStatus, 'detached');
-  assert.equal(app.runtimeState.tabsById.has('00000000-0000-0000-0000-000000000123'), true);
+  assert.equal(
+    app.runtimeState.tabsById.has('00000000-0000-0000-0000-000000000123'),
+    true,
+  );
 });
 
 test('turn_send failure returns correlated error payload', async () => {
@@ -561,7 +641,10 @@ test('server_request_respond replies through codex client', async () => {
     id: 'raw-1',
     result: { decision: 'accept' },
   });
-  assert.equal(app.runtimeState.serverRequestsById.get('req-1')?.status, 'submitting');
+  assert.equal(
+    app.runtimeState.serverRequestsById.get('req-1')?.status,
+    'submitting',
+  );
 });
 
 test('server_request_respond preserves structured approval decisions under decision envelope', async () => {
@@ -650,7 +733,8 @@ test('bridge forwards plan, progress, hook and guardian notifications', async ()
   assert.equal(messages[1]?.type, 'mcp_tool_progress');
   assert.equal(messages[2]?.type, 'hook_started');
   assert.equal(messages[3]?.type, 'guardian_review_completed');
-  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-1') || [];
+  const cachedEvents =
+    app.runtimeState.timelineEventsByThread.get('thread-1') || [];
   assert.equal(cachedEvents.length, 4);
 });
 
@@ -765,9 +849,67 @@ test('bridge batches high-frequency assistant deltas before broadcasting', async
   assert.equal(messages[0]?.delta, 'ab');
   assert.equal(messages[1]?.type, 'item_completed');
 
-  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-batch') || [];
+  const cachedEvents =
+    app.runtimeState.timelineEventsByThread.get('thread-batch') || [];
   assert.equal(cachedEvents.length, 2);
   assert.equal(cachedEvents[0]?.delta, 'ab');
+});
+
+test('thread_sync replays timeline events persisted while clients are disconnected', async () => {
+  const { app, listeners, calls } = createAppStub();
+  app.runtimeState.tabsById.set('thread-offline', {
+    threadId: 'thread-offline',
+    name: 'Offline',
+    cwd: 'C:\\workspace',
+    status: 'running',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+  });
+
+  await ensureCodexReady(app);
+  const notificationListener = listeners.get('notification')?.[0];
+  assert.ok(notificationListener);
+
+  notificationListener?.({
+    method: 'item/agentMessage/delta',
+    params: {
+      threadId: 'thread-offline',
+      turnId: 'turn-offline',
+      itemId: 'assistant-offline',
+      delta: 'hel',
+    },
+  });
+  notificationListener?.({
+    method: 'item/completed',
+    params: {
+      threadId: 'thread-offline',
+      turnId: 'turn-offline',
+      completedAtMs: 1234,
+      item: {
+        id: 'assistant-offline',
+        type: 'agentMessage',
+        text: 'hello',
+      },
+    },
+  });
+
+  assert.equal(calls.appendTimelineEvent.length, 2);
+  const socket = createSocket();
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_sync',
+    threadId: 'thread-offline',
+  });
+
+  const sync = (socket.sent as Array<any>).find(
+    (message) => message.type === 'thread_sync',
+  );
+  assert.ok(sync);
+  assert.equal(sync.timelineEvents.length, 2);
+  assert.equal(sync.timelineEvents[0].type, 'agent_delta');
+  assert.equal(sync.timelineEvents[0].sequence, 1);
+  assert.equal(sync.timelineEvents[1].type, 'item_completed');
+  assert.equal(sync.timelineEvents[1].sequence, 2);
 });
 
 test('file change patch updates refresh pending request snapshot', async () => {
@@ -804,7 +946,9 @@ test('file change patch updates refresh pending request snapshot', async () => {
 
   const updatedRequest = app.runtimeState.serverRequestsById.get('req-2');
   assert.equal(updatedRequest?.patch, '*** Begin Patch\n*** End Patch');
-  assert.deepEqual(updatedRequest?.changes, [{ path: 'apps/web/src/app/App.tsx', kind: 'update' }]);
+  assert.deepEqual(updatedRequest?.changes, [
+    { path: 'apps/web/src/app/App.tsx', kind: 'update' },
+  ]);
   const messages = socket.sent as Array<any>;
   assert.equal(messages[0]?.type, 'server_request_updated');
   assert.equal(messages[0]?.request?.method, 'item/fileChange/requestApproval');
@@ -827,8 +971,13 @@ test('turn diff updates are cached and broadcast for timeline diff rendering', (
     },
   });
 
-  const cached = app.runtimeState.turnDiffsByThread.get('thread-diff-1')?.get('turn-diff-1');
-  assert.equal(cached?.diff, '*** Begin Patch\n*** Update File: src/a.ts\n+line\n*** End Patch');
+  const cached = app.runtimeState.turnDiffsByThread
+    .get('thread-diff-1')
+    ?.get('turn-diff-1');
+  assert.equal(
+    cached?.diff,
+    '*** Begin Patch\n*** Update File: src/a.ts\n+line\n*** End Patch',
+  );
   const messages = socket.sent as Array<any>;
   assert.equal(messages[0]?.type, 'turn_diff_updated');
   assert.equal(messages[0]?.turnId, 'turn-diff-1');
@@ -852,7 +1001,9 @@ test('turn plan updates are cached and broadcast for plan rendering', () => {
     },
   });
 
-  const cached = app.runtimeState.turnPlansByThread.get('thread-plan-1')?.get('turn-plan-1');
+  const cached = app.runtimeState.turnPlansByThread
+    .get('thread-plan-1')
+    ?.get('turn-plan-1');
   assert.equal(cached?.explanation, 'Work in stages');
   assert.deepEqual(cached?.plan, [
     { step: 'Inspect', status: 'completed' },
@@ -890,7 +1041,11 @@ test('model reroute notifications update runtime tab model and broadcast effecti
     },
   });
 
-  assert.equal(app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')?.model, 'gpt-5.5');
+  assert.equal(
+    app.runtimeState.tabsById.get('00000000-0000-0000-0000-000000000123')
+      ?.model,
+    'gpt-5.5',
+  );
   assert.deepEqual(socket.sent.at(-1), {
     type: 'model_rerouted',
     threadId: '00000000-0000-0000-0000-000000000123',
@@ -932,7 +1087,8 @@ test('bridge preserves thread-scoped errors and generic codex notifications in t
   assert.equal(messages[1]?.type, 'thread_event');
   assert.equal(messages[1]?.method, 'process/outputDelta');
   assert.equal(messages[1]?.itemId, 'proc-1');
-  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-error') || [];
+  const cachedEvents =
+    app.runtimeState.timelineEventsByThread.get('thread-error') || [];
   assert.equal(cachedEvents.length, 2);
   assert.equal(cachedEvents[0]?.type, 'error_notice');
   assert.equal(cachedEvents[1]?.type, 'thread_event');
@@ -954,7 +1110,8 @@ test('bridge caches fallback generic notifications for thread-scoped official ev
   const messages = socket.sent as Array<any>;
   assert.equal(messages[0]?.type, 'notification');
   assert.equal(messages[0]?.method, 'guardianWarning');
-  const cachedEvents = app.runtimeState.timelineEventsByThread.get('thread-generic') || [];
+  const cachedEvents =
+    app.runtimeState.timelineEventsByThread.get('thread-generic') || [];
   assert.equal(cachedEvents.length, 1);
   assert.equal(cachedEvents[0]?.type, 'thread_event');
   assert.equal(cachedEvents[0]?.method, 'guardianWarning');

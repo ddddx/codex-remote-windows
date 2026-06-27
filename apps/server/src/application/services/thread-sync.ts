@@ -8,9 +8,23 @@ import type {
   TokenUsagePayload,
 } from '@codex-remote/protocol';
 import type { v2 } from '@codex-remote/codex-app-server-types';
-import { listServerRequests, restoreServerRequestRecord } from './server-requests.js';
-import { listSupplementalItems, listTimelineEvents, listTurnDiffs, listTurnPlans } from './runtime-cache.js';
-import { listRuntimeTabs, toSessionTabPayload, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
+import {
+  listServerRequests,
+  restoreServerRequestRecord,
+} from './server-requests.js';
+import {
+  hydrateTimelineEvents,
+  listSupplementalItems,
+  listTimelineEvents,
+  listTurnDiffs,
+  listTurnPlans,
+} from './runtime-cache.js';
+import {
+  listRuntimeTabs,
+  toSessionTabPayload,
+  upsertRuntimeTab,
+  type RuntimeTab,
+} from './session-tabs.js';
 
 export type RuntimeThread = v2.Thread & {
   model?: string;
@@ -27,16 +41,22 @@ export type RuntimeThread = v2.Thread & {
 export function hydratePersistedRuntimeState(app: FastifyInstance): void {
   if (!app.runtimeState.tabsById.size) {
     for (const persisted of app.repositories.sessions.listSessions()) {
-      const preference = typeof app.repositories.threadPreferences.getThreadPreference === 'function'
-        ? app.repositories.threadPreferences.getThreadPreference(persisted.threadId)
-        : null;
+      const preference =
+        typeof app.repositories.threadPreferences.getThreadPreference ===
+        'function'
+          ? app.repositories.threadPreferences.getThreadPreference(
+              persisted.threadId,
+            )
+          : null;
       app.runtimeState.tabsById.set(persisted.threadId, {
         ...persisted,
-        approvalPolicy: preference?.approvalPolicy || persisted.approvalPolicy || '',
+        approvalPolicy:
+          preference?.approvalPolicy || persisted.approvalPolicy || '',
         sandboxMode: preference?.sandboxMode || persisted.sandboxMode || '',
         model: preference?.model || '',
         reasoningEffort: preference?.reasoningEffort || '',
       });
+      hydrateTimelineEvents(app.runtimeState, persisted.threadId);
     }
   }
   if (!app.runtimeState.serverRequestsById.size) {
@@ -53,7 +73,9 @@ export function hydratePersistedRuntimeState(app: FastifyInstance): void {
   }
 }
 
-export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]> {
+export async function bootstrapTabs(
+  app: FastifyInstance,
+): Promise<RuntimeTab[]> {
   hydratePersistedRuntimeState(app);
 
   const persistedTabs = listRuntimeTabs(app);
@@ -62,8 +84,8 @@ export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]>
     const threads = await app.codexClient.listThreads(100);
     const nextTabs = Array.isArray(threads)
       ? threads
-        .map((thread) => upsertRuntimeTab(app, thread))
-        .filter((tab) => tab.threadId)
+          .map((thread) => upsertRuntimeTab(app, thread))
+          .filter((tab) => tab.threadId)
       : [];
     return nextTabs.length ? nextTabs : persistedTabs;
   } catch {
@@ -71,12 +93,16 @@ export async function bootstrapTabs(app: FastifyInstance): Promise<RuntimeTab[]>
   }
 }
 
-export function buildInitialState(app: FastifyInstance): Extract<ServerMessage, { type: 'state' }> {
+export function buildInitialState(
+  app: FastifyInstance,
+): Extract<ServerMessage, { type: 'state' }> {
   return {
     type: 'state',
     tabs: listRuntimeTabs(app).map(toSessionTabPayload),
     serverRequests: listServerRequests(app),
-    globalSupplementalItems: [...app.runtimeState.globalNotices] as GlobalSupplementalItemPayload[],
+    globalSupplementalItems: [
+      ...app.runtimeState.globalNotices,
+    ] as GlobalSupplementalItemPayload[],
   };
 }
 
@@ -85,16 +111,31 @@ export function buildThreadSyncMessage(
   threadId: string,
   thread: RuntimeThread,
 ): Extract<ServerMessage, { type: 'thread_sync' }> {
-  const turns = Array.isArray(thread.turns) ? thread.turns as ThreadTurnPayload[] : [];
+  const turns = Array.isArray(thread.turns)
+    ? (thread.turns as ThreadTurnPayload[])
+    : [];
   return {
     type: 'thread_sync',
     threadId,
     turns,
-    supplementalItems: listSupplementalItems(app.runtimeState, threadId) as SupplementalItemPayload[],
-    globalSupplementalItems: [...app.runtimeState.globalNotices] as GlobalSupplementalItemPayload[],
-    tokenUsage: (thread.tokenUsage ?? thread.token_usage ?? thread.usage ?? thread.tokenStats ?? thread.token_stats ?? null) as TokenUsagePayload,
+    supplementalItems: listSupplementalItems(
+      app.runtimeState,
+      threadId,
+    ) as SupplementalItemPayload[],
+    globalSupplementalItems: [
+      ...app.runtimeState.globalNotices,
+    ] as GlobalSupplementalItemPayload[],
+    tokenUsage: (thread.tokenUsage ??
+      thread.token_usage ??
+      thread.usage ??
+      thread.tokenStats ??
+      thread.token_stats ??
+      null) as TokenUsagePayload,
     turnPlans: listTurnPlans(app.runtimeState, threadId, turns),
     turnDiffs: listTurnDiffs(app.runtimeState, threadId, turns),
-    timelineEvents: listTimelineEvents(app.runtimeState, threadId) as TimelineEventPayload[],
+    timelineEvents: listTimelineEvents(
+      app.runtimeState,
+      threadId,
+    ) as TimelineEventPayload[],
   };
 }

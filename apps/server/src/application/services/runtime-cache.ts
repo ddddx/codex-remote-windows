@@ -6,9 +6,15 @@ import type {
   TurnDiffSnapshot,
   TurnPlanSnapshot,
 } from '../../state/runtime-state.js';
-import type { ThreadTurnPayload, TurnPlanPayload } from '@codex-remote/protocol';
+import type {
+  ThreadTurnPayload,
+  TurnPlanPayload,
+} from '@codex-remote/protocol';
 
-function ensureTurnPlanMap(runtimeState: RuntimeState, threadId?: string): Map<string, TurnPlanSnapshot> | null {
+function ensureTurnPlanMap(
+  runtimeState: RuntimeState,
+  threadId?: string,
+): Map<string, TurnPlanSnapshot> | null {
   if (!threadId) {
     return null;
   }
@@ -18,7 +24,10 @@ function ensureTurnPlanMap(runtimeState: RuntimeState, threadId?: string): Map<s
   return runtimeState.turnPlansByThread.get(threadId) || null;
 }
 
-function ensureTurnDiffMap(runtimeState: RuntimeState, threadId?: string): Map<string, TurnDiffSnapshot> | null {
+function ensureTurnDiffMap(
+  runtimeState: RuntimeState,
+  threadId?: string,
+): Map<string, TurnDiffSnapshot> | null {
   if (!threadId) {
     return null;
   }
@@ -28,7 +37,10 @@ function ensureTurnDiffMap(runtimeState: RuntimeState, threadId?: string): Map<s
   return runtimeState.turnDiffsByThread.get(threadId) || null;
 }
 
-function ensureSupplementalMap(runtimeState: RuntimeState, threadId?: string): Map<string, SupplementalItemSnapshot> | null {
+function ensureSupplementalMap(
+  runtimeState: RuntimeState,
+  threadId?: string,
+): Map<string, SupplementalItemSnapshot> | null {
   if (!threadId) {
     return null;
   }
@@ -50,8 +62,11 @@ export function setCachedTurnPlan(
   }
   plans.set(turnId, {
     turnId,
-    explanation: typeof payload?.explanation === 'string' ? payload.explanation : '',
-    plan: Array.isArray(payload?.plan) ? payload.plan as Array<{ step?: string; status?: string }> : [],
+    explanation:
+      typeof payload?.explanation === 'string' ? payload.explanation : '',
+    plan: Array.isArray(payload?.plan)
+      ? (payload.plan as Array<{ step?: string; status?: string }>)
+      : [],
     updatedAt: Date.now(),
   });
 }
@@ -120,7 +135,8 @@ export function listTurnPlans(
       explanation?: string;
     };
     const plan = Array.isArray(turnRecord.plan) ? turnRecord.plan : [];
-    const explanation = typeof turnRecord.explanation === 'string' ? turnRecord.explanation : '';
+    const explanation =
+      typeof turnRecord.explanation === 'string' ? turnRecord.explanation : '';
     if (!turnId || !plan.length) {
       continue;
     }
@@ -131,7 +147,9 @@ export function listTurnPlans(
       updatedAt: Date.now(),
     });
   }
-  for (const [turnId, snapshot] of runtimeState.turnPlansByThread.get(threadId) || new Map()) {
+  for (const [turnId, snapshot] of runtimeState.turnPlansByThread.get(
+    threadId,
+  ) || new Map()) {
     merged.set(turnId, snapshot);
   }
   return Array.from(merged.values());
@@ -156,7 +174,9 @@ export function listTurnDiffs(
       updatedAt: Date.now(),
     });
   }
-  for (const [turnId, snapshot] of runtimeState.turnDiffsByThread.get(threadId) || new Map()) {
+  for (const [turnId, snapshot] of runtimeState.turnDiffsByThread.get(
+    threadId,
+  ) || new Map()) {
     merged.set(turnId, snapshot);
   }
   return Array.from(merged.values());
@@ -171,10 +191,90 @@ export function listSupplementalItems(
     return [];
   }
   return Array.from(store.values()).sort((left, right) => {
-    const leftTime = Number(left.completedAt || left.startedAt || left.createdAt || left.updatedAt || 0);
-    const rightTime = Number(right.completedAt || right.startedAt || right.createdAt || right.updatedAt || 0);
+    const leftTime = Number(
+      left.completedAt ||
+        left.startedAt ||
+        left.createdAt ||
+        left.updatedAt ||
+        0,
+    );
+    const rightTime = Number(
+      right.completedAt ||
+        right.startedAt ||
+        right.createdAt ||
+        right.updatedAt ||
+        0,
+    );
     return leftTime - rightTime;
   });
+}
+
+type CachedTimelineEventSnapshot = TimelineEventSnapshot & {
+  sequence?: number;
+  createdAt?: number;
+  startedAt?: number;
+  completedAt?: number;
+  updatedAt?: number;
+};
+
+function timelineEventTime(event: CachedTimelineEventSnapshot): number {
+  const value =
+    event.startedAt ?? event.completedAt ?? event.createdAt ?? event.updatedAt;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : Date.now();
+}
+
+function normalizeTimelineEvent(
+  event: TimelineEventSnapshot,
+  sequence?: number,
+): CachedTimelineEventSnapshot {
+  const normalized = { ...event } as CachedTimelineEventSnapshot;
+  if (
+    typeof normalized.startedAt !== 'number' &&
+    typeof normalized.completedAt !== 'number' &&
+    typeof normalized.createdAt !== 'number' &&
+    typeof normalized.updatedAt !== 'number'
+  ) {
+    normalized.createdAt = Date.now();
+  }
+  if (
+    typeof sequence === 'number' &&
+    Number.isFinite(sequence) &&
+    sequence > 0
+  ) {
+    normalized.sequence = sequence;
+  }
+  return normalized;
+}
+
+function restoreTimelineEventRecord(record: {
+  threadId: string;
+  sequence: number;
+  eventJson: string;
+  createdAt: number;
+}): CachedTimelineEventSnapshot | null {
+  try {
+    const parsed = JSON.parse(record.eventJson);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const event = parsed as TimelineEventSnapshot;
+    return normalizeTimelineEvent(
+      {
+        ...event,
+        threadId:
+          typeof event.threadId === 'string' ? event.threadId : record.threadId,
+        createdAt:
+          typeof (event as CachedTimelineEventSnapshot).createdAt === 'number'
+            ? (event as CachedTimelineEventSnapshot).createdAt
+            : record.createdAt,
+      } as TimelineEventSnapshot,
+      record.sequence,
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function appendTimelineEvent(
@@ -185,11 +285,20 @@ export function appendTimelineEvent(
   if (!threadId) {
     return;
   }
-  const existing = runtimeState.timelineEventsByThread.get(threadId) || [];
-  const next = [...existing, event];
-  if (next.length > 400) {
-    next.splice(0, next.length - 400);
+  const normalized = normalizeTimelineEvent(event);
+  const createdAt = timelineEventTime(normalized);
+  let cached = normalized;
+  const repository = runtimeState.repositories?.timelineEvents;
+  if (repository) {
+    const record = repository.appendTimelineEvent({
+      threadId,
+      eventJson: JSON.stringify(normalized),
+      createdAt,
+    });
+    cached = normalizeTimelineEvent(normalized, record.sequence);
   }
+  const existing = runtimeState.timelineEventsByThread.get(threadId) || [];
+  const next = [...existing, cached].sort(compareTimelineEvents);
   runtimeState.timelineEventsByThread.set(threadId, next);
 }
 
@@ -197,10 +306,61 @@ export function listTimelineEvents(
   runtimeState: RuntimeState,
   threadId: string,
 ): TimelineEventSnapshot[] {
-  return [...(runtimeState.timelineEventsByThread.get(threadId) || [])];
+  const memoryEvents = runtimeState.timelineEventsByThread.get(threadId) || [];
+  const repository = runtimeState.repositories?.timelineEvents;
+  if (repository) {
+    const restored = repository
+      .listTimelineEvents(threadId)
+      .map(restoreTimelineEventRecord)
+      .filter((event): event is CachedTimelineEventSnapshot => Boolean(event))
+      .sort(compareTimelineEvents);
+    const merged = dedupeTimelineEvents([...restored, ...memoryEvents]);
+    runtimeState.timelineEventsByThread.set(threadId, merged);
+    return merged as TimelineEventSnapshot[];
+  }
+  return dedupeTimelineEvents(memoryEvents) as TimelineEventSnapshot[];
 }
 
-export function pushGlobalNotice(runtimeState: RuntimeState, notice: GlobalNoticeSnapshot): void {
+export function hydrateTimelineEvents(
+  runtimeState: RuntimeState,
+  threadId: string,
+): void {
+  if (!runtimeState.repositories?.timelineEvents || !threadId) {
+    return;
+  }
+  listTimelineEvents(runtimeState, threadId);
+}
+
+function compareTimelineEvents(
+  left: CachedTimelineEventSnapshot,
+  right: CachedTimelineEventSnapshot,
+): number {
+  const leftSequence = typeof left.sequence === 'number' ? left.sequence : 0;
+  const rightSequence = typeof right.sequence === 'number' ? right.sequence : 0;
+  if (leftSequence || rightSequence) {
+    return leftSequence - rightSequence;
+  }
+  return timelineEventTime(left) - timelineEventTime(right);
+}
+
+function dedupeTimelineEvents(
+  events: CachedTimelineEventSnapshot[],
+): CachedTimelineEventSnapshot[] {
+  const byKey = new Map<string, CachedTimelineEventSnapshot>();
+  for (const event of events) {
+    const key =
+      typeof event.sequence === 'number' && event.sequence > 0
+        ? `sequence:${event.sequence}`
+        : `event:${JSON.stringify(event)}`;
+    byKey.set(key, event);
+  }
+  return Array.from(byKey.values()).sort(compareTimelineEvents);
+}
+
+export function pushGlobalNotice(
+  runtimeState: RuntimeState,
+  notice: GlobalNoticeSnapshot,
+): void {
   runtimeState.globalNotices.push(notice);
   while (runtimeState.globalNotices.length > 50) {
     runtimeState.globalNotices.shift();

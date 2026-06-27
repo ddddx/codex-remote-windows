@@ -3,6 +3,7 @@ import type {
   PendingRequestRecord,
   SessionRecord,
   ThreadPreferenceRecord,
+  TimelineEventRecord,
   UploadRecord,
   WindowBindingRecord,
 } from './entities.js';
@@ -39,4 +40,13 @@ export interface WindowBindingRepository {
 export interface AppStateRepository {
   getAppState(key: string): AppStateRecord | null;
   setAppState(record: AppStateRecord): void;
+}
+
+export interface TimelineEventRepository {
+  appendTimelineEvent(record: {
+    threadId: string;
+    eventJson: string;
+    createdAt: number;
+  }): TimelineEventRecord;
+  listTimelineEvents(threadId: string): TimelineEventRecord[];
 }

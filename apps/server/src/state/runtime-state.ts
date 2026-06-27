@@ -9,6 +9,7 @@ import type {
   TurnDiffPayload,
   TurnPlanPayload,
 } from '@codex-remote/protocol';
+import type { TimelineEventRepository } from '@codex-remote/domain';
 
 type RuntimeTab = {
   threadId: string;
@@ -50,8 +51,12 @@ type RuntimeRepositories = {
   };
   pendingRequests: {
     listPendingRequests: () => PersistedServerRequestRecord[];
-    getPendingRequest: (requestId: string) => PersistedServerRequestRecord | null;
-    upsertPendingRequest: (record: PersistedServerRequestRecord & { payloadJson?: string }) => void;
+    getPendingRequest: (
+      requestId: string,
+    ) => PersistedServerRequestRecord | null;
+    upsertPendingRequest: (
+      record: PersistedServerRequestRecord & { payloadJson?: string },
+    ) => void;
     removePendingRequest: (requestId: string) => void;
   };
   threadPreferences: {
@@ -114,6 +119,7 @@ type RuntimeRepositories = {
       updatedAt: number;
     }) => void;
   };
+  timelineEvents?: TimelineEventRepository;
 };
 
 export type RuntimeWsClient = {

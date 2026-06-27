@@ -1,4 +1,10 @@
-export type SessionStatus = 'idle' | 'running' | 'failed' | 'closed' | 'detached' | 'unknown';
+export type SessionStatus =
+  | 'idle'
+  | 'running'
+  | 'failed'
+  | 'closed'
+  | 'detached'
+  | 'unknown';
 
 export type SessionRecord = {
   threadId: string;
@@ -53,4 +59,11 @@ export type AppStateRecord = {
   key: string;
   valueJson: string;
   updatedAt: number;
+};
+
+export type TimelineEventRecord = {
+  sequence: number;
+  threadId: string;
+  eventJson: string;
+  createdAt: number;
 };

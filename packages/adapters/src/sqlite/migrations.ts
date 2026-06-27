@@ -60,4 +60,16 @@ export const SQLITE_MIGRATIONS = [
       updated_at INTEGER NOT NULL
     );
   `,
+  `
+    CREATE TABLE IF NOT EXISTS timeline_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS idx_timeline_events_thread_sequence
+    ON timeline_events(thread_id, sequence);
+  `,
 ];

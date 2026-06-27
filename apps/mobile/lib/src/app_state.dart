@@ -13,6 +13,8 @@ const String githubReleaseApiUrl =
     'https://api.github.com/repos/ddddx/codex-remote-windows/releases/latest';
 const String githubReleasePageUrl =
     'https://github.com/ddddx/codex-remote-windows/releases';
+const String githubLatestReleasePageUrl =
+    'https://github.com/ddddx/codex-remote-windows/releases/latest';
 
 class MobileUpdateInfo {
   const MobileUpdateInfo({
@@ -268,6 +270,25 @@ class CodexAppState extends ChangeNotifier {
   }
 
   Future<MobileUpdateInfo> _fetchLatestRelease() async {
+    Object? apiError;
+    try {
+      return await _fetchLatestReleaseFromApi();
+    } catch (error) {
+      apiError = error;
+    }
+    try {
+      return await _fetchLatestReleaseFromHtml();
+    } catch (error) {
+      if (apiError is ApiException) {
+        throw ApiException(
+          '${apiError.message}；备用发布页检查也失败：${_friendlyErrorMessage(error)}',
+        );
+      }
+      throw error;
+    }
+  }
+
+  Future<MobileUpdateInfo> _fetchLatestReleaseFromApi() async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);
     try {
@@ -335,6 +356,41 @@ class CodexAppState extends ChangeNotifier {
         apkName: apkName,
         apkUrl: apkUrl,
       );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<MobileUpdateInfo> _fetchLatestReleaseFromHtml() async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12);
+    try {
+      final request = await client
+          .getUrl(Uri.parse(githubLatestReleasePageUrl))
+          .timeout(const Duration(seconds: 12));
+      request.headers.set(HttpHeaders.acceptHeader, 'text/html');
+      request.headers.set(HttpHeaders.userAgentHeader, 'CodexRemoteMobile');
+      final response = await request.close().timeout(
+        const Duration(seconds: 12),
+      );
+      final text = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw ApiException('检查 GitHub 发布页失败：HTTP ${response.statusCode}');
+      }
+      final finalUrl = response.redirects.isNotEmpty
+          ? response.redirects.last.location.toString()
+          : githubLatestReleasePageUrl;
+      final info = extractMobileUpdateInfoFromReleaseHtml(
+        html: text,
+        finalUrl: finalUrl,
+      );
+      if (info == null) {
+        throw ApiException('GitHub 发布页没有可下载的 APK');
+      }
+      return info;
     } finally {
       client.close(force: true);
     }
@@ -1188,6 +1244,7 @@ class CodexAppState extends ChangeNotifier {
     }
     _replaceGlobalNotices(message['globalSupplementalItems']);
     final events = message['timelineEvents'];
+    final replayedEvents = <JsonMap>[];
     if (events is List) {
       final settledIds = entries
           .where((entry) => !entry.partial && entry.status != 'running')
@@ -1207,19 +1264,23 @@ class CodexAppState extends ChangeNotifier {
         )) {
           continue;
         }
+        replayedEvents.add(event);
         final entry = _entryFromEvent(event);
         if (entry != null) {
           entries.add(entry);
         }
       }
     }
-    entries.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    entries.sort(_compareTimelineEntries);
     timelineByThread[threadId] = _dedupeEntries(entries);
     final usage = message['tokenUsage'];
     if (usage is JsonMap) {
       tokenUsageByThread[threadId] = usage;
     }
     _restoreActiveTurn(threadId, turns);
+    for (final event in replayedEvents) {
+      _applyThreadSyncEventSideEffect(event);
+    }
     unreadThreadIds.remove(threadId);
   }
 
@@ -1579,6 +1640,8 @@ class CodexAppState extends ChangeNotifier {
     const replayable = {
       'agent_delta',
       'plan_delta',
+      'turn_started',
+      'turn_completed',
       'turn_plan_updated',
       'turn_diff_updated',
       'mcp_tool_progress',
@@ -1586,6 +1649,8 @@ class CodexAppState extends ChangeNotifier {
       'item_delta',
       'item_completed',
       'thread_event',
+      'token_usage',
+      'model_rerouted',
       'warning',
       'error_notice',
     };
@@ -1641,9 +1706,16 @@ class CodexAppState extends ChangeNotifier {
         turnId: readString(event, 'turnId'),
         itemId: itemId.ifEmpty(entryId),
         createdAt: _eventTime(event),
+        sequence: _eventSequence(event),
         partial: true,
         raw: event,
       );
+    }
+    if (type == 'turn_started' ||
+        type == 'turn_completed' ||
+        type == 'token_usage' ||
+        type == 'model_rerouted') {
+      return null;
     }
     if (type == 'turn_plan_updated') {
       return _entryFromTurnPlan(event) ?? _genericEventEntry(event);
@@ -1667,6 +1739,36 @@ class CodexAppState extends ChangeNotifier {
     return _genericEventEntry(event);
   }
 
+  void _applyThreadSyncEventSideEffect(JsonMap event) {
+    final type = readString(event, 'type');
+    if (type == 'turn_started') {
+      final threadId = readString(event, 'threadId');
+      if (threadId.isNotEmpty) {
+        activeTurnStartedAt[threadId] = _eventTime(event);
+        _startWorkingTimer();
+      }
+      return;
+    }
+    if (type == 'turn_completed') {
+      final threadId = readString(event, 'threadId');
+      if (threadId.isNotEmpty) {
+        activeTurnStartedAt.remove(threadId);
+      }
+      return;
+    }
+    if (type == 'token_usage') {
+      final threadId = readString(event, 'threadId');
+      final usage = event['usage'];
+      if (threadId.isNotEmpty && usage is JsonMap) {
+        tokenUsageByThread[threadId] = usage;
+      }
+      return;
+    }
+    if (type == 'model_rerouted') {
+      _applyModelReroute(event);
+    }
+  }
+
   TimelineEntry _genericEventEntry(JsonMap event) {
     final type = readString(event, 'type');
     return TimelineEntry(
@@ -1681,6 +1783,7 @@ class CodexAppState extends ChangeNotifier {
       patch: readString(event, 'patch'),
       changes: readMapList(event, 'changes'),
       createdAt: _eventTime(event),
+      sequence: _eventSequence(event),
       details: event,
       raw: event,
     );
@@ -1724,6 +1827,7 @@ class CodexAppState extends ChangeNotifier {
           ),
         ),
       ),
+      sequence: readInt(planEntry, 'sequence'),
       details: normalizedDetails,
       raw: normalizedDetails,
     );
@@ -1790,8 +1894,17 @@ class CodexAppState extends ChangeNotifier {
       turnId: turnId,
       patch: diff,
       createdAt: _normalizeTimestamp(
-        readInt(diffEntry, 'updatedAt', DateTime.now().millisecondsSinceEpoch),
+        readInt(
+          diffEntry,
+          'updatedAt',
+          readInt(
+            diffEntry,
+            'createdAt',
+            DateTime.now().millisecondsSinceEpoch,
+          ),
+        ),
       ),
+      sequence: readInt(diffEntry, 'sequence'),
       details: diffEntry,
       raw: diffEntry,
     );
@@ -2150,6 +2263,7 @@ class CodexAppState extends ChangeNotifier {
         createdAt: entry.createdAt == 0
             ? _normalizeTimestamp(startedAt)
             : entry.createdAt,
+        sequence: entry.sequence,
         partial: entry.partial,
         details: entry.details,
         raw: entry.raw,
@@ -2280,6 +2394,7 @@ class CodexAppState extends ChangeNotifier {
         changes: current.changes,
         attachments: current.attachments,
         createdAt: current.createdAt,
+        sequence: current.sequence,
         partial: true,
         details: current.details,
         raw: current.raw,
@@ -2725,7 +2840,7 @@ class CodexAppState extends ChangeNotifier {
     } else {
       entries.add(entry);
     }
-    entries.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    entries.sort(_compareTimelineEntries);
     timelineByThread[threadId] = _dedupeEntries(entries);
   }
 
@@ -2953,7 +3068,7 @@ class CodexAppState extends ChangeNotifier {
       }
     }
     return _dropDuplicateOptimisticUserEntries(result)
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      ..sort(_compareTimelineEntries);
   }
 
   String _entrySemanticKey(TimelineEntry entry) {
@@ -3076,9 +3191,30 @@ class CodexAppState extends ChangeNotifier {
     readInt(
       event,
       'startedAt',
-      readInt(event, 'createdAt', DateTime.now().millisecondsSinceEpoch),
+      readInt(
+        event,
+        'completedAt',
+        readInt(
+          event,
+          'createdAt',
+          readInt(event, 'updatedAt', DateTime.now().millisecondsSinceEpoch),
+        ),
+      ),
     ),
   );
+
+  int _eventSequence(JsonMap event) => readInt(event, 'sequence');
+
+  int _compareTimelineEntries(TimelineEntry left, TimelineEntry right) {
+    final timeCompare = left.createdAt.compareTo(right.createdAt);
+    if (timeCompare != 0) {
+      return timeCompare;
+    }
+    if (left.sequence != 0 || right.sequence != 0) {
+      return left.sequence.compareTo(right.sequence);
+    }
+    return left.id.compareTo(right.id);
+  }
 
   String _eventId(JsonMap event) {
     final type = readString(event, 'type');
@@ -3479,6 +3615,114 @@ String extractVersionNameFromRelease({
     }
   }
   return '';
+}
+
+MobileUpdateInfo? extractMobileUpdateInfoFromReleaseHtml({
+  required String html,
+  required String finalUrl,
+}) {
+  final links =
+      RegExp(
+            r'''href=["']([^"']*?/ddddx/codex-remote-windows/releases/download/[^"']+?\.apk(?:\?[^"']*)?)["']''',
+            caseSensitive: false,
+          )
+          .allMatches(html)
+          .map((match) {
+            final href = _decodeBasicHtmlEntities(match.group(1) ?? '');
+            final url = _absoluteGithubUrl(href);
+            final name = _fileNameFromUrl(url);
+            return {'url': url, 'name': name};
+          })
+          .where((asset) {
+            return asset['url']!.isNotEmpty && asset['name']!.endsWith('.apk');
+          })
+          .toList(growable: false);
+
+  if (links.isEmpty) {
+    return null;
+  }
+  final selected = links.firstWhere(
+    (asset) => asset['name']!.contains('-universal-'),
+    orElse: () => links.first,
+  );
+  final apkName = selected['name'] ?? '';
+  final apkUrl = selected['url'] ?? '';
+  final tagName = _releaseTagFromUrl(
+    apkUrl,
+  ).ifEmpty(_releaseTagFromUrl(finalUrl));
+  final releaseTitle = _releaseTitleFromHtml(html);
+  final versionName = extractVersionNameFromRelease(
+    assetName: apkName,
+    tagName: tagName,
+    releaseName: releaseTitle,
+  );
+  if (apkName.isEmpty || apkUrl.isEmpty || versionName.isEmpty) {
+    return null;
+  }
+  final releaseUrl = tagName.isEmpty
+      ? githubReleasePageUrl
+      : 'https://github.com/ddddx/codex-remote-windows/releases/tag/$tagName';
+  return MobileUpdateInfo(
+    versionName: versionName,
+    tagName: tagName,
+    releaseUrl: releaseUrl,
+    apkName: apkName,
+    apkUrl: apkUrl,
+  );
+}
+
+String _absoluteGithubUrl(String href) {
+  final trimmed = href.trim();
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('//')) {
+    return 'https:$trimmed';
+  }
+  if (trimmed.startsWith('/')) {
+    return 'https://github.com$trimmed';
+  }
+  return trimmed;
+}
+
+String _fileNameFromUrl(String url) {
+  try {
+    final uri = Uri.parse(url);
+    if (uri.pathSegments.isEmpty) {
+      return '';
+    }
+    return Uri.decodeComponent(uri.pathSegments.last);
+  } catch (_) {
+    final path = url.split('?').first;
+    final parts = path.split('/');
+    return parts.isEmpty ? '' : Uri.decodeComponent(parts.last);
+  }
+}
+
+String _releaseTagFromUrl(String url) {
+  final match = RegExp(
+    r'/releases/(?:download|tag)/([^/?#]+)',
+    caseSensitive: false,
+  ).firstMatch(url);
+  return match == null ? '' : Uri.decodeComponent(match.group(1) ?? '');
+}
+
+String _releaseTitleFromHtml(String html) {
+  final match = RegExp(
+    r'<title>(.*?)</title>',
+    caseSensitive: false,
+    dotAll: true,
+  ).firstMatch(html);
+  return match == null ? '' : _decodeBasicHtmlEntities(match.group(1) ?? '');
+}
+
+String _decodeBasicHtmlEntities(String value) {
+  return value
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
 }
 
 int compareVersionNames(String left, String right) {
