@@ -38,6 +38,8 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> getAppVersion(result)
                 "openUrl" -> openUrl(call, result)
                 "downloadAndInstallApk" -> downloadAndInstallApk(call, result)
+                "startBackgroundKeepAlive" -> startBackgroundKeepAlive(call, result)
+                "stopBackgroundKeepAlive" -> stopBackgroundKeepAlive(result)
                 else -> result.notImplemented()
             }
         }
@@ -167,6 +169,26 @@ class MainActivity : FlutterActivity() {
                     result.error("download_failed", error.message, null)
                 }
             }
+        }
+    }
+
+    private fun startBackgroundKeepAlive(call: MethodCall, result: MethodChannel.Result) {
+        val title = call.argument<String>("title") ?: "Codex Remote"
+        val body = call.argument<String>("body") ?: "后台保持连接中"
+        try {
+            KeepAliveService.start(this, title, body)
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("keep_alive_failed", error.message, null)
+        }
+    }
+
+    private fun stopBackgroundKeepAlive(result: MethodChannel.Result) {
+        try {
+            KeepAliveService.stop(this)
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("keep_alive_stop_failed", error.message, null)
         }
     }
 

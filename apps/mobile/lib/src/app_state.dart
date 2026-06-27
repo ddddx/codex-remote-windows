@@ -56,6 +56,7 @@ class CodexAppState extends ChangeNotifier {
   int appVersionCode = 0;
   bool updateChecking = false;
   bool updateDownloading = false;
+  bool backgroundKeepAliveActive = false;
   String updateMessage = '';
   MobileUpdateInfo? availableUpdate;
   WorkspaceListing? workspaceListing;
@@ -439,6 +440,7 @@ class CodexAppState extends ChangeNotifier {
 
   Future<void> logout() async {
     await _socket?.close();
+    await _stopBackgroundKeepAlive();
     cookie = '';
     sessions = [];
     authSessions = [];
@@ -592,10 +594,47 @@ class CodexAppState extends ChangeNotifier {
     _messageSub = socket.messages.listen(handleServerMessage);
     _statusSub = socket.status.listen((status) {
       connectionStatus = status;
+      if (status == 'connected') {
+        unawaited(_startBackgroundKeepAlive());
+      } else if (status == 'idle') {
+        unawaited(_stopBackgroundKeepAlive());
+      }
       notifyListeners();
     });
     await socket.connect();
     _syncActiveThread();
+  }
+
+  Future<void> _startBackgroundKeepAlive() async {
+    if (backgroundKeepAliveActive || cookie.isEmpty) {
+      return;
+    }
+    try {
+      await bridge.startBackgroundKeepAlive(
+        title: 'Codex Remote 已连接',
+        body: '后台保持与 Windows 服务通信',
+      );
+      backgroundKeepAliveActive = true;
+      notifyListeners();
+    } catch (error) {
+      errorMessage = _friendlyErrorMessage(error);
+      notifyListeners();
+    }
+  }
+
+  Future<void> _stopBackgroundKeepAlive({bool notify = true}) async {
+    if (!backgroundKeepAliveActive) {
+      return;
+    }
+    try {
+      await bridge.stopBackgroundKeepAlive();
+    } catch (_) {
+      // The app may be shutting down or running in a non-Android test shell.
+    }
+    backgroundKeepAliveActive = false;
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   void selectSession(String threadId) {
@@ -3303,6 +3342,7 @@ class CodexAppState extends ChangeNotifier {
     unawaited(_messageSub?.cancel());
     unawaited(_statusSub?.cancel());
     unawaited(_socket?.dispose());
+    unawaited(_stopBackgroundKeepAlive(notify: false));
     _api?.close();
     super.dispose();
   }

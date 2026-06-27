@@ -88,4 +88,18 @@ class NativeBridge {
       'fileName': fileName,
     });
   }
+
+  Future<void> startBackgroundKeepAlive({
+    required String title,
+    required String body,
+  }) async {
+    await _channel.invokeMethod<void>('startBackgroundKeepAlive', {
+      'title': title,
+      'body': body,
+    });
+  }
+
+  Future<void> stopBackgroundKeepAlive() async {
+    await _channel.invokeMethod<void>('stopBackgroundKeepAlive');
+  }
 }
