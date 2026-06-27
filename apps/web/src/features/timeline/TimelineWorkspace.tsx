@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -58,6 +58,50 @@ type ExpandableTimelineRowProps = {
   className?: string;
 };
 
+function isInteractiveDetailTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  return Boolean(target.closest('a, button, input, textarea, select, summary, [role="button"], [contenteditable="true"]'));
+}
+
+function shouldCollapseDetailBody(event: MouseEvent<HTMLElement>): boolean {
+  if (isInteractiveDetailTarget(event.target)) {
+    return false;
+  }
+  const selection = window.getSelection?.();
+  return !selection?.toString();
+}
+
+function DetailCollapseBody({
+  children,
+  onCollapse,
+}: {
+  children: React.ReactNode;
+  onCollapse: () => void;
+}) {
+  return (
+    <div
+      className="timeline-inline-detail-body"
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        if (shouldCollapseDetailBody(event)) {
+          onCollapse();
+        }
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onCollapse();
+        }
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 const MarkdownMessage = memo(function MarkdownMessage({
   text,
   className,
@@ -104,7 +148,9 @@ function ExpandableTimelineRow(props: ExpandableTimelineRowProps) {
         <div className="timeline-inline-title">{title}</div>
         {summary ? <div className="timeline-inline-meta timeline-inline-summary">{summary}</div> : null}
       </button>
-      {expandable && open ? <div className="timeline-inline-detail-body">{details}</div> : null}
+      {expandable && open ? (
+        <DetailCollapseBody onCollapse={() => setOpen(false)}>{details}</DetailCollapseBody>
+      ) : null}
     </div>
   );
 }
@@ -133,7 +179,9 @@ function ExpandableFileChangeRow({
         <div className="timeline-inline-title">{title}</div>
         {summary ? <div className="timeline-inline-meta timeline-inline-summary">{summary}</div> : null}
       </button>
-      {expandable && open ? <div className="timeline-inline-detail-body">{details}</div> : null}
+      {expandable && open ? (
+        <DetailCollapseBody onCollapse={() => setOpen(false)}>{details}</DetailCollapseBody>
+      ) : null}
     </div>
   );
 }

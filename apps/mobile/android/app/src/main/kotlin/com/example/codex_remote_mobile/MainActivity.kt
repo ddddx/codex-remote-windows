@@ -21,10 +21,15 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
     private val channelName = "codex_remote_mobile/native"
@@ -33,11 +38,16 @@ class MainActivity : FlutterActivity() {
     private val notificationPermissionRequestCode = 42019
     private val taskNotificationChannelId = "codex_remote_task_events"
     private val downloadExecutor = Executors.newSingleThreadExecutor()
+    private val maxDownloadConnections = 4
+    private val acceleratedDownloadMinBytes = 8L * 1024L * 1024L
+    private val progressIntervalMs = 250L
     private var pendingPickResult: MethodChannel.Result? = null
+    private lateinit var nativeChannel: MethodChannel
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
+        nativeChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        nativeChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "getString" -> getStringValue(call, result)
                 "setString" -> setStringValue(call, result)
@@ -168,6 +178,16 @@ class MainActivity : FlutterActivity() {
                 val apkFile = downloadApk(url, fileName)
                 runOnUiThread {
                     try {
+                        emitDownloadProgress(
+                            status = "installing",
+                            url = url,
+                            fileName = fileName,
+                            downloadedBytes = apkFile.length(),
+                            totalBytes = apkFile.length(),
+                            bytesPerSecond = 0,
+                            accelerated = false,
+                            connections = 1,
+                        )
                         installApk(apkFile)
                         result.success(null)
                     } catch (error: Exception) {
@@ -291,21 +311,23 @@ class MainActivity : FlutterActivity() {
         if (temp.exists()) {
             temp.delete()
         }
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
-            connectTimeout = 15000
-            readTimeout = 30000
-            setRequestProperty("User-Agent", "CodexRemoteMobile")
-        }
+        emitDownloadProgress(
+            status = "preparing",
+            url = url,
+            fileName = fileName,
+            downloadedBytes = 0,
+            totalBytes = 0,
+            bytesPerSecond = 0,
+            accelerated = false,
+            connections = 1,
+        )
+        val metadata = fetchDownloadMetadata(url)
         try {
-            val status = connection.responseCode
-            if (status !in 200..299) {
-                throw IllegalStateException("下载失败：HTTP $status")
-            }
-            connection.inputStream.use { input ->
-                temp.outputStream().use { output ->
-                    input.copyTo(output)
-                }
+            val rangeDownloaded = metadata.supportsRanges &&
+                metadata.contentLength >= acceleratedDownloadMinBytes &&
+                downloadApkWithRanges(url, fileName, temp, metadata.contentLength)
+            if (!rangeDownloaded) {
+                downloadApkSingle(url, fileName, temp, metadata.contentLength)
             }
             if (target.exists()) {
                 target.delete()
@@ -315,10 +337,286 @@ class MainActivity : FlutterActivity() {
             }
             return target
         } finally {
-            connection.disconnect()
             if (temp.exists()) {
                 temp.delete()
             }
+        }
+    }
+
+    private data class DownloadMetadata(
+        val contentLength: Long,
+        val supportsRanges: Boolean,
+    )
+
+    private fun openDownloadConnection(url: String, method: String = "GET"): HttpURLConnection {
+        return (URL(url).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            requestMethod = method
+            connectTimeout = 15000
+            readTimeout = 30000
+            setRequestProperty("User-Agent", "CodexRemoteMobile")
+        }
+    }
+
+    private fun fetchDownloadMetadata(url: String): DownloadMetadata {
+        val connection = openDownloadConnection(url, "HEAD")
+        return try {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                DownloadMetadata(contentLength = -1, supportsRanges = false)
+            } else {
+                val acceptRanges = connection.getHeaderField("Accept-Ranges") ?: ""
+                DownloadMetadata(
+                    contentLength = connection.getHeaderFieldLong("Content-Length", -1),
+                    supportsRanges = acceptRanges.contains("bytes", ignoreCase = true),
+                )
+            }
+        } catch (_: Exception) {
+            DownloadMetadata(contentLength = -1, supportsRanges = false)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun downloadApkSingle(
+        url: String,
+        fileName: String,
+        temp: File,
+        expectedBytes: Long,
+    ) {
+        val connection = openDownloadConnection(url)
+        try {
+            val status = connection.responseCode
+            if (status !in 200..299) {
+                throw IllegalStateException("下载失败：HTTP $status")
+            }
+            val totalBytes = expectedBytes.takeIf { it > 0 }
+                ?: connection.getHeaderFieldLong("Content-Length", -1)
+            val reporter = DownloadProgressReporter(
+                url = url,
+                fileName = fileName,
+                totalBytes = totalBytes,
+                accelerated = false,
+                connections = 1,
+            )
+            var downloadedBytes = 0L
+            reporter.emit("downloading", downloadedBytes, force = true)
+            BufferedInputStream(connection.inputStream).use { input ->
+                temp.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) {
+                            break
+                        }
+                        output.write(buffer, 0, read)
+                        downloadedBytes += read.toLong()
+                        reporter.emit("downloading", downloadedBytes)
+                    }
+                }
+            }
+            reporter.emit("completed", downloadedBytes, force = true)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun downloadApkWithRanges(
+        url: String,
+        fileName: String,
+        temp: File,
+        totalBytes: Long,
+    ): Boolean {
+        val connections = min(
+            maxDownloadConnections,
+            ((totalBytes + acceleratedDownloadMinBytes - 1) / acceleratedDownloadMinBytes).toInt().coerceAtLeast(1),
+        )
+        if (connections <= 1) {
+            return false
+        }
+        val downloadedBytes = AtomicLong(0)
+        val reporter = DownloadProgressReporter(
+            url = url,
+            fileName = fileName,
+            totalBytes = totalBytes,
+            accelerated = true,
+            connections = connections,
+        )
+        emitDownloadProgress(
+            status = "preparing",
+            url = url,
+            fileName = fileName,
+            downloadedBytes = 0,
+            totalBytes = totalBytes,
+            bytesPerSecond = 0,
+            accelerated = true,
+            connections = connections,
+            message = "正在启用分段下载...",
+        )
+        var rangeWorkersStopped = true
+        try {
+            RandomAccessFile(temp, "rw").use { file ->
+                file.setLength(totalBytes)
+            }
+            val pool = Executors.newFixedThreadPool(connections)
+            val progressTicker = Executors.newSingleThreadScheduledExecutor()
+            val ticker = progressTicker.scheduleAtFixedRate(
+                {
+                    reporter.emit("downloading", downloadedBytes.get(), force = true)
+                },
+                0,
+                progressIntervalMs,
+                TimeUnit.MILLISECONDS,
+            )
+            val futures = (0 until connections).map { index ->
+                val start = totalBytes * index / connections
+                val end = if (index == connections - 1) {
+                    totalBytes - 1
+                } else {
+                    (totalBytes * (index + 1) / connections) - 1
+                }
+                pool.submit {
+                    downloadRange(url, temp, start, end, downloadedBytes)
+                }
+            }
+            try {
+                futures.forEach { it.get() }
+            } finally {
+                futures.forEach { it.cancel(true) }
+                ticker.cancel(true)
+                progressTicker.shutdownNow()
+                pool.shutdownNow()
+                rangeWorkersStopped = pool.awaitTermination(10, TimeUnit.SECONDS)
+            }
+            if (downloadedBytes.get() != totalBytes) {
+                throw IllegalStateException("分段下载未完成")
+            }
+            reporter.emit("completed", totalBytes, force = true)
+            return true
+        } catch (_: Exception) {
+            if (temp.exists()) {
+                temp.delete()
+            }
+            if (!rangeWorkersStopped) {
+                throw IllegalStateException("分段下载停止超时")
+            }
+            emitDownloadProgress(
+                status = "preparing",
+                url = url,
+                fileName = fileName,
+                downloadedBytes = 0,
+                totalBytes = totalBytes,
+                bytesPerSecond = 0,
+                accelerated = false,
+                connections = 1,
+                message = "分段下载不可用，切换普通下载...",
+            )
+            return false
+        }
+    }
+
+    private fun downloadRange(
+        url: String,
+        temp: File,
+        start: Long,
+        end: Long,
+        downloadedBytes: AtomicLong,
+    ) {
+        val connection = openDownloadConnection(url).apply {
+            setRequestProperty("Range", "bytes=$start-$end")
+        }
+        try {
+            val status = connection.responseCode
+            if (status != HttpURLConnection.HTTP_PARTIAL) {
+                throw IllegalStateException("服务器不支持分段下载：HTTP $status")
+            }
+            BufferedInputStream(connection.inputStream).use { input ->
+                RandomAccessFile(temp, "rw").use { output ->
+                    output.seek(start)
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) {
+                            break
+                        }
+                        output.write(buffer, 0, read)
+                        downloadedBytes.addAndGet(read.toLong())
+                    }
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private inner class DownloadProgressReporter(
+        private val url: String,
+        private val fileName: String,
+        private val totalBytes: Long,
+        private val accelerated: Boolean,
+        private val connections: Int,
+    ) {
+        private var lastEmitAt = 0L
+        private var lastSpeedAt = System.currentTimeMillis()
+        private var lastSpeedBytes = 0L
+
+        @Synchronized
+        fun emit(status: String, downloadedBytes: Long, force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (!force && now - lastEmitAt < progressIntervalMs) {
+                return
+            }
+            val elapsedMs = (now - lastSpeedAt).coerceAtLeast(1)
+            val bytesPerSecond = (((downloadedBytes - lastSpeedBytes).coerceAtLeast(0)) * 1000L) / elapsedMs
+            lastSpeedAt = now
+            lastSpeedBytes = downloadedBytes
+            lastEmitAt = now
+            emitDownloadProgress(
+                status = status,
+                url = url,
+                fileName = fileName,
+                downloadedBytes = downloadedBytes,
+                totalBytes = totalBytes,
+                bytesPerSecond = bytesPerSecond,
+                accelerated = accelerated,
+                connections = connections,
+            )
+        }
+    }
+
+    private fun emitDownloadProgress(
+        status: String,
+        url: String,
+        fileName: String,
+        downloadedBytes: Long,
+        totalBytes: Long,
+        bytesPerSecond: Long,
+        accelerated: Boolean,
+        connections: Int,
+        message: String? = null,
+    ) {
+        if (!::nativeChannel.isInitialized) {
+            return
+        }
+        val progress = if (totalBytes > 0) {
+            downloadedBytes.toDouble() / totalBytes.toDouble()
+        } else {
+            0.0
+        }
+        val payload = mapOf(
+            "status" to status,
+            "url" to url,
+            "fileName" to fileName,
+            "downloadedBytes" to downloadedBytes,
+            "totalBytes" to totalBytes,
+            "bytesPerSecond" to bytesPerSecond,
+            "progress" to progress.coerceIn(0.0, 1.0),
+            "accelerated" to accelerated,
+            "connections" to connections,
+            "message" to message,
+        )
+        runOnUiThread {
+            nativeChannel.invokeMethod("downloadProgress", payload)
         }
     }
 

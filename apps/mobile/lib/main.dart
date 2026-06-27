@@ -1080,13 +1080,22 @@ class _TurnPlanTimelineCard extends StatelessWidget {
   }
 }
 
-class _ProcessTimelineCard extends StatelessWidget {
+class _ProcessTimelineCard extends StatefulWidget {
   const _ProcessTimelineCard({required this.entry});
 
   final TimelineEntry entry;
 
   @override
+  State<_ProcessTimelineCard> createState() => _ProcessTimelineCardState();
+}
+
+class _ProcessTimelineCardState extends State<_ProcessTimelineCard> {
+  final ExpansibleController _controller = ExpansibleController();
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final entry = widget.entry;
     final details = _processDetailWidgets(context, entry);
     final title = _processHeadline(entry);
     final summary = _processPreview(entry);
@@ -1142,6 +1151,12 @@ class _ProcessTimelineCard extends StatelessWidget {
                           context,
                         ).copyWith(dividerColor: Colors.transparent),
                         child: ExpansionTile(
+                          controller: _controller,
+                          onExpansionChanged: (value) {
+                            setState(() {
+                              _expanded = value;
+                            });
+                          },
                           tilePadding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 2,
@@ -1177,7 +1192,20 @@ class _ProcessTimelineCard extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                          children: details,
+                          children: [
+                            GestureDetector(
+                              behavior: HitTestBehavior.translucent,
+                              onTap: () {
+                                if (_expanded) {
+                                  _controller.collapse();
+                                }
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: details,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
               ),
@@ -2948,6 +2976,21 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             state.updateMessage.isEmpty ? subtitle : state.updateMessage,
           ),
         ),
+        if (state.hasUpdateDownloadProgress) ...[
+          LinearProgressIndicator(
+            value: state.updateTotalBytes > 0
+                ? state.updateDownloadProgress.clamp(0, 1).toDouble()
+                : null,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            state.updateDownloadDetail.isEmpty
+                ? '正在准备下载...'
+                : state.updateDownloadDetail,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+        ],
         Row(
           children: [
             Expanded(

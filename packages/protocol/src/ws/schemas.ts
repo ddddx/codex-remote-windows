@@ -333,6 +333,9 @@ const timelineEventSchema = z.discriminatedUnion('type', [
     noticeKind: z.string().optional(),
   }),
 ]);
+const sequencedTimelineEventSchema = timelineEventSchema.and(z.object({
+  sequence: z.number().optional(),
+}));
 
 const serverRequestSchema = z.object({
   requestId: z.string(),
@@ -462,7 +465,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     tokenUsage: tokenUsagePayloadSchema.optional(),
     turnPlans: z.array(turnPlanSchema).optional(),
     turnDiffs: z.array(turnDiffSchema).optional(),
-    timelineEvents: z.array(timelineEventSchema).optional(),
+    timelineEvents: z.array(sequencedTimelineEventSchema).optional(),
   }),
   z.object({
     type: z.literal('turn_started'),

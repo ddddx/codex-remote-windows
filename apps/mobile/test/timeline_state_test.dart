@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:codex_remote_mobile/src/app_state.dart';
 import 'package:codex_remote_mobile/src/models.dart';
 import 'package:codex_remote_mobile/src/native_bridge.dart';
@@ -40,6 +42,35 @@ void main() {
     expect(info.apkName, 'codex-remote-v1.0.15-universal-sdk35-release.apk');
     expect(info.apkUrl, contains('https://github.com/'));
     expect(info.apkUrl, contains('&x=2'));
+  });
+
+  test('tracks update download progress and speed', () async {
+    final bridge = _TestBridge();
+    final state = CodexAppState(bridge);
+    addTearDown(state.dispose);
+
+    bridge.emitDownloadProgress(
+      const UpdateDownloadProgress(
+        status: 'downloading',
+        url: 'https://github.com/release.apk',
+        fileName: 'release.apk',
+        downloadedBytes: 1024 * 1024,
+        totalBytes: 4 * 1024 * 1024,
+        bytesPerSecond: 512 * 1024,
+        progress: 0.25,
+        accelerated: true,
+        connections: 4,
+        message: '',
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(state.updateMessage, '正在下载...');
+    expect(state.updateDownloadProgress, 0.25);
+    expect(state.updateDownloadDetail, contains('25%'));
+    expect(state.updateDownloadDetail, contains('1.0 MB / 4.0 MB'));
+    expect(state.updateDownloadDetail, contains('512 KB/s'));
+    expect(state.updateDownloadDetail, contains('分段 x4'));
   });
 
   test('merges streaming timeline events like web', () {
@@ -849,6 +880,16 @@ void main() {
 class _TestBridge extends NativeBridge {
   final Map<String, String> values = {};
   final List<Map<String, Object?>> notifications = [];
+  final StreamController<UpdateDownloadProgress> _downloadProgress =
+      StreamController<UpdateDownloadProgress>.broadcast();
+
+  @override
+  Stream<UpdateDownloadProgress> get downloadProgress =>
+      _downloadProgress.stream;
+
+  void emitDownloadProgress(UpdateDownloadProgress progress) {
+    _downloadProgress.add(progress);
+  }
 
   @override
   Future<String?> getString(String key) async => values[key];

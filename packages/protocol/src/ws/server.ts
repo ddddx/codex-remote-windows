@@ -150,7 +150,7 @@ export type ThreadTurnPayload = Pick<v2.Turn, 'id' | 'items' | 'status' | 'start
 
 export type TimelineThreadEventParams = JsonValue | Record<string, unknown>;
 
-export type TimelineEventPayload =
+export type TimelineEventPayload = { sequence?: number } & (
   | { type: 'turn_started'; threadId: string; turnId?: string; startedAt?: number }
   | { type: 'turn_completed'; threadId: string; turnId?: string }
   | { type: 'turn_plan_updated'; threadId: string; turnId?: string; explanation?: string; plan?: TurnPlanStepPayload[] }
@@ -192,7 +192,8 @@ export type TimelineEventPayload =
   | { type: 'token_usage'; threadId: string; usage: TokenUsagePayload }
   | { type: 'model_rerouted'; threadId: string; turnId?: string; fromModel: string; toModel: string; reason?: string | GuardedRecord }
   | { type: 'warning'; message: string; threadId?: string; noticeId?: string; createdAt?: number; noticeKind?: string }
-  | { type: 'error_notice'; message: string; threadId?: string; noticeId?: string; createdAt?: number; noticeKind?: string };
+  | { type: 'error_notice'; message: string; threadId?: string; noticeId?: string; createdAt?: number; noticeKind?: string }
+);
 
 export type ServerRequestPayload = {
   requestId: string;

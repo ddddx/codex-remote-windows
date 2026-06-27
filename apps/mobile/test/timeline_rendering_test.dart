@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:codex_remote_mobile/main.dart';
 import 'package:codex_remote_mobile/src/app_state.dart';
 import 'package:codex_remote_mobile/src/models.dart';
@@ -58,6 +60,12 @@ void main() {
     expect(find.textContaining('lib/main.dart'), findsOneWidget);
     expect(find.textContaining('@@ -1,1 +1,1 @@'), findsOneWidget);
     expect(find.textContaining('+new line'), findsOneWidget);
+
+    await tester.tap(find.textContaining('@@ -1,1 +1,1 @@').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.textContaining('@@ -1,1 +1,1 @@'), findsNothing);
   });
 
   testWidgets('highlights running tasks apart from completed tasks', (
@@ -109,4 +117,11 @@ void main() {
   });
 }
 
-class _TestBridge extends NativeBridge {}
+class _TestBridge extends NativeBridge {
+  final StreamController<UpdateDownloadProgress> _downloadProgress =
+      StreamController<UpdateDownloadProgress>.broadcast();
+
+  @override
+  Stream<UpdateDownloadProgress> get downloadProgress =>
+      _downloadProgress.stream;
+}

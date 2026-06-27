@@ -33,13 +33,18 @@ class MobileUpdateInfo {
 }
 
 class CodexAppState extends ChangeNotifier {
-  CodexAppState(this.bridge);
+  CodexAppState(this.bridge) {
+    _downloadProgressSub = bridge.downloadProgress.listen(
+      _handleDownloadProgress,
+    );
+  }
 
   final NativeBridge bridge;
   CodexApi? _api;
   CodexSocket? _socket;
   StreamSubscription<JsonMap>? _messageSub;
   StreamSubscription<String>? _statusSub;
+  StreamSubscription<UpdateDownloadProgress>? _downloadProgressSub;
   Timer? _workingTimer;
   bool _reauthenticating = false;
   final Set<String> _completedTurnNotifications = {};
@@ -59,6 +64,13 @@ class CodexAppState extends ChangeNotifier {
   int appVersionCode = 0;
   bool updateChecking = false;
   bool updateDownloading = false;
+  double updateDownloadProgress = 0;
+  int updateDownloadedBytes = 0;
+  int updateTotalBytes = 0;
+  int updateDownloadBytesPerSecond = 0;
+  bool updateDownloadAccelerated = false;
+  int updateDownloadConnections = 1;
+  String updateDownloadStage = '';
   bool backgroundKeepAliveActive = false;
   bool appInForeground = true;
   String updateMessage = '';
@@ -128,6 +140,31 @@ class CodexAppState extends ChangeNotifier {
       return 'Working · ${seconds}s';
     }
     return 'Working · ${seconds ~/ 60}m ${(seconds % 60).toString().padLeft(2, '0')}s';
+  }
+
+  bool get hasUpdateDownloadProgress =>
+      updateDownloading ||
+      updateDownloadedBytes > 0 ||
+      updateTotalBytes > 0 ||
+      updateDownloadStage.isNotEmpty;
+
+  String get updateDownloadDetail {
+    final parts = <String>[];
+    if (updateTotalBytes > 0) {
+      final percent = (updateDownloadProgress.clamp(0, 1) * 100).floor();
+      parts.add(
+        '$percent% · ${formatByteCount(updateDownloadedBytes)} / ${formatByteCount(updateTotalBytes)}',
+      );
+    } else if (updateDownloadedBytes > 0) {
+      parts.add(formatByteCount(updateDownloadedBytes));
+    }
+    if (updateDownloadBytesPerSecond > 0) {
+      parts.add('${formatByteCount(updateDownloadBytesPerSecond)}/s');
+    }
+    if (updateDownloadAccelerated && updateDownloadConnections > 1) {
+      parts.add('分段 x$updateDownloadConnections');
+    }
+    return parts.join(' · ');
   }
 
   Future<void> initialize() async {
@@ -253,7 +290,8 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     updateDownloading = true;
-    updateMessage = '正在下载 ${info.versionName}...';
+    _resetUpdateDownloadProgress();
+    updateMessage = '正在准备下载 ${info.versionName}...';
     notifyListeners();
     try {
       await bridge.downloadAndInstallApk(
@@ -267,6 +305,39 @@ class CodexAppState extends ChangeNotifier {
       updateDownloading = false;
       notifyListeners();
     }
+  }
+
+  void _handleDownloadProgress(UpdateDownloadProgress progress) {
+    updateDownloadStage = progress.status;
+    updateDownloadedBytes = progress.downloadedBytes;
+    updateTotalBytes = progress.totalBytes;
+    updateDownloadBytesPerSecond = progress.bytesPerSecond;
+    updateDownloadProgress = progress.progress;
+    updateDownloadAccelerated = progress.accelerated;
+    updateDownloadConnections = progress.connections;
+
+    if (progress.message.trim().isNotEmpty) {
+      updateMessage = progress.message.trim();
+    } else {
+      updateMessage = switch (progress.status) {
+        'preparing' => '正在准备下载...',
+        'downloading' => '正在下载...',
+        'completed' => '下载完成，正在打开安装器...',
+        'installing' => '正在打开安装器...',
+        _ => '正在下载...',
+      };
+    }
+    notifyListeners();
+  }
+
+  void _resetUpdateDownloadProgress() {
+    updateDownloadProgress = 0;
+    updateDownloadedBytes = 0;
+    updateTotalBytes = 0;
+    updateDownloadBytesPerSecond = 0;
+    updateDownloadAccelerated = false;
+    updateDownloadConnections = 1;
+    updateDownloadStage = '';
   }
 
   Future<MobileUpdateInfo> _fetchLatestRelease() async {
@@ -3596,11 +3667,27 @@ class CodexAppState extends ChangeNotifier {
     _workingTimer?.cancel();
     unawaited(_messageSub?.cancel());
     unawaited(_statusSub?.cancel());
+    unawaited(_downloadProgressSub?.cancel());
     unawaited(_socket?.dispose());
     unawaited(_stopBackgroundKeepAlive(notify: false));
     _api?.close();
     super.dispose();
   }
+}
+
+String formatByteCount(int bytes) {
+  final value = max(0, bytes).toDouble();
+  const units = ['B', 'KB', 'MB', 'GB'];
+  var unitIndex = 0;
+  var scaled = value;
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex == 0) {
+    return '${scaled.round()} ${units[unitIndex]}';
+  }
+  return '${scaled >= 100 ? scaled.toStringAsFixed(0) : scaled.toStringAsFixed(1)} ${units[unitIndex]}';
 }
 
 String extractVersionNameFromRelease({

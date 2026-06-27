@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 class PickedImage {
@@ -24,10 +26,86 @@ class AppVersionInfo {
   final int versionCode;
 }
 
+class UpdateDownloadProgress {
+  const UpdateDownloadProgress({
+    required this.status,
+    required this.url,
+    required this.fileName,
+    required this.downloadedBytes,
+    required this.totalBytes,
+    required this.bytesPerSecond,
+    required this.progress,
+    required this.accelerated,
+    required this.connections,
+    required this.message,
+  });
+
+  factory UpdateDownloadProgress.fromMap(Map<dynamic, dynamic> map) {
+    final downloadedBytes = _readNonNegativeInt(map['downloadedBytes']);
+    final totalBytes = _readNonNegativeInt(map['totalBytes']);
+    final progress = _readDouble(map['progress']);
+    return UpdateDownloadProgress(
+      status: _readString(map['status']),
+      url: _readString(map['url']),
+      fileName: _readString(map['fileName']),
+      downloadedBytes: downloadedBytes,
+      totalBytes: totalBytes,
+      bytesPerSecond: _readInt(map['bytesPerSecond']),
+      progress: progress > 0
+          ? progress.clamp(0, 1).toDouble()
+          : totalBytes > 0
+          ? (downloadedBytes / totalBytes).clamp(0, 1).toDouble()
+          : 0,
+      accelerated: map['accelerated'] == true,
+      connections: _readInt(map['connections']).clamp(1, 64).toInt(),
+      message: _readString(map['message']),
+    );
+  }
+
+  final String status;
+  final String url;
+  final String fileName;
+  final int downloadedBytes;
+  final int totalBytes;
+  final int bytesPerSecond;
+  final double progress;
+  final bool accelerated;
+  final int connections;
+  final String message;
+}
+
 class NativeBridge {
   static const MethodChannel _channel = MethodChannel(
     'codex_remote_mobile/native',
   );
+  static final StreamController<UpdateDownloadProgress>
+  _downloadProgressController =
+      StreamController<UpdateDownloadProgress>.broadcast();
+  static bool _methodCallHandlerInstalled = false;
+
+  Stream<UpdateDownloadProgress> get downloadProgress {
+    _ensureMethodCallHandler();
+    return _downloadProgressController.stream;
+  }
+
+  static void _ensureMethodCallHandler() {
+    if (_methodCallHandlerInstalled) {
+      return;
+    }
+    _methodCallHandlerInstalled = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method != 'downloadProgress') {
+        return null;
+      }
+      final arguments = call.arguments;
+      if (arguments is Map) {
+        _downloadProgressController.add(
+          UpdateDownloadProgress.fromMap(arguments),
+        );
+      }
+      return null;
+    });
+  }
 
   Future<String?> getString(String key) async {
     return _channel.invokeMethod<String>('getString', {'key': key});
@@ -119,3 +197,14 @@ class NativeBridge {
     });
   }
 }
+
+String _readString(Object? value) => value is String ? value : '';
+
+int _readInt(Object? value) => value is num ? value.round() : 0;
+
+int _readNonNegativeInt(Object? value) {
+  final result = _readInt(value);
+  return result < 0 ? 0 : result;
+}
+
+double _readDouble(Object? value) => value is num ? value.toDouble() : 0;
