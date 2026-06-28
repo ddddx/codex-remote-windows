@@ -26,8 +26,11 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Collections
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
 
@@ -38,11 +41,12 @@ class MainActivity : FlutterActivity() {
     private val notificationPermissionRequestCode = 42019
     private val taskNotificationChannelId = "codex_remote_task_events"
     private val downloadExecutor = Executors.newSingleThreadExecutor()
-    private val maxDownloadConnections = 4
+    private val maxDownloadConnections = 8
     private val acceleratedDownloadMinBytes = 8L * 1024L * 1024L
     private val progressIntervalMs = 250L
     private var pendingPickResult: MethodChannel.Result? = null
     private lateinit var nativeChannel: MethodChannel
+    @Volatile private var activeDownloadControl: DownloadControl? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -55,6 +59,9 @@ class MainActivity : FlutterActivity() {
                 "pickImage" -> pickImage(result)
                 "getAppVersion" -> getAppVersion(result)
                 "openUrl" -> openUrl(call, result)
+                "downloadUpdateApk" -> downloadUpdateApk(call, result)
+                "installDownloadedApk" -> installDownloadedApk(call, result)
+                "cancelUpdateDownload" -> cancelUpdateDownload(result)
                 "downloadAndInstallApk" -> downloadAndInstallApk(call, result)
                 "startBackgroundKeepAlive" -> startBackgroundKeepAlive(call, result)
                 "stopBackgroundKeepAlive" -> stopBackgroundKeepAlive(result)
@@ -165,6 +172,76 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun downloadUpdateApk(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")?.trim()
+        val requestedName = call.argument<String>("fileName")?.trim()
+        if (url.isNullOrBlank()) {
+            result.error("invalid_url", "Missing APK URL", null)
+            return
+        }
+        if (activeDownloadControl != null) {
+            result.error("download_active", "已有下载正在进行", null)
+            return
+        }
+        val fileName = sanitizeApkName(requestedName)
+        val requestedConnections = normalizeDownloadConnections(call.argument<Int>("maxConnections"))
+        val control = DownloadControl()
+        activeDownloadControl = control
+        downloadExecutor.execute {
+            try {
+                val apkFile = downloadApk(url, fileName, requestedConnections, control)
+                runOnUiThread {
+                    result.success(
+                        mapOf(
+                            "fileName" to apkFile.name,
+                            "sizeBytes" to apkFile.length(),
+                        )
+                    )
+                }
+            } catch (error: CancellationException) {
+                emitDownloadCancelled(url, fileName)
+                runOnUiThread {
+                    result.error("download_cancelled", "下载已取消", null)
+                }
+            } catch (error: Exception) {
+                if (control.cancelled.get()) {
+                    emitDownloadCancelled(url, fileName)
+                    runOnUiThread {
+                        result.error("download_cancelled", "下载已取消", null)
+                    }
+                } else {
+                    runOnUiThread {
+                        result.error("download_failed", error.message, null)
+                    }
+                }
+            } finally {
+                if (activeDownloadControl === control) {
+                    activeDownloadControl = null
+                }
+            }
+        }
+    }
+
+    private fun installDownloadedApk(call: MethodCall, result: MethodChannel.Result) {
+        val fileName = sanitizeApkName(call.argument<String>("fileName")?.trim())
+        val apkFile = File(downloadDirectory(), fileName)
+        if (!apkFile.exists()) {
+            result.error("apk_missing", "安装包不存在，请重新下载。", null)
+            return
+        }
+        try {
+            installApk(apkFile)
+            result.success(null)
+        } catch (error: Exception) {
+            result.error("install_failed", error.message, null)
+        }
+    }
+
+    private fun cancelUpdateDownload(result: MethodChannel.Result) {
+        activeDownloadControl?.cancel()
+        result.success(null)
+    }
+
     private fun downloadAndInstallApk(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")?.trim()
         val requestedName = call.argument<String>("fileName")?.trim()
@@ -173,9 +250,11 @@ class MainActivity : FlutterActivity() {
             return
         }
         val fileName = sanitizeApkName(requestedName)
+        val requestedConnections = normalizeDownloadConnections(call.argument<Int>("maxConnections"))
+        val control = DownloadControl()
         downloadExecutor.execute {
             try {
-                val apkFile = downloadApk(url, fileName)
+                val apkFile = downloadApk(url, fileName, requestedConnections, control)
                 runOnUiThread {
                     try {
                         emitDownloadProgress(
@@ -196,7 +275,11 @@ class MainActivity : FlutterActivity() {
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    result.error("download_failed", error.message, null)
+                    if (control.cancelled.get()) {
+                        result.error("download_cancelled", "下载已取消", null)
+                    } else {
+                        result.error("download_failed", error.message, null)
+                    }
                 }
             }
         }
@@ -301,11 +384,54 @@ class MainActivity : FlutterActivity() {
         return if (clean.endsWith(".apk", ignoreCase = true)) clean else "$clean.apk"
     }
 
-    private fun downloadApk(url: String, fileName: String): File {
+    private fun downloadDirectory(): File {
         val downloadsDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: cacheDir
         if (!downloadsDir.exists()) {
             downloadsDir.mkdirs()
         }
+        return downloadsDir
+    }
+
+    private fun normalizeDownloadConnections(value: Int?): Int {
+        return (value ?: 4).coerceIn(1, maxDownloadConnections)
+    }
+
+    private class DownloadControl {
+        private val connections = Collections.synchronizedSet(mutableSetOf<HttpURLConnection>())
+        val cancelled = AtomicBoolean(false)
+
+        fun register(connection: HttpURLConnection) {
+            connections.add(connection)
+            if (cancelled.get()) {
+                connection.disconnect()
+            }
+        }
+
+        fun unregister(connection: HttpURLConnection) {
+            connections.remove(connection)
+        }
+
+        fun cancel() {
+            cancelled.set(true)
+            synchronized(connections) {
+                connections.forEach { it.disconnect() }
+            }
+        }
+
+        fun throwIfCancelled() {
+            if (cancelled.get()) {
+                throw CancellationException("下载已取消")
+            }
+        }
+    }
+
+    private fun downloadApk(
+        url: String,
+        fileName: String,
+        maxConnections: Int,
+        control: DownloadControl,
+    ): File {
+        val downloadsDir = downloadDirectory()
         val target = File(downloadsDir, fileName)
         val temp = File(downloadsDir, "$fileName.part")
         if (temp.exists()) {
@@ -321,14 +447,16 @@ class MainActivity : FlutterActivity() {
             accelerated = false,
             connections = 1,
         )
-        val metadata = fetchDownloadMetadata(url)
+        control.throwIfCancelled()
+        val metadata = fetchDownloadMetadata(url, control)
         try {
             val rangeDownloaded = metadata.supportsRanges &&
                 metadata.contentLength >= acceleratedDownloadMinBytes &&
-                downloadApkWithRanges(url, fileName, temp, metadata.contentLength)
+                downloadApkWithRanges(url, fileName, temp, metadata.contentLength, maxConnections, control)
             if (!rangeDownloaded) {
-                downloadApkSingle(url, fileName, temp, metadata.contentLength)
+                downloadApkSingle(url, fileName, temp, metadata.contentLength, control)
             }
+            control.throwIfCancelled()
             if (target.exists()) {
                 target.delete()
             }
@@ -348,18 +476,25 @@ class MainActivity : FlutterActivity() {
         val supportsRanges: Boolean,
     )
 
-    private fun openDownloadConnection(url: String, method: String = "GET"): HttpURLConnection {
-        return (URL(url).openConnection() as HttpURLConnection).apply {
+    private fun openDownloadConnection(
+        url: String,
+        method: String = "GET",
+        control: DownloadControl? = null,
+    ): HttpURLConnection {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             requestMethod = method
             connectTimeout = 15000
             readTimeout = 30000
             setRequestProperty("User-Agent", "CodexRemoteMobile")
         }
+        control?.register(connection)
+        return connection
     }
 
-    private fun fetchDownloadMetadata(url: String): DownloadMetadata {
-        val connection = openDownloadConnection(url, "HEAD")
+    private fun fetchDownloadMetadata(url: String, control: DownloadControl): DownloadMetadata {
+        control.throwIfCancelled()
+        val connection = openDownloadConnection(url, "HEAD", control)
         return try {
             val status = connection.responseCode
             if (status !in 200..299) {
@@ -374,6 +509,7 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             DownloadMetadata(contentLength = -1, supportsRanges = false)
         } finally {
+            control.unregister(connection)
             connection.disconnect()
         }
     }
@@ -383,8 +519,10 @@ class MainActivity : FlutterActivity() {
         fileName: String,
         temp: File,
         expectedBytes: Long,
+        control: DownloadControl,
     ) {
-        val connection = openDownloadConnection(url)
+        control.throwIfCancelled()
+        val connection = openDownloadConnection(url, control = control)
         try {
             val status = connection.responseCode
             if (status !in 200..299) {
@@ -401,10 +539,12 @@ class MainActivity : FlutterActivity() {
             )
             var downloadedBytes = 0L
             reporter.emit("downloading", downloadedBytes, force = true)
+            control.throwIfCancelled()
             BufferedInputStream(connection.inputStream).use { input ->
                 temp.outputStream().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
+                        control.throwIfCancelled()
                         val read = input.read(buffer)
                         if (read < 0) {
                             break
@@ -417,6 +557,7 @@ class MainActivity : FlutterActivity() {
             }
             reporter.emit("completed", downloadedBytes, force = true)
         } finally {
+            control.unregister(connection)
             connection.disconnect()
         }
     }
@@ -426,9 +567,12 @@ class MainActivity : FlutterActivity() {
         fileName: String,
         temp: File,
         totalBytes: Long,
+        maxConnections: Int,
+        control: DownloadControl,
     ): Boolean {
+        control.throwIfCancelled()
         val connections = min(
-            maxDownloadConnections,
+            maxConnections,
             ((totalBytes + acceleratedDownloadMinBytes - 1) / acceleratedDownloadMinBytes).toInt().coerceAtLeast(1),
         )
         if (connections <= 1) {
@@ -476,7 +620,7 @@ class MainActivity : FlutterActivity() {
                     (totalBytes * (index + 1) / connections) - 1
                 }
                 pool.submit {
-                    downloadRange(url, temp, start, end, downloadedBytes)
+                    downloadRange(url, temp, start, end, downloadedBytes, control)
                 }
             }
             try {
@@ -488,14 +632,18 @@ class MainActivity : FlutterActivity() {
                 pool.shutdownNow()
                 rangeWorkersStopped = pool.awaitTermination(10, TimeUnit.SECONDS)
             }
+            control.throwIfCancelled()
             if (downloadedBytes.get() != totalBytes) {
                 throw IllegalStateException("分段下载未完成")
             }
             reporter.emit("completed", totalBytes, force = true)
             return true
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             if (temp.exists()) {
                 temp.delete()
+            }
+            if (error is CancellationException || control.cancelled.get()) {
+                throw CancellationException("下载已取消")
             }
             if (!rangeWorkersStopped) {
                 throw IllegalStateException("分段下载停止超时")
@@ -521,8 +669,10 @@ class MainActivity : FlutterActivity() {
         start: Long,
         end: Long,
         downloadedBytes: AtomicLong,
+        control: DownloadControl,
     ) {
-        val connection = openDownloadConnection(url).apply {
+        control.throwIfCancelled()
+        val connection = openDownloadConnection(url, control = control).apply {
             setRequestProperty("Range", "bytes=$start-$end")
         }
         try {
@@ -535,6 +685,7 @@ class MainActivity : FlutterActivity() {
                     output.seek(start)
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
+                        control.throwIfCancelled()
                         val read = input.read(buffer)
                         if (read < 0) {
                             break
@@ -545,6 +696,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
         } finally {
+            control.unregister(connection)
             connection.disconnect()
         }
     }
@@ -618,6 +770,20 @@ class MainActivity : FlutterActivity() {
         runOnUiThread {
             nativeChannel.invokeMethod("downloadProgress", payload)
         }
+    }
+
+    private fun emitDownloadCancelled(url: String, fileName: String) {
+        emitDownloadProgress(
+            status = "cancelled",
+            url = url,
+            fileName = fileName,
+            downloadedBytes = 0,
+            totalBytes = 0,
+            bytesPerSecond = 0,
+            accelerated = false,
+            connections = 1,
+            message = "下载已取消",
+        )
     }
 
     private fun installApk(file: File) {

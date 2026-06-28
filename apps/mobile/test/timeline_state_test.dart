@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:ffi';
 
 import 'package:codex_remote_mobile/src/app_state.dart';
 import 'package:codex_remote_mobile/src/models.dart';
 import 'package:codex_remote_mobile/src/native_bridge.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -23,13 +25,14 @@ void main() {
 
   test('extracts mobile release info from GitHub html fallback', () {
     final info = extractMobileUpdateInfoFromReleaseHtml(
+      currentAbi: Abi.androidArm64,
       finalUrl:
           'https://github.com/ddddx/codex-remote-windows/releases/tag/mobile-build-v1.0.15-1-abcdef',
       html: '''
         <html>
           <head><title>Codex Remote Android v1.0.15 · Release</title></head>
           <body>
-            <a href="/ddddx/codex-remote-windows/releases/download/mobile-build-v1.0.15-1-abcdef/codex-remote-v1.0.15-arm64-sdk35-release.apk">arm64</a>
+            <a href="/ddddx/codex-remote-windows/releases/download/mobile-build-v1.0.15-1-abcdef/codex-remote-v1.0.15-arm64-v8a-sdk35-release.apk">arm64</a>
             <a href="/ddddx/codex-remote-windows/releases/download/mobile-build-v1.0.15-1-abcdef/codex-remote-v1.0.15-universal-sdk35-release.apk?download=1&amp;x=2">universal</a>
           </body>
         </html>
@@ -39,9 +42,111 @@ void main() {
     expect(info, isNotNull);
     expect(info!.versionName, '1.0.15');
     expect(info.tagName, 'mobile-build-v1.0.15-1-abcdef');
-    expect(info.apkName, 'codex-remote-v1.0.15-universal-sdk35-release.apk');
+    expect(info.apkName, 'codex-remote-v1.0.15-arm64-v8a-sdk35-release.apk');
     expect(info.apkUrl, contains('https://github.com/'));
-    expect(info.apkUrl, contains('&x=2'));
+    expect(info.apkUrl, contains('arm64-v8a'));
+  });
+
+  test(
+    'selects release apk by current Android ABI before universal fallback',
+    () {
+      const assets = [
+        'codex-remote-v1.0.15-universal-sdk35-release.apk',
+        'codex-remote-v1.0.15-arm64-v8a-sdk35-release.apk',
+        'codex-remote-v1.0.15-armeabi-v7a-sdk35-release.apk',
+        'codex-remote-v1.0.15-x86_64-sdk35-release.apk',
+      ];
+
+      expect(
+        selectBestMobileApkAssetName(assets, currentAbi: Abi.androidArm64),
+        'codex-remote-v1.0.15-arm64-v8a-sdk35-release.apk',
+      );
+      expect(
+        selectBestMobileApkAssetName(assets, currentAbi: Abi.androidArm),
+        'codex-remote-v1.0.15-armeabi-v7a-sdk35-release.apk',
+      );
+      expect(
+        selectBestMobileApkAssetName(assets, currentAbi: Abi.androidX64),
+        'codex-remote-v1.0.15-x86_64-sdk35-release.apk',
+      );
+      expect(
+        selectBestMobileApkAssetName(const [
+          'codex-remote-v1.0.15-universal-sdk35-release.apk',
+        ], currentAbi: Abi.androidArm64),
+        'codex-remote-v1.0.15-universal-sdk35-release.apk',
+      );
+    },
+  );
+
+  test('normalizes and persists update download thread count', () {
+    final bridge = _TestBridge();
+    final state = CodexAppState(bridge);
+    addTearDown(state.dispose);
+
+    expect(normalizeUpdateDownloadConnectionLimit(null), 4);
+    expect(normalizeUpdateDownloadConnectionLimit(0), 1);
+    expect(normalizeUpdateDownloadConnectionLimit(99), 8);
+
+    state.setUpdateDownloadConnectionLimit(6);
+
+    expect(state.updateDownloadConnectionLimit, 6);
+    expect(bridge.values['updateDownloadConnectionLimit'], '6');
+  });
+
+  test('downloads update before opening installer', () async {
+    final bridge = _TestBridge()
+      ..downloadedApk = const DownloadedApk(
+        fileName: 'codex-remote-v1.0.18-arm64-v8a-sdk35-release.apk',
+        sizeBytes: 42,
+      );
+    final state = CodexAppState(bridge)
+      ..availableUpdate = const MobileUpdateInfo(
+        versionName: '1.0.18',
+        tagName: 'mobile-build-v1.0.18',
+        releaseUrl: 'https://github.com/ddddx/codex-remote-windows/releases',
+        apkName: 'codex-remote-v1.0.18-arm64-v8a-sdk35-release.apk',
+        apkUrl: 'https://github.com/release.apk',
+      );
+    addTearDown(state.dispose);
+
+    state.setUpdateDownloadConnectionLimit(6);
+    await state.downloadAvailableUpdate();
+
+    expect(bridge.downloadedUrls, ['https://github.com/release.apk']);
+    expect(bridge.downloadedMaxConnections, [6]);
+    expect(state.updateReadyToInstall, isTrue);
+    expect(state.updateDownloadedApkName, contains('arm64-v8a'));
+    expect(bridge.installedApks, isEmpty);
+
+    await state.installDownloadedUpdate();
+
+    expect(bridge.installedApks, [
+      'codex-remote-v1.0.18-arm64-v8a-sdk35-release.apk',
+    ]);
+  });
+
+  test('clears update progress after cancelled download', () async {
+    final bridge = _TestBridge()
+      ..downloadError = PlatformException(
+        code: 'download_cancelled',
+        message: '下载已取消',
+      );
+    final state = CodexAppState(bridge)
+      ..availableUpdate = const MobileUpdateInfo(
+        versionName: '1.0.18',
+        tagName: 'mobile-build-v1.0.18',
+        releaseUrl: 'https://github.com/ddddx/codex-remote-windows/releases',
+        apkName: 'codex-remote-v1.0.18-arm64-v8a-sdk35-release.apk',
+        apkUrl: 'https://github.com/release.apk',
+      );
+    addTearDown(state.dispose);
+
+    await state.downloadAvailableUpdate();
+
+    expect(state.updateDownloading, isFalse);
+    expect(state.updateReadyToInstall, isFalse);
+    expect(state.hasUpdateDownloadProgress, isFalse);
+    expect(state.updateMessage, '下载已取消');
   });
 
   test('tracks update download progress and speed', () async {
@@ -880,8 +985,16 @@ void main() {
 class _TestBridge extends NativeBridge {
   final Map<String, String> values = {};
   final List<Map<String, Object?>> notifications = [];
+  final List<String> downloadedUrls = [];
+  final List<int> downloadedMaxConnections = [];
+  final List<String> installedApks = [];
   final StreamController<UpdateDownloadProgress> _downloadProgress =
       StreamController<UpdateDownloadProgress>.broadcast();
+  DownloadedApk downloadedApk = const DownloadedApk(
+    fileName: 'codex-remote-update.apk',
+    sizeBytes: 0,
+  );
+  Object? downloadError;
 
   @override
   Stream<UpdateDownloadProgress> get downloadProgress =>
@@ -906,6 +1019,29 @@ class _TestBridge extends NativeBridge {
 
   @override
   Future<PickedImage?> pickImage() async => null;
+
+  @override
+  Future<DownloadedApk> downloadUpdateApk({
+    required String url,
+    required String fileName,
+    required int maxConnections,
+  }) async {
+    downloadedUrls.add(url);
+    downloadedMaxConnections.add(maxConnections);
+    final error = downloadError;
+    if (error != null) {
+      throw error;
+    }
+    return downloadedApk;
+  }
+
+  @override
+  Future<void> installDownloadedApk({required String fileName}) async {
+    installedApks.add(fileName);
+  }
+
+  @override
+  Future<void> cancelUpdateDownload() async {}
 
   @override
   Future<void> requestNotificationPermission() async {}

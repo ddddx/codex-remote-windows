@@ -26,6 +26,20 @@ class AppVersionInfo {
   final int versionCode;
 }
 
+class DownloadedApk {
+  const DownloadedApk({required this.fileName, required this.sizeBytes});
+
+  factory DownloadedApk.fromMap(Map<dynamic, dynamic>? map) {
+    return DownloadedApk(
+      fileName: _readString(map?['fileName']),
+      sizeBytes: _readNonNegativeInt(map?['sizeBytes']),
+    );
+  }
+
+  final String fileName;
+  final int sizeBytes;
+}
+
 class UpdateDownloadProgress {
   const UpdateDownloadProgress({
     required this.status,
@@ -157,13 +171,37 @@ class NativeBridge {
     await _channel.invokeMethod<void>('openUrl', {'url': url});
   }
 
+  Future<DownloadedApk> downloadUpdateApk({
+    required String url,
+    required String fileName,
+    required int maxConnections,
+  }) async {
+    final result = await _channel.invokeMapMethod<String, Object?>(
+      'downloadUpdateApk',
+      {'url': url, 'fileName': fileName, 'maxConnections': maxConnections},
+    );
+    return DownloadedApk.fromMap(result);
+  }
+
+  Future<void> installDownloadedApk({required String fileName}) async {
+    await _channel.invokeMethod<void>('installDownloadedApk', {
+      'fileName': fileName,
+    });
+  }
+
+  Future<void> cancelUpdateDownload() async {
+    await _channel.invokeMethod<void>('cancelUpdateDownload');
+  }
+
   Future<void> downloadAndInstallApk({
     required String url,
     required String fileName,
+    required int maxConnections,
   }) async {
     await _channel.invokeMethod<void>('downloadAndInstallApk', {
       'url': url,
       'fileName': fileName,
+      'maxConnections': maxConnections,
     });
   }
 

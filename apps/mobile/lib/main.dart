@@ -2928,6 +2928,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final subtitle = update == null
         ? current
         : '$current · 最新 ${update.versionName}';
+    final packageName = state.updateDownloadedApkName.ifEmpty(
+      update?.apkName ?? '',
+    );
+    final statusLines = [
+      state.updateMessage.isEmpty ? subtitle : state.updateMessage,
+      if (packageName.isNotEmpty)
+        '${state.updateReadyToInstall ? '已下载' : '安装包'} $packageName',
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2940,9 +2948,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           title: Text(
             update == null ? '检查 GitHub 发布页' : '发现新版本 ${update.versionName}',
           ),
-          subtitle: Text(
-            state.updateMessage.isEmpty ? subtitle : state.updateMessage,
-          ),
+          subtitle: Text(statusLines.join('\n')),
         ),
         if (state.hasUpdateDownloadProgress) ...[
           LinearProgressIndicator(
@@ -2959,6 +2965,23 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
           const SizedBox(height: 8),
         ],
+        ListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.speed_outlined),
+          title: Text('下载线程 ${state.updateDownloadConnectionLimit}'),
+          subtitle: Slider(
+            value: state.updateDownloadConnectionLimit.toDouble(),
+            min: 1,
+            max: maxUpdateDownloadConnectionLimit.toDouble(),
+            divisions: maxUpdateDownloadConnectionLimit - 1,
+            label: '${state.updateDownloadConnectionLimit}',
+            onChanged: state.updateDownloading
+                ? null
+                : (value) =>
+                      state.setUpdateDownloadConnectionLimit(value.round()),
+          ),
+        ),
         Row(
           children: [
             Expanded(
@@ -2979,17 +3002,24 @@ class _SettingsSheetState extends State<_SettingsSheet> {
             Expanded(
               child: FilledButton.icon(
                 onPressed: state.updateDownloading
-                    ? null
+                    ? state.cancelUpdateDownload
+                    : state.updateReadyToInstall
+                    ? state.installDownloadedUpdate
                     : update == null
                     ? null
                     : state.downloadAvailableUpdate,
                 icon: state.updateDownloading
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                    ? const Icon(Icons.close)
+                    : state.updateReadyToInstall
+                    ? const Icon(Icons.system_update)
                     : const Icon(Icons.download),
-                label: const Text('下载安装'),
+                label: Text(
+                  state.updateDownloading
+                      ? '取消'
+                      : state.updateReadyToInstall
+                      ? '安装'
+                      : '下载',
+                ),
               ),
             ),
             const SizedBox(width: 8),

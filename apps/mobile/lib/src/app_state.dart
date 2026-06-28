@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'models.dart';
@@ -15,6 +17,8 @@ const String githubReleasePageUrl =
     'https://github.com/ddddx/codex-remote-windows/releases';
 const String githubLatestReleasePageUrl =
     'https://github.com/ddddx/codex-remote-windows/releases/latest';
+const int defaultUpdateDownloadConnectionLimit = 4;
+const int maxUpdateDownloadConnectionLimit = 8;
 
 class MobileUpdateInfo {
   const MobileUpdateInfo({
@@ -70,7 +74,10 @@ class CodexAppState extends ChangeNotifier {
   int updateDownloadBytesPerSecond = 0;
   bool updateDownloadAccelerated = false;
   int updateDownloadConnections = 1;
+  int updateDownloadConnectionLimit = defaultUpdateDownloadConnectionLimit;
   String updateDownloadStage = '';
+  bool updateReadyToInstall = false;
+  String updateDownloadedApkName = '';
   bool backgroundKeepAliveActive = false;
   bool appInForeground = true;
   String updateMessage = '';
@@ -146,7 +153,7 @@ class CodexAppState extends ChangeNotifier {
       updateDownloading ||
       updateDownloadedBytes > 0 ||
       updateTotalBytes > 0 ||
-      updateDownloadStage.isNotEmpty;
+      updateReadyToInstall;
 
   String get updateDownloadDetail {
     final parts = <String>[];
@@ -174,6 +181,11 @@ class CodexAppState extends ChangeNotifier {
     cookie = await bridge.getString('cookie') ?? '';
     activeSessionId = await bridge.getString('activeSessionId') ?? '';
     theme = await bridge.getString('theme') ?? 'paper';
+    updateDownloadConnectionLimit = normalizeUpdateDownloadConnectionLimit(
+      int.tryParse(
+        await bridge.getString('updateDownloadConnectionLimit') ?? '',
+      ),
+    );
     dismissedNoticeKeys = _decodeStringSet(
       await bridge.getString('dismissedNoticeKeys') ?? '',
     );
@@ -226,6 +238,19 @@ class CodexAppState extends ChangeNotifier {
   void setTheme(String value) {
     theme = value;
     unawaited(bridge.setString('theme', value));
+    notifyListeners();
+  }
+
+  void setUpdateDownloadConnectionLimit(int value) {
+    updateDownloadConnectionLimit = normalizeUpdateDownloadConnectionLimit(
+      value,
+    );
+    unawaited(
+      bridge.setString(
+        'updateDownloadConnectionLimit',
+        updateDownloadConnectionLimit.toString(),
+      ),
+    );
     notifyListeners();
   }
 
@@ -294,15 +319,55 @@ class CodexAppState extends ChangeNotifier {
     updateMessage = '正在准备下载 ${info.versionName}...';
     notifyListeners();
     try {
-      await bridge.downloadAndInstallApk(
+      final downloaded = await bridge.downloadUpdateApk(
         url: info.apkUrl,
         fileName: info.apkName,
+        maxConnections: updateDownloadConnectionLimit,
       );
+      updateDownloadedApkName = downloaded.fileName.ifEmpty(info.apkName);
+      updateReadyToInstall = updateDownloadedApkName.isNotEmpty;
+      updateMessage = updateReadyToInstall ? '安装包已下载，点击安装更新' : '下载完成';
+    } catch (error) {
+      if (_isDownloadCancelledError(error)) {
+        _resetUpdateDownloadProgress();
+        updateMessage = '下载已取消';
+      } else {
+        updateMessage = _friendlyErrorMessage(error);
+      }
+    } finally {
+      updateDownloading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> installDownloadedUpdate() async {
+    final fileName = updateDownloadedApkName.ifEmpty(
+      availableUpdate?.apkName ?? '',
+    );
+    if (fileName.isEmpty) {
+      updateMessage = '没有可安装的更新包';
+      notifyListeners();
+      return;
+    }
+    try {
+      await bridge.installDownloadedApk(fileName: fileName);
       updateMessage = '安装器已打开，请按系统提示完成安装';
     } catch (error) {
       updateMessage = _friendlyErrorMessage(error);
-    } finally {
-      updateDownloading = false;
+    }
+    notifyListeners();
+  }
+
+  Future<void> cancelUpdateDownload() async {
+    if (!updateDownloading) {
+      return;
+    }
+    updateMessage = '正在取消下载...';
+    notifyListeners();
+    try {
+      await bridge.cancelUpdateDownload();
+    } catch (error) {
+      updateMessage = _friendlyErrorMessage(error);
       notifyListeners();
     }
   }
@@ -322,8 +387,9 @@ class CodexAppState extends ChangeNotifier {
       updateMessage = switch (progress.status) {
         'preparing' => '正在准备下载...',
         'downloading' => '正在下载...',
-        'completed' => '下载完成，正在打开安装器...',
+        'completed' => '下载完成',
         'installing' => '正在打开安装器...',
+        'cancelled' => '下载已取消',
         _ => '正在下载...',
       };
     }
@@ -338,6 +404,8 @@ class CodexAppState extends ChangeNotifier {
     updateDownloadAccelerated = false;
     updateDownloadConnections = 1;
     updateDownloadStage = '';
+    updateReadyToInstall = false;
+    updateDownloadedApkName = '';
   }
 
   Future<MobileUpdateInfo> _fetchLatestRelease() async {
@@ -389,17 +457,18 @@ class CodexAppState extends ChangeNotifier {
       if (assets is! List) {
         throw ApiException('GitHub 发布页没有 APK 文件');
       }
-      JsonMap? selectedAsset;
-      for (final asset in assets.whereType<JsonMap>()) {
-        final name = readString(asset, 'name');
-        if (name.endsWith('.apk') && name.contains('-universal-')) {
-          selectedAsset = asset;
-          break;
-        }
-        if (selectedAsset == null && name.endsWith('.apk')) {
-          selectedAsset = asset;
-        }
-      }
+      final apkAssets = assets
+          .whereType<JsonMap>()
+          .where((asset) => readString(asset, 'name').endsWith('.apk'))
+          .toList(growable: false);
+      final selectedAssetName = selectBestMobileApkAssetName(
+        apkAssets.map((asset) => readString(asset, 'name')),
+      );
+      final selectedAsset = selectedAssetName.isEmpty
+          ? null
+          : apkAssets.firstWhere(
+              (asset) => readString(asset, 'name') == selectedAssetName,
+            );
       if (selectedAsset == null) {
         throw ApiException('GitHub 发布页没有可下载的 APK');
       }
@@ -524,6 +593,13 @@ class CodexAppState extends ChangeNotifier {
     if (error is TimeoutException) {
       return '连接超时，请确认电脑服务正在运行，并且手机能访问这个地址。';
     }
+    if (error is PlatformException) {
+      if (error.code == 'download_cancelled') {
+        return '下载已取消';
+      }
+      final message = error.message?.trim() ?? '';
+      return message.isEmpty ? '操作失败：${error.code}' : message;
+    }
     if (error is SocketException) {
       final message = error.message.toLowerCase();
       if (message.contains('failed host lookup')) {
@@ -545,6 +621,10 @@ class CodexAppState extends ChangeNotifier {
     }
     final text = error.toString();
     return text.isEmpty ? '连接失败，请检查服务地址和 Token。' : text;
+  }
+
+  bool _isDownloadCancelledError(Object error) {
+    return error is PlatformException && error.code == 'download_cancelled';
   }
 
   bool _usesAndroidLoopbackServerUrl() {
@@ -3690,6 +3770,11 @@ String formatByteCount(int bytes) {
   return '${scaled >= 100 ? scaled.toStringAsFixed(0) : scaled.toStringAsFixed(1)} ${units[unitIndex]}';
 }
 
+int normalizeUpdateDownloadConnectionLimit(int? value) {
+  final raw = value ?? defaultUpdateDownloadConnectionLimit;
+  return raw.clamp(1, maxUpdateDownloadConnectionLimit).toInt();
+}
+
 String extractVersionNameFromRelease({
   required String assetName,
   required String tagName,
@@ -3707,6 +3792,7 @@ String extractVersionNameFromRelease({
 MobileUpdateInfo? extractMobileUpdateInfoFromReleaseHtml({
   required String html,
   required String finalUrl,
+  Abi? currentAbi,
 }) {
   final links =
       RegExp(
@@ -3728,8 +3814,12 @@ MobileUpdateInfo? extractMobileUpdateInfoFromReleaseHtml({
   if (links.isEmpty) {
     return null;
   }
+  final selectedName = selectBestMobileApkAssetName(
+    links.map((asset) => asset['name'] ?? ''),
+    currentAbi: currentAbi,
+  );
   final selected = links.firstWhere(
-    (asset) => asset['name']!.contains('-universal-'),
+    (asset) => asset['name'] == selectedName,
     orElse: () => links.first,
   );
   final apkName = selected['name'] ?? '';
@@ -3756,6 +3846,49 @@ MobileUpdateInfo? extractMobileUpdateInfoFromReleaseHtml({
     apkName: apkName,
     apkUrl: apkUrl,
   );
+}
+
+String selectBestMobileApkAssetName(
+  Iterable<String> assetNames, {
+  Abi? currentAbi,
+}) {
+  final apks = assetNames
+      .map((name) => name.trim())
+      .where((name) => name.toLowerCase().endsWith('.apk'))
+      .toList(growable: false);
+  if (apks.isEmpty) {
+    return '';
+  }
+  final lowerByName = {for (final name in apks) name: name.toLowerCase()};
+  for (final marker in _preferredApkAbiMarkers(currentAbi ?? Abi.current())) {
+    for (final entry in lowerByName.entries) {
+      if (entry.value.contains(marker)) {
+        return entry.key;
+      }
+    }
+  }
+  for (final entry in lowerByName.entries) {
+    if (entry.value.contains('-universal-')) {
+      return entry.key;
+    }
+  }
+  return apks.first;
+}
+
+List<String> _preferredApkAbiMarkers(Abi abi) {
+  if (abi == Abi.androidArm64) {
+    return const ['-arm64-v8a-', '-arm64-'];
+  }
+  if (abi == Abi.androidArm) {
+    return const ['-armeabi-v7a-', '-armv7-', '-arm-'];
+  }
+  if (abi == Abi.androidX64) {
+    return const ['-x86_64-', '-x64-'];
+  }
+  if (abi == Abi.androidIA32) {
+    return const ['-x86-', '-ia32-'];
+  }
+  return const [];
 }
 
 String _absoluteGithubUrl(String href) {

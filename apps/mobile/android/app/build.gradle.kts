@@ -66,3 +66,11 @@ android {
 flutter {
     source = "../.."
 }
+
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.versionCode.set(output.versionCode.get() * 10000)
+        }
+    }
+}
