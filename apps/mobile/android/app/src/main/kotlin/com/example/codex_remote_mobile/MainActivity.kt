@@ -41,8 +41,9 @@ class MainActivity : FlutterActivity() {
     private val notificationPermissionRequestCode = 42019
     private val taskNotificationChannelId = "codex_remote_task_events"
     private val downloadExecutor = Executors.newSingleThreadExecutor()
-    private val maxDownloadConnections = 8
+    private val maxDownloadConnections = 64
     private val acceleratedDownloadMinBytes = 8L * 1024L * 1024L
+    private val acceleratedDownloadRangeBytes = 1L * 1024L * 1024L
     private val progressIntervalMs = 250L
     private var pendingPickResult: MethodChannel.Result? = null
     private lateinit var nativeChannel: MethodChannel
@@ -573,7 +574,9 @@ class MainActivity : FlutterActivity() {
         control.throwIfCancelled()
         val connections = min(
             maxConnections,
-            ((totalBytes + acceleratedDownloadMinBytes - 1) / acceleratedDownloadMinBytes).toInt().coerceAtLeast(1),
+            ((totalBytes + acceleratedDownloadRangeBytes - 1) / acceleratedDownloadRangeBytes)
+                .toInt()
+                .coerceAtLeast(1),
         )
         if (connections <= 1) {
             return false

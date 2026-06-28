@@ -47,6 +47,31 @@ void main() {
     expect(info.apkUrl, contains('arm64-v8a'));
   });
 
+  test('extracts GitHub expanded assets URL from lazy release page', () {
+    final url = extractGithubExpandedAssetsUrl(
+      finalUrl:
+          'https://github.com/ddddx/codex-remote-windows/releases/tag/mobile-build-v1.0.18-7-abcdef',
+      html: '''
+        <include-fragment
+          src="https://github.com/ddddx/codex-remote-windows/releases/expanded_assets/mobile-build-v1.0.18-7-abcdef">
+        </include-fragment>
+      ''',
+    );
+
+    expect(
+      url,
+      'https://github.com/ddddx/codex-remote-windows/releases/expanded_assets/mobile-build-v1.0.18-7-abcdef',
+    );
+    expect(
+      extractGithubExpandedAssetsUrl(
+        html: '<html></html>',
+        finalUrl:
+            'https://github.com/ddddx/codex-remote-windows/releases/tag/mobile-build-v1.0.18-7-abcdef',
+      ),
+      url,
+    );
+  });
+
   test(
     'selects release apk by current Android ABI before universal fallback',
     () {
@@ -85,12 +110,13 @@ void main() {
 
     expect(normalizeUpdateDownloadConnectionLimit(null), 4);
     expect(normalizeUpdateDownloadConnectionLimit(0), 1);
-    expect(normalizeUpdateDownloadConnectionLimit(99), 8);
+    expect(normalizeUpdateDownloadConnectionLimit(32), 32);
+    expect(normalizeUpdateDownloadConnectionLimit(99), 64);
 
-    state.setUpdateDownloadConnectionLimit(6);
+    state.setUpdateDownloadConnectionLimit(32);
 
-    expect(state.updateDownloadConnectionLimit, 6);
-    expect(bridge.values['updateDownloadConnectionLimit'], '6');
+    expect(state.updateDownloadConnectionLimit, 32);
+    expect(bridge.values['updateDownloadConnectionLimit'], '32');
   });
 
   test('downloads update before opening installer', () async {

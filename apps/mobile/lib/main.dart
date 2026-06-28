@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/app_state.dart';
 import 'src/models.dart';
@@ -2965,23 +2966,7 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
           const SizedBox(height: 8),
         ],
-        ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.speed_outlined),
-          title: Text('下载线程 ${state.updateDownloadConnectionLimit}'),
-          subtitle: Slider(
-            value: state.updateDownloadConnectionLimit.toDouble(),
-            min: 1,
-            max: maxUpdateDownloadConnectionLimit.toDouble(),
-            divisions: maxUpdateDownloadConnectionLimit - 1,
-            label: '${state.updateDownloadConnectionLimit}',
-            onChanged: state.updateDownloading
-                ? null
-                : (value) =>
-                      state.setUpdateDownloadConnectionLimit(value.round()),
-          ),
-        ),
+        _UpdateDownloadThreadsControl(state: state),
         Row(
           children: [
             Expanded(
@@ -3031,6 +3016,126 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ],
         ),
       ],
+    );
+  }
+}
+
+class _UpdateDownloadThreadsControl extends StatefulWidget {
+  const _UpdateDownloadThreadsControl({required this.state});
+
+  final CodexAppState state;
+
+  @override
+  State<_UpdateDownloadThreadsControl> createState() =>
+      _UpdateDownloadThreadsControlState();
+}
+
+class _UpdateDownloadThreadsControlState
+    extends State<_UpdateDownloadThreadsControl> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  CodexAppState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: state.updateDownloadConnectionLimit.toString(),
+    );
+    _focusNode = FocusNode()..addListener(_handleFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _UpdateDownloadThreadsControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focusNode.hasFocus) {
+      _syncText();
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChanged() {
+    if (!_focusNode.hasFocus) {
+      _commitText();
+    }
+  }
+
+  void _syncText() {
+    final next = state.updateDownloadConnectionLimit.toString();
+    if (_controller.text == next) {
+      return;
+    }
+    _controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: next.length),
+    );
+  }
+
+  void _commitText() {
+    final parsed = int.tryParse(_controller.text.trim());
+    state.setUpdateDownloadConnectionLimit(
+      parsed ?? defaultUpdateDownloadConnectionLimit,
+    );
+    _syncText();
+  }
+
+  void _handleInputChanged(String value) {
+    final parsed = int.tryParse(value.trim());
+    if (parsed != null) {
+      state.setUpdateDownloadConnectionLimit(parsed);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = !state.updateDownloading;
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(Icons.speed_outlined),
+      title: Text('下载线程 ${state.updateDownloadConnectionLimit}'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Slider(
+            value: state.updateDownloadConnectionLimit.toDouble(),
+            min: 1,
+            max: maxUpdateDownloadConnectionLimit.toDouble(),
+            divisions: maxUpdateDownloadConnectionLimit - 1,
+            label: '${state.updateDownloadConnectionLimit}',
+            onChanged: enabled
+                ? (value) =>
+                      state.setUpdateDownloadConnectionLimit(value.round())
+                : null,
+          ),
+          SizedBox(
+            width: 150,
+            child: TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              enabled: enabled,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(
+                isDense: true,
+                labelText: '自定义',
+                suffixText: '线程',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: _handleInputChanged,
+              onSubmitted: (_) => _commitText(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

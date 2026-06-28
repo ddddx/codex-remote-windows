@@ -18,7 +18,7 @@ const String githubReleasePageUrl =
 const String githubLatestReleasePageUrl =
     'https://github.com/ddddx/codex-remote-windows/releases/latest';
 const int defaultUpdateDownloadConnectionLimit = 4;
-const int maxUpdateDownloadConnectionLimit = 8;
+const int maxUpdateDownloadConnectionLimit = 64;
 
 class MobileUpdateInfo {
   const MobileUpdateInfo({
@@ -409,21 +409,21 @@ class CodexAppState extends ChangeNotifier {
   }
 
   Future<MobileUpdateInfo> _fetchLatestRelease() async {
-    Object? apiError;
-    try {
-      return await _fetchLatestReleaseFromApi();
-    } catch (error) {
-      apiError = error;
-    }
+    late Object pageError;
     try {
       return await _fetchLatestReleaseFromHtml();
     } catch (error) {
-      if (apiError is ApiException) {
-        throw ApiException(
-          '${apiError.message}；备用发布页检查也失败：${_friendlyErrorMessage(error)}',
-        );
-      }
-      throw error;
+      pageError = error;
+    }
+    try {
+      return await _fetchLatestReleaseFromApi();
+    } catch (error) {
+      throw ApiException(
+        _mergeUniqueMessages([
+          _friendlyErrorMessage(pageError),
+          _friendlyErrorMessage(error),
+        ]),
+      );
     }
   }
 
@@ -447,7 +447,7 @@ class CodexAppState extends ChangeNotifier {
           .join()
           .timeout(const Duration(seconds: 12));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ApiException('检查更新失败：HTTP ${response.statusCode}');
+        throw ApiException(githubUpdateHttpErrorMessage(response.statusCode));
       }
       final decoded = jsonDecode(text);
       if (decoded is! JsonMap) {
@@ -518,7 +518,7 @@ class CodexAppState extends ChangeNotifier {
           .join()
           .timeout(const Duration(seconds: 12));
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw ApiException('检查 GitHub 发布页失败：HTTP ${response.statusCode}');
+        throw ApiException(githubUpdateHttpErrorMessage(response.statusCode));
       }
       final finalUrl = response.redirects.isNotEmpty
           ? response.redirects.last.location.toString()
@@ -527,10 +527,44 @@ class CodexAppState extends ChangeNotifier {
         html: text,
         finalUrl: finalUrl,
       );
-      if (info == null) {
-        throw ApiException('GitHub 发布页没有可下载的 APK');
+      if (info != null) {
+        return info;
       }
-      return info;
+      final expandedAssetsUrl = extractGithubExpandedAssetsUrl(
+        html: text,
+        finalUrl: finalUrl,
+      );
+      if (expandedAssetsUrl.isNotEmpty) {
+        final expandedRequest = await client
+            .getUrl(Uri.parse(expandedAssetsUrl))
+            .timeout(const Duration(seconds: 12));
+        expandedRequest.headers.set(HttpHeaders.acceptHeader, 'text/html');
+        expandedRequest.headers.set(
+          HttpHeaders.userAgentHeader,
+          'CodexRemoteMobile',
+        );
+        final expandedResponse = await expandedRequest.close().timeout(
+          const Duration(seconds: 12),
+        );
+        final expandedText = await expandedResponse
+            .transform(utf8.decoder)
+            .join()
+            .timeout(const Duration(seconds: 12));
+        if (expandedResponse.statusCode < 200 ||
+            expandedResponse.statusCode >= 300) {
+          throw ApiException(
+            githubUpdateHttpErrorMessage(expandedResponse.statusCode),
+          );
+        }
+        final expandedInfo = extractMobileUpdateInfoFromReleaseHtml(
+          html: expandedText,
+          finalUrl: finalUrl,
+        );
+        if (expandedInfo != null) {
+          return expandedInfo;
+        }
+      }
+      throw ApiException('GitHub 发布页没有可下载的 APK');
     } finally {
       client.close(force: true);
     }
@@ -3848,6 +3882,30 @@ MobileUpdateInfo? extractMobileUpdateInfoFromReleaseHtml({
   );
 }
 
+String extractGithubExpandedAssetsUrl({
+  required String html,
+  required String finalUrl,
+}) {
+  final match =
+      RegExp(
+        r'''src=["']([^"']*?/ddddx/codex-remote-windows/releases/expanded_assets/[^"']+)["']''',
+        caseSensitive: false,
+      ).firstMatch(html) ??
+      RegExp(
+        r'''["']([^"']*?/ddddx/codex-remote-windows/releases/expanded_assets/[^"']+)["']''',
+        caseSensitive: false,
+      ).firstMatch(html);
+  if (match != null) {
+    final src = _decodeBasicHtmlEntities(match.group(1) ?? '');
+    return _absoluteGithubUrl(src);
+  }
+  final tagName = _releaseTagFromUrl(finalUrl);
+  if (tagName.isEmpty) {
+    return '';
+  }
+  return 'https://github.com/ddddx/codex-remote-windows/releases/expanded_assets/$tagName';
+}
+
 String selectBestMobileApkAssetName(
   Iterable<String> assetNames, {
   Abi? currentAbi,
@@ -3943,6 +4001,27 @@ String _decodeBasicHtmlEntities(String value) {
       .replaceAll('&#39;', "'")
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>');
+}
+
+String githubUpdateHttpErrorMessage(int statusCode) {
+  if (statusCode == 403) {
+    return 'GitHub 暂时拒绝更新检查（HTTP 403），请稍后重试或打开发布页查看。';
+  }
+  if (statusCode == 404) {
+    return '没有找到 GitHub 发布页。';
+  }
+  return '检查更新失败：HTTP $statusCode';
+}
+
+String _mergeUniqueMessages(Iterable<String> messages) {
+  final unique = <String>[];
+  for (final message in messages) {
+    final trimmed = message.trim();
+    if (trimmed.isNotEmpty && !unique.contains(trimmed)) {
+      unique.add(trimmed);
+    }
+  }
+  return unique.isEmpty ? '检查更新失败。' : unique.join('；');
 }
 
 int compareVersionNames(String left, String right) {
