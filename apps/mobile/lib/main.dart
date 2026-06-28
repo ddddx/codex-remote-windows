@@ -222,7 +222,6 @@ class _AppShellState extends State<AppShell> {
     final parts = [
       state.connectionStatus,
       state.healthStatus == 'ok' ? '服务正常' : state.healthStatus,
-      if (state.isWorking) state.workingLabel,
     ].where((item) => item.isNotEmpty).join(' · ');
     return parts;
   }
@@ -771,57 +770,32 @@ class _WorkingStatusBanner extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: colors.primaryContainer,
-        borderRadius: BorderRadius.circular(8),
+        color: colors.primaryContainer.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+      child: Row(
         children: [
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 5,
-            child: ColoredBox(color: colors.primary),
+          SizedBox.square(
+            dimension: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: colors.primary,
+            ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-            child: Row(
-              children: [
-                SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: colors.primary,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '正在执行任务',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: colors.onPrimaryContainer,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (label.trim().isNotEmpty)
-                        Text(
-                          label,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: colors.onPrimaryContainer),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label.trim().isEmpty ? '正在执行任务' : '正在执行任务 · $label',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colors.onPrimaryContainer,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -840,11 +814,11 @@ class _TimelineStatusBadge extends StatelessWidget {
     final foreground = _timelineStatusForeground(context, entry);
     final running = _isRunningEntry(entry);
     return Container(
-      constraints: const BoxConstraints(minHeight: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(minHeight: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: _timelineStatusBackground(context, entry),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(5),
         border: running
             ? null
             : Border.all(color: Theme.of(context).colorScheme.outlineVariant),
@@ -854,15 +828,15 @@ class _TimelineStatusBadge extends StatelessWidget {
         children: [
           if (running)
             SizedBox.square(
-              dimension: 12,
+              dimension: 10,
               child: CircularProgressIndicator(
-                strokeWidth: 2,
+                strokeWidth: 1.8,
                 color: foreground,
               ),
             )
           else
-            Icon(_entryStateIcon(entry), size: 14, color: foreground),
-          const SizedBox(width: 5),
+            Icon(_entryStateIcon(entry), size: 12, color: foreground),
+          const SizedBox(width: 4),
           Text(
             _timelineStatusLabel(entry),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
@@ -1090,7 +1064,6 @@ class _ProcessTimelineCard extends StatefulWidget {
 }
 
 class _ProcessTimelineCardState extends State<_ProcessTimelineCard> {
-  final ExpansibleController _controller = ExpansibleController();
   bool _expanded = false;
 
   @override
@@ -1099,116 +1072,110 @@ class _ProcessTimelineCardState extends State<_ProcessTimelineCard> {
     final details = _processDetailWidgets(context, entry);
     final title = _processHeadline(entry);
     final summary = _processPreview(entry);
+    final expandable = details.isNotEmpty;
+    final colors = Theme.of(context).colorScheme;
+    final markerColor = _timelineStateColor(context, entry);
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.sizeOf(context).width * 0.96,
         ),
-        child: Card(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+          decoration: BoxDecoration(
+            color: _processColor(context, entry),
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: colors.outlineVariant),
+          ),
           clipBehavior: Clip.antiAlias,
-          elevation: _isRunningEntry(entry) ? 2 : 0,
-          color: _processColor(context, entry),
-          child: Stack(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: 5,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: _timelineStateColor(context, entry),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 5),
-                child: details.isEmpty
-                    ? ListTile(
-                        dense: true,
-                        leading: Icon(
-                          _entryStateIcon(entry),
-                          size: 18,
-                          color: _timelineStateColor(context, entry),
+              InkWell(
+                onTap: expandable
+                    ? () => setState(() {
+                        _expanded = !_expanded;
+                      })
+                    : null,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(9, 7, 7, 7),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 3,
+                        height: summary.isEmpty ? 24 : 34,
+                        decoration: BoxDecoration(
+                          color: markerColor,
+                          borderRadius: BorderRadius.circular(3),
                         ),
-                        title: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: summary.isEmpty
-                            ? null
-                            : Text(
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        _entryStateIcon(entry),
+                        size: 16,
+                        color: markerColor,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              title,
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (summary.isNotEmpty)
+                              Text(
                                 summary,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: colors.onSurfaceVariant),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                        trailing: _TimelineStatusBadge(entry: entry),
-                      )
-                    : Theme(
-                        data: Theme.of(
-                          context,
-                        ).copyWith(dividerColor: Colors.transparent),
-                        child: ExpansionTile(
-                          controller: _controller,
-                          onExpansionChanged: (value) {
-                            setState(() {
-                              _expanded = value;
-                            });
-                          },
-                          tilePadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 2,
-                          ),
-                          childrenPadding: const EdgeInsets.fromLTRB(
-                            12,
-                            0,
-                            12,
-                            12,
-                          ),
-                          leading: Icon(
-                            _entryStateIcon(entry),
-                            size: 18,
-                            color: _timelineStateColor(context, entry),
-                          ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              _TimelineStatusBadge(entry: entry),
-                            ],
-                          ),
-                          subtitle: summary.isEmpty
-                              ? null
-                              : Text(
-                                  summary,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                          children: [
-                            GestureDetector(
-                              behavior: HitTestBehavior.translucent,
-                              onTap: () {
-                                if (_expanded) {
-                                  _controller.collapse();
-                                }
-                              },
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: details,
-                              ),
-                            ),
                           ],
                         ),
                       ),
+                      const SizedBox(width: 6),
+                      _TimelineStatusBadge(entry: entry),
+                      if (expandable) ...[
+                        const SizedBox(width: 2),
+                        Icon(
+                          _expanded
+                              ? Icons.keyboard_arrow_up
+                              : Icons.keyboard_arrow_down,
+                          size: 18,
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
+              if (expandable && _expanded)
+                GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: () => setState(() {
+                    _expanded = false;
+                  }),
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: colors.outlineVariant),
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 9),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: details,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1322,16 +1289,17 @@ String _timelineStatusLabel(TimelineEntry entry) {
 }
 
 Color _processColor(BuildContext context, TimelineEntry entry) {
+  final colors = Theme.of(context).colorScheme;
   if (_isRunningEntry(entry)) {
-    return Theme.of(context).colorScheme.primaryContainer;
+    return colors.primaryContainer.withValues(alpha: 0.28);
   }
   if (_isErrorEntry(entry)) {
-    return Theme.of(context).colorScheme.errorContainer;
+    return colors.errorContainer.withValues(alpha: 0.38);
   }
   if (_isWarningEntry(entry)) {
-    return Theme.of(context).colorScheme.tertiaryContainer;
+    return colors.tertiaryContainer.withValues(alpha: 0.34);
   }
-  return Theme.of(context).colorScheme.surfaceContainerLow;
+  return colors.surfaceContainerLow;
 }
 
 String _processHeadline(TimelineEntry entry) {

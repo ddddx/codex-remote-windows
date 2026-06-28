@@ -110,8 +110,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('正在执行任务'), findsOneWidget);
-    expect(find.textContaining('Working'), findsAtLeastNWidgets(1));
+    expect(find.textContaining('正在执行任务'), findsOneWidget);
+    expect(find.textContaining('Working'), findsOneWidget);
+    expect(find.textContaining('connected · 服务正常 · Working'), findsNothing);
     expect(find.text('运行中'), findsOneWidget);
     expect(find.text('完成'), findsOneWidget);
   });
