@@ -44,6 +44,7 @@ type RequestResponseMap = {
   'thread/resume': v2.ThreadResumeResponse;
   'thread/settings/update': v2.ThreadSettingsUpdateResponse;
   'turn/start': v2.TurnStartResponse;
+  'thread/realtime/appendSpeech': v2.ThreadRealtimeAppendSpeechResponse;
   'thread/shellCommand': v2.ThreadShellCommandResponse;
   'thread/compact/start': v2.ThreadCompactStartResponse;
   'thread/backgroundTerminals/clean': v2.ThreadBackgroundTerminalsCleanResponse;
@@ -422,6 +423,10 @@ export class CodexAppServerClient extends EventEmitter {
       threadId,
       command,
     });
+  }
+
+  async appendRealtimeSpeech(threadId: string, text: string): Promise<v2.ThreadRealtimeAppendSpeechResponse> {
+    return this.request('thread/realtime/appendSpeech', { threadId, text });
   }
 
   async compactThread(threadId: string): Promise<ThreadCompactStartResponse> {

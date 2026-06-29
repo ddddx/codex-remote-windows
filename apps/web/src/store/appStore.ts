@@ -1851,6 +1851,7 @@ function shouldDisplayGenericNotification(method: string): boolean {
     method === 'account/rateLimits/updated'
     || method === 'skills/changed'
     || method === 'thread/settings/updated'
+    || method === 'externalAgentConfig/import/progress'
   ) {
     return false;
   }

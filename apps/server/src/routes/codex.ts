@@ -18,9 +18,12 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     const { threadId } = request.params as { threadId: string };
     const query = request.query as { cursor?: string; limit?: string | number };
     const rawLimit = typeof query.limit === 'number' ? query.limit : Number.parseInt(String(query.limit || ''), 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(Math.floor(rawLimit), 100)
+      : null;
     return app.codexClient.listBackgroundTerminals(threadId, {
       cursor: query.cursor || null,
-      limit: Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : null,
+      limit,
     });
   });
 
@@ -35,12 +38,15 @@ export async function registerCodexRoutes(app: FastifyInstance): Promise<void> {
     return app.codexClient.readWorkspaceMessages();
   });
 
-  app.post('/api/codex/rate-limit-reset-credit/consume', { preHandler: app.requireAuth }, async (request) => {
+  app.post('/api/codex/rate-limit-reset-credit/consume', { preHandler: app.requireAuth }, async (request, reply) => {
     await ensureCodexReady(app);
     const body = request.body as { idempotencyKey?: string };
     const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '';
     if (!idempotencyKey) {
-      throw new Error('idempotencyKey is required');
+      return reply.code(400).send({
+        code: 'BAD_REQUEST',
+        message: 'idempotencyKey is required',
+      });
     }
     return app.codexClient.consumeRateLimitResetCredit(idempotencyKey);
   });

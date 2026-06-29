@@ -69,6 +69,24 @@ function createCodexStub() {
     async readConfig() {
       return { config: {} };
     },
+    async listBackgroundTerminals() {
+      return { data: [], nextCursor: null };
+    },
+    async terminateBackgroundTerminal() {
+      return { terminated: true };
+    },
+    async deleteThread() {
+      return {};
+    },
+    async readWorkspaceMessages() {
+      return { featureEnabled: true, messages: [] };
+    },
+    async consumeRateLimitResetCredit() {
+      return { outcome: 'nothingToReset' };
+    },
+    async readExternalAgentImportHistories() {
+      return { data: [] };
+    },
     respond() {},
     respondError() {},
     on() {},
@@ -421,5 +439,50 @@ test('codex options fills effective defaults when config values are empty', asyn
   assert.equal(payload.defaults.reasoningEffort, 'medium');
   assert.equal(payload.defaults.approvalPolicy, 'on-request');
   assert.equal(payload.defaults.sandboxMode, 'workspace-write');
+  await app.close();
+});
+
+test('codex background terminals route clamps requested page size', async () => {
+  const app = await buildTestApp();
+  const cookie = await createAuthCookie(app);
+  const calls: unknown[] = [];
+  app.codexClient = {
+    ...app.codexClient,
+    async listBackgroundTerminals(threadId: string, options: unknown) {
+      calls.push({ threadId, options });
+      return { data: [], nextCursor: null };
+    },
+  } as any;
+
+  const response = await app.inject({
+    method: 'GET',
+    url: '/api/codex/threads/thread-bg/background-terminals?limit=999&cursor=abc',
+    headers: { cookie },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls[0], {
+    threadId: 'thread-bg',
+    options: { cursor: 'abc', limit: 100 },
+  });
+  await app.close();
+});
+
+test('rate limit reset consume requires an idempotency key', async () => {
+  const app = await buildTestApp();
+  const cookie = await createAuthCookie(app);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/codex/rate-limit-reset-credit/consume',
+    headers: {
+      cookie,
+      'content-type': 'application/json',
+    },
+    payload: {},
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().message, 'idempotencyKey is required');
   await app.close();
 });

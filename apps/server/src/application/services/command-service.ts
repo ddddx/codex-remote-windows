@@ -193,7 +193,6 @@ export function createCommandService(app: FastifyInstance) {
 
       if (parsed.name === 'delete') {
         await app.codexClient.deleteThread(message.threadId);
-        notifyCommandResult(app, message.threadId, '会话已删除。');
         return;
       }
 

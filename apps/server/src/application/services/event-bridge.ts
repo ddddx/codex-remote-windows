@@ -216,6 +216,11 @@ function removeRuntimeThread(app: FastifyInstance, threadId: string): void {
     if (request.threadId === threadId) {
       app.runtimeState.serverRequestsById.delete(requestId);
       app.repositories.pendingRequests.removePendingRequest(requestId);
+      broadcastMessage(app, {
+        type: 'server_request_resolved',
+        requestId,
+        threadId,
+      });
     }
   }
   app.repositories.sessions.removeSession(threadId);
@@ -688,15 +693,6 @@ export function handleCodexNotification(
 
   if (method === 'thread/archived' || method === 'thread/unarchived') {
     broadcastGenericThreadEvent(app, method, params);
-    return;
-  }
-
-  if (method === 'externalAgentConfig/import/progress') {
-    broadcastMessage(app, {
-      type: 'notification',
-      method,
-      params,
-    });
     return;
   }
 

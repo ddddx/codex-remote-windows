@@ -827,8 +827,10 @@ test('thread/deleted notifications remove local tab and pending thread requests'
   assert.equal(app.runtimeState.serverRequestsById.has('request-delete'), false);
   assert.deepEqual(calls.removeSession, ['thread-delete']);
   assert.deepEqual(calls.removePendingRequest, ['request-delete']);
-  assert.equal((socket.sent[0] as any)?.type, 'tab_removed');
-  assert.equal((socket.sent[0] as any)?.threadId, 'thread-delete');
+  assert.equal((socket.sent[0] as any)?.type, 'server_request_resolved');
+  assert.equal((socket.sent[0] as any)?.requestId, 'request-delete');
+  assert.equal((socket.sent[1] as any)?.type, 'tab_removed');
+  assert.equal((socket.sent[1] as any)?.threadId, 'thread-delete');
 });
 
 test('model/safetyBuffering/updated is reflected as running timeline state', () => {

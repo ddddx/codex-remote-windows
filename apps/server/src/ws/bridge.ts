@@ -73,9 +73,16 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
   app.codexClient.on('server_request', (msg: ServerRequest) => {
     try {
       if (msg.method === 'currentTime/read') {
-        app.codexClient.respond(msg.id, {
-          currentTimeAt: Math.floor(Date.now() / 1000),
-        });
+        try {
+          app.codexClient.respond(msg.id, {
+            currentTimeAt: Math.floor(Date.now() / 1000),
+          });
+        } catch (error) {
+          app.codexClient.respondError(msg.id, {
+            code: -32603,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
         return;
       }
 

@@ -3038,7 +3038,8 @@ class CodexAppState extends ChangeNotifier {
     final params = message['params'];
     if (method == 'account/rateLimits/updated' ||
         method == 'skills/changed' ||
-        method == 'thread/settings/updated') {
+        method == 'thread/settings/updated' ||
+        method == 'externalAgentConfig/import/progress') {
       return;
     }
     final paramsMap = params is JsonMap ? params : const <String, dynamic>{};

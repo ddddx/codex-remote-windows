@@ -82,6 +82,10 @@ type CodexClientLike = {
     threadId: string,
     command: string,
   ) => Promise<unknown>;
+  appendRealtimeSpeech: (
+    threadId: string,
+    text: string,
+  ) => Promise<unknown>;
   compactThread: (threadId: string) => Promise<unknown>;
   stopBackgroundTerminals: (threadId: string) => Promise<unknown>;
   listBackgroundTerminals: (
