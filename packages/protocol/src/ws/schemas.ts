@@ -404,6 +404,12 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
     threadId: z.string(),
   }),
   z.object({
+    type: z.literal('thread_history_load'),
+    threadId: z.string(),
+    cursor: z.string().nullable().optional(),
+    limit: z.number().optional(),
+  }),
+  z.object({
     type: z.literal('thread_options_update'),
     threadId: z.string(),
     model: z.string().optional(),
@@ -466,6 +472,17 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
     turnPlans: z.array(turnPlanSchema).optional(),
     turnDiffs: z.array(turnDiffSchema).optional(),
     timelineEvents: z.array(sequencedTimelineEventSchema).optional(),
+    historyCursor: z.string().nullable().optional(),
+    hasMoreHistory: z.boolean().optional(),
+  }),
+  z.object({
+    type: z.literal('thread_history'),
+    threadId: z.string(),
+    turns: z.array(threadTurnSchema).optional(),
+    turnPlans: z.array(turnPlanSchema).optional(),
+    turnDiffs: z.array(turnDiffSchema).optional(),
+    historyCursor: z.string().nullable().optional(),
+    hasMoreHistory: z.boolean().optional(),
   }),
   z.object({
     type: z.literal('turn_started'),

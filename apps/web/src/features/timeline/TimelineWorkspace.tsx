@@ -23,6 +23,7 @@ import { useAppStore, type ServerRequestItem, type TimelineEntry } from '../../s
 
 type TimelineWorkspaceProps = {
   onRespondApproval: (request: ServerRequestItem, response: unknown) => void;
+  onLoadMoreHistory?: (threadId: string, cursor: string | null) => void;
   homeAside?: React.ReactNode;
 };
 
@@ -1392,7 +1393,7 @@ const ApprovalCard = memo(function ApprovalCard({
   );
 });
 
-export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWorkspaceProps) {
+export function TimelineWorkspace({ onRespondApproval, onLoadMoreHistory, homeAside }: TimelineWorkspaceProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const lastSignatureRef = useRef('');
   const lastSessionIdRef = useRef<string | null>(null);
@@ -1411,6 +1412,16 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
     state.sessions.activeSessionId
       ? (state.timeline.entriesBySessionId[state.sessions.activeSessionId] || EMPTY_TIMELINE_ENTRIES)
       : EMPTY_TIMELINE_ENTRIES
+  ));
+  const historyCursor = useAppStore((state) => (
+    state.sessions.activeSessionId
+      ? state.timeline.historyCursorBySessionId[state.sessions.activeSessionId] ?? null
+      : null
+  ));
+  const hasMoreRemoteHistory = useAppStore((state) => (
+    state.sessions.activeSessionId
+      ? Boolean(state.timeline.hasMoreHistoryBySessionId[state.sessions.activeSessionId])
+      : false
   ));
   const health = useAppStore((state) => state.health.data);
   const error = useAppStore((state) => state.health.error || state.connection.error || '');
@@ -1534,16 +1545,23 @@ export function TimelineWorkspace({ onRespondApproval, homeAside }: TimelineWork
             <div className={`status-chip${turnState?.active ? ' running' : ''}`}>
               {turnState?.active ? '运行中' : '空闲'}
             </div>
-            {hiddenRenderableCount ? (
+            {hasMoreRemoteHistory || hiddenRenderableCount ? (
               <button
                 type="button"
                 className="btn btn-secondary timeline-load-more"
                 onClick={() => {
                   stickToBottomRef.current = false;
+                  if (activeSessionId && hasMoreRemoteHistory && onLoadMoreHistory) {
+                    onLoadMoreHistory(activeSessionId, historyCursor);
+                    setRenderLimit((value) => value + RENDERABLE_PAGE_SIZE);
+                    return;
+                  }
                   setRenderLimit((value) => value + RENDERABLE_PAGE_SIZE);
                 }}
               >
-                {`加载更早 ${Math.min(hiddenRenderableCount, RENDERABLE_PAGE_SIZE)} 条`}
+                {hasMoreRemoteHistory
+                  ? '加载更早历史'
+                  : `加载更早 ${Math.min(hiddenRenderableCount, RENDERABLE_PAGE_SIZE)} 条`}
               </button>
             ) : null}
           </div>

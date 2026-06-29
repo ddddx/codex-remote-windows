@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AuthSession, CodexOptionsResponse, HealthResponse } from '@codex-remote/protocol';
 import { ComposerDock } from '../features/composer/ComposerDock.js';
 import { SessionRail } from '../features/sessions/SessionRail.js';
@@ -352,6 +352,7 @@ export function App() {
   const [composerResetSignal, setComposerResetSignal] = useState(0);
   const previousConnectionStatusRef = useRef(connectionStatus);
   const needsForegroundThreadSyncRef = useRef(false);
+  const pendingHistoryLoadsRef = useRef(new Set<string>());
   const lastSyncedPrefsRef = useRef<Record<string, string>>({});
   const sessionNameInputRef = useRef<HTMLInputElement | null>(null);
   const tokenInputRef = useRef<HTMLInputElement | null>(null);
@@ -564,6 +565,22 @@ export function App() {
       threadId: activeSessionId,
     });
   }, [activeSessionId, socketClient]);
+
+  const loadMoreThreadHistory = useCallback((threadId: string, cursor: string | null) => {
+    const key = `${threadId}:${cursor || ''}`;
+    if (pendingHistoryLoadsRef.current.has(key)) {
+      return;
+    }
+    pendingHistoryLoadsRef.current.add(key);
+    socketClient.send({
+      type: 'thread_history_load',
+      threadId,
+      cursor,
+    });
+    window.setTimeout(() => {
+      pendingHistoryLoadsRef.current.delete(key);
+    }, 5_000);
+  }, [socketClient]);
 
   useEffect(() => {
     const previousStatus = previousConnectionStatusRef.current;
@@ -1026,6 +1043,7 @@ export function App() {
             ) : null}
             <TimelineWorkspace
               onRespondApproval={respondApproval}
+              onLoadMoreHistory={loadMoreThreadHistory}
               homeAside={!resolvedActiveSessionId ? (
                 <div className="home-settings-stack">
                   <article className="home-settings-card">

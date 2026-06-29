@@ -34,6 +34,12 @@ export type ClientMessage =
     threadId: string;
   }
   | {
+    type: 'thread_history_load';
+    threadId: string;
+    cursor?: string | null;
+    limit?: number;
+  }
+  | {
     type: 'thread_options_update';
     threadId: string;
     model?: string;

@@ -66,6 +66,16 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
     return;
   }
 
+  if (message.type === 'thread_history_load') {
+    const snapshot = await app.services.sessions.loadThreadHistory(
+      message.threadId,
+      message.cursor,
+      message.limit,
+    );
+    sendMessage(app, socket, snapshot);
+    return;
+  }
+
   if (message.type === 'thread_options_update') {
     await app.services.sessions.updateThreadOptions(message);
     return;

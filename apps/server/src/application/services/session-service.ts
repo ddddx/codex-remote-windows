@@ -2,7 +2,13 @@ import type { ClientMessage, ServerMessage } from '@codex-remote/protocol';
 import type { FastifyInstance } from 'fastify';
 import { broadcastMessage, ensureCodexReady } from '../../ws/bridge.js';
 import { flushPendingAgentDeltas } from './event-bridge.js';
-import { buildThreadSyncMessage, bootstrapTabs, type RuntimeThread } from './thread-sync.js';
+import {
+  buildThreadHistoryMessage,
+  buildThreadSyncMessage,
+  bootstrapTabs,
+  defaultThreadSyncTurnLimit,
+  type RuntimeThread,
+} from './thread-sync.js';
 import { toSessionTabPayload, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
 
 type CreateTabMessage = Extract<ClientMessage, { type: 'tab_create' }>;
@@ -87,6 +93,7 @@ export function createSessionService(app: FastifyInstance) {
         effort: current?.reasoningEffort || null,
         approvalPolicy: current?.approvalPolicy || null,
         sandbox: current?.sandboxMode || null,
+        initialTurnsLimit: defaultThreadSyncTurnLimit(),
       });
       const tab = upsertRuntimeTab(app, {
         ...(current || {}),
@@ -108,6 +115,15 @@ export function createSessionService(app: FastifyInstance) {
         tab: nextTab,
         message: buildThreadSyncMessage(app, threadId, thread as RuntimeThread),
       };
+    },
+
+    async loadThreadHistory(threadId: string, cursor?: string | null, limit?: number): Promise<Extract<ServerMessage, { type: 'thread_history' }>> {
+      await ensureCodexReady(app);
+      const page = await app.codexClient.listThreadTurns(threadId, {
+        cursor: cursor || null,
+        limit: limit || defaultThreadSyncTurnLimit(),
+      });
+      return buildThreadHistoryMessage(app, threadId, page as any);
     },
 
     async updateThreadOptions(message: ThreadOptionsUpdateMessage): Promise<RuntimeTab | null> {

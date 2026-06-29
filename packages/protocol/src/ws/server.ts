@@ -246,6 +246,17 @@ export type ServerMessage =
       turnPlans?: TurnPlanPayload[];
       turnDiffs?: TurnDiffPayload[];
       timelineEvents?: TimelineEventPayload[];
+      historyCursor?: string | null;
+      hasMoreHistory?: boolean;
+    }
+  | {
+      type: 'thread_history';
+      threadId: string;
+      turns?: ThreadTurnPayload[];
+      turnPlans?: TurnPlanPayload[];
+      turnDiffs?: TurnDiffPayload[];
+      historyCursor?: string | null;
+      hasMoreHistory?: boolean;
     }
   | { type: 'turn_started'; threadId: string; turnId?: string; startedAt?: number }
   | { type: 'turn_completed'; threadId: string; turnId?: string }

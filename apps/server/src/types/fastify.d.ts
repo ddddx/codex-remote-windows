@@ -50,6 +50,7 @@ type CodexClientLike = {
     threadId: string,
     options?: {
       excludeTurns?: boolean;
+      initialTurnsLimit?: number | null;
       model?: string | null;
       effort?: string | null;
       approvalPolicy?: string | null;
@@ -57,6 +58,17 @@ type CodexClientLike = {
       cwd?: string | null;
     },
   ) => Promise<Record<string, unknown>>;
+  listThreadTurns: (
+    threadId: string,
+    options?: {
+      cursor?: string | null;
+      limit?: number | null;
+    },
+  ) => Promise<{
+    data: Array<Record<string, unknown>>;
+    nextCursor: string | null;
+    backwardsCursor: string | null;
+  }>;
   updateThreadSettings: (
     threadId: string,
     options?: {

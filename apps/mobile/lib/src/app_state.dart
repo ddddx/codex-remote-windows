@@ -91,6 +91,9 @@ class CodexAppState extends ChangeNotifier {
   ComposerPrefs defaultPrefs = const ComposerPrefs();
   Map<String, ComposerPrefs> prefsByThread = {};
   Map<String, List<TimelineEntry>> timelineByThread = {};
+  Map<String, String?> historyCursorByThread = {};
+  Map<String, bool> hasMoreHistoryByThread = {};
+  final Set<String> _pendingHistoryLoads = {};
   Map<String, List<AttachmentItem>> attachmentsByThread = {};
   Map<String, JsonMap> tokenUsageByThread = {};
   Map<String, int> activeTurnStartedAt = {};
@@ -125,6 +128,9 @@ class CodexAppState extends ChangeNotifier {
 
   List<TimelineEntry> get activeTimeline =>
       timelineByThread[activeSessionId] ?? const [];
+  String? get activeHistoryCursor => historyCursorByThread[activeSessionId];
+  bool get activeHasMoreHistory =>
+      hasMoreHistoryByThread[activeSessionId] ?? false;
   List<AttachmentItem> get activeAttachments =>
       attachmentsByThread[activeSessionId] ?? const [];
   JsonMap? get activeTokenUsage =>
@@ -896,6 +902,25 @@ class CodexAppState extends ChangeNotifier {
     _socket?.send({'type': 'thread_sync', 'threadId': activeSessionId});
   }
 
+  void loadMoreHistory(String threadId, String? cursor) {
+    if (threadId.isEmpty || !(hasMoreHistoryByThread[threadId] ?? false)) {
+      return;
+    }
+    final key = '$threadId:${cursor ?? ''}';
+    if (_pendingHistoryLoads.contains(key)) {
+      return;
+    }
+    _pendingHistoryLoads.add(key);
+    _socket?.send({
+      'type': 'thread_history_load',
+      'threadId': threadId,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    });
+    Future<void>.delayed(const Duration(seconds: 5), () {
+      _pendingHistoryLoads.remove(key);
+    });
+  }
+
   Future<void> createSession({
     required String name,
     required String cwd,
@@ -1118,6 +1143,9 @@ class CodexAppState extends ChangeNotifier {
       case 'thread_sync':
         _applyThreadSync(message);
         break;
+      case 'thread_history':
+        _applyThreadHistory(message);
+        break;
       case 'server_request_required':
       case 'server_request_updated':
         final request = message['request'];
@@ -1319,6 +1347,9 @@ class CodexAppState extends ChangeNotifier {
         .where((item) => item.threadId != threadId)
         .toList(growable: false);
     timelineByThread.remove(threadId);
+    historyCursorByThread.remove(threadId);
+    hasMoreHistoryByThread.remove(threadId);
+    _pendingHistoryLoads.removeWhere((key) => key.startsWith('$threadId:'));
     attachmentsByThread.remove(threadId);
     tokenUsageByThread.remove(threadId);
     activeTurnStartedAt.remove(threadId);
@@ -1376,6 +1407,10 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     _ensureThreadVisible(threadId);
+    final historyCursor = readString(message, 'historyCursor');
+    historyCursorByThread[threadId] = historyCursor.isEmpty ? null : historyCursor;
+    hasMoreHistoryByThread[threadId] =
+        readBool(message, 'hasMoreHistory') || historyCursor.isNotEmpty;
     var entries = <TimelineEntry>[
       ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
     ];
@@ -1496,6 +1531,59 @@ class CodexAppState extends ChangeNotifier {
       _applyThreadSyncEvent(event);
     }
     unreadThreadIds.remove(threadId);
+  }
+
+  void _applyThreadHistory(JsonMap message) {
+    final threadId = readString(message, 'threadId');
+    if (threadId.isEmpty) {
+      return;
+    }
+    _ensureThreadVisible(threadId);
+    var entries = <TimelineEntry>[
+      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
+    ];
+    final turns = message['turns'];
+    if (turns is List) {
+      for (var index = 0; index < turns.length; index += 1) {
+        final rawTurn = _asJsonMap(turns[index]);
+        if (rawTurn != null) {
+          entries.addAll(_entriesFromTurn(threadId, rawTurn, index));
+        }
+      }
+    }
+    final turnPlans = message['turnPlans'];
+    if (turnPlans is List) {
+      for (final rawPlan in turnPlans) {
+        final plan = _asJsonMap(rawPlan);
+        if (plan == null) {
+          continue;
+        }
+        final entry = _entryFromTurnPlan(plan);
+        if (entry != null) {
+          entries.add(entry);
+        }
+      }
+    }
+    final turnDiffs = message['turnDiffs'];
+    if (turnDiffs is List) {
+      for (final rawDiff in turnDiffs) {
+        final diff = _asJsonMap(rawDiff);
+        if (diff == null) {
+          continue;
+        }
+        final entry = _entryFromTurnDiff(diff);
+        if (entry != null) {
+          entries = _mergeTurnDiffEntry(entries, entry);
+        }
+      }
+    }
+    entries.sort(_compareTimelineEntries);
+    timelineByThread[threadId] = _dedupeEntries(entries);
+    final historyCursor = readString(message, 'historyCursor');
+    historyCursorByThread[threadId] = historyCursor.isEmpty ? null : historyCursor;
+    hasMoreHistoryByThread[threadId] =
+        readBool(message, 'hasMoreHistory') || historyCursor.isNotEmpty;
+    _pendingHistoryLoads.removeWhere((key) => key.startsWith('$threadId:'));
   }
 
   List<TimelineEntry> _dropReplayRebuiltEntries(

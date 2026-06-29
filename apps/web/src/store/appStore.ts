@@ -134,6 +134,8 @@ type AppStore = {
   };
   timeline: {
     entriesBySessionId: Record<string, TimelineEntry[]>;
+    historyCursorBySessionId: Record<string, string | null>;
+    hasMoreHistoryBySessionId: Record<string, boolean>;
   };
   assistantStreams: {
     bySessionId: Record<string, Record<string, string>>;
@@ -190,6 +192,7 @@ type AppStore = {
   setTokenUsage: (threadId: string, usage: TokenUsagePayload) => void;
   setSessionModel: (threadId: string, model: string) => void;
   setThreadSync: (threadId: string, message: Extract<ServerMessage, { type: 'thread_sync' }>) => void;
+  mergeThreadHistory: (threadId: string, message: Extract<ServerMessage, { type: 'thread_history' }>) => void;
   appendTimelineEntry: (threadId: string, entry: TimelineEntry) => void;
   removeTimelineEntry: (threadId: string, entryId: string) => void;
   appendAssistantDelta: (
@@ -1885,6 +1888,198 @@ function pushGlobalSupplementalNotifications(
   }
 }
 
+type ThreadSyncTimelineEvent = Record<string, unknown> & {
+  type: string;
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  method?: string;
+  delta?: string;
+  patch?: string;
+  changes?: unknown;
+  sequence?: number;
+  startedAt?: number;
+  createdAt?: number;
+  completedAt?: number;
+  updatedAt?: number;
+  item?: unknown;
+};
+
+function threadSyncEventItemId(event: Record<string, unknown>): string {
+  const item = event.item && typeof event.item === 'object'
+    ? event.item as Record<string, unknown>
+    : null;
+  return typeof event.itemId === 'string'
+    ? event.itemId
+    : typeof item?.id === 'string'
+      ? item.id
+      : '';
+}
+
+function completedAssistantItemHasText(event: Record<string, unknown>): boolean {
+  const item = event.item && typeof event.item === 'object'
+    ? event.item as Record<string, unknown>
+    : null;
+  if (!item) {
+    return false;
+  }
+  const itemType = typeof item.type === 'string' ? item.type : '';
+  const role = typeof item.role === 'string' ? item.role : '';
+  if (
+    itemType !== 'agentMessage' &&
+    itemType !== 'agent_message' &&
+    itemType !== 'assistantMessage' &&
+    itemType !== 'assistant_message' &&
+    !(itemType === 'message' && role === 'assistant')
+  ) {
+    return false;
+  }
+  return Boolean(
+    extractStructuredText(item.text) ||
+    extractStructuredText(item.content) ||
+    extractStructuredText(item.output) ||
+    extractStructuredText(item.message) ||
+    extractStructuredText(item.parts),
+  );
+}
+
+function completedCommandItemHasOutput(event: Record<string, unknown>): boolean {
+  const item = event.item && typeof event.item === 'object'
+    ? event.item as Record<string, unknown>
+    : null;
+  if (!item || item.type !== 'commandExecution') {
+    return false;
+  }
+  return Boolean(extractStructuredText(item.output) || extractStructuredText(item.aggregatedOutput));
+}
+
+function shouldCompactThreadSyncDelta(event: ThreadSyncTimelineEvent): boolean {
+  if (event.type === 'agent_delta' || event.type === 'plan_delta') {
+    return typeof event.delta === 'string';
+  }
+  if (event.type !== 'item_delta' || typeof event.delta !== 'string') {
+    return false;
+  }
+  return event.method === 'item/commandExecution/outputDelta' ||
+    event.method === 'item/fileChange/outputDelta' ||
+    event.method === 'item/reasoning/summaryTextDelta' ||
+    event.method === 'item/reasoning/textDelta';
+}
+
+function threadSyncEventTime(event: ThreadSyncTimelineEvent): number {
+  return event.startedAt || event.createdAt || event.completedAt || event.updatedAt || 0;
+}
+
+function compactThreadSyncTimelineEvents(
+  events: Extract<ServerMessage, { type: 'thread_sync' }>['timelineEvents'],
+  threadId: string,
+): ThreadSyncTimelineEvent[] {
+  const sourceEvents = Array.isArray(events)
+    ? events
+      .filter((event) => Boolean(event) && typeof event === 'object')
+      .map((event) => event as unknown as ThreadSyncTimelineEvent)
+    : [];
+  const completedAssistantTextIds = new Set<string>();
+  const completedCommandOutputIds = new Set<string>();
+  for (const event of sourceEvents) {
+    if (event.type !== 'item_completed') {
+      continue;
+    }
+    const itemId = threadSyncEventItemId(event);
+    if (!itemId) {
+      continue;
+    }
+    if (completedAssistantItemHasText(event)) {
+      completedAssistantTextIds.add(itemId);
+    }
+    if (completedCommandItemHasOutput(event)) {
+      completedCommandOutputIds.add(itemId);
+    }
+  }
+
+  const compacted: ThreadSyncTimelineEvent[] = [];
+  const compactedIndexes = new Map<string, number>();
+  const latestIndexes = new Map<string, number>();
+  for (const event of sourceEvents) {
+    const normalizedEvent: ThreadSyncTimelineEvent = typeof event.threadId === 'string' && event.threadId
+      ? event
+      : { ...event, threadId };
+    const itemId = threadSyncEventItemId(normalizedEvent);
+    if (normalizedEvent.type === 'agent_delta' && itemId && completedAssistantTextIds.has(itemId)) {
+      continue;
+    }
+    if (
+      normalizedEvent.type === 'item_delta' &&
+      normalizedEvent.method === 'item/commandExecution/outputDelta' &&
+      itemId &&
+      completedCommandOutputIds.has(itemId)
+    ) {
+      continue;
+    }
+
+    if (
+      normalizedEvent.type === 'token_usage' ||
+      normalizedEvent.type === 'turn_diff_updated' ||
+      normalizedEvent.type === 'turn_plan_updated'
+    ) {
+      const key = [
+        normalizedEvent.type,
+        normalizedEvent.threadId || '',
+        normalizedEvent.turnId || '',
+      ].join(':');
+      const existingIndex = latestIndexes.get(key);
+      if (existingIndex === undefined) {
+        latestIndexes.set(key, compacted.length);
+        compacted.push({ ...normalizedEvent });
+      } else {
+        compacted[existingIndex] = { ...normalizedEvent };
+      }
+      continue;
+    }
+
+    if (!shouldCompactThreadSyncDelta(normalizedEvent)) {
+      compacted.push(normalizedEvent);
+      continue;
+    }
+    const key = [
+      normalizedEvent.type,
+      normalizedEvent.method || '',
+      normalizedEvent.threadId || '',
+      normalizedEvent.turnId || '',
+      itemId,
+    ].join(':');
+    const existingIndex = compactedIndexes.get(key);
+    if (existingIndex === undefined) {
+      compactedIndexes.set(key, compacted.length);
+      compacted.push({ ...normalizedEvent });
+      continue;
+    }
+    const current = compacted[existingIndex];
+    compacted[existingIndex] = {
+      ...current,
+      ...normalizedEvent,
+      sequence: current.sequence,
+      startedAt: typeof current.startedAt === 'number' && typeof normalizedEvent.startedAt === 'number'
+        ? Math.min(current.startedAt, normalizedEvent.startedAt)
+        : current.startedAt || normalizedEvent.startedAt,
+      createdAt: typeof current.createdAt === 'number' && typeof normalizedEvent.createdAt === 'number'
+        ? Math.min(current.createdAt, normalizedEvent.createdAt)
+        : current.createdAt || normalizedEvent.createdAt,
+      delta: `${typeof current.delta === 'string' ? current.delta : ''}${typeof normalizedEvent.delta === 'string' ? normalizedEvent.delta : ''}`,
+      patch: normalizedEvent.patch ?? current.patch,
+      changes: normalizedEvent.changes ?? current.changes,
+    };
+  }
+  return compacted.sort((left, right) => {
+    const leftSequence = typeof left.sequence === 'number' ? left.sequence : 0;
+    const rightSequence = typeof right.sequence === 'number' ? right.sequence : 0;
+    if (leftSequence || rightSequence) {
+      return leftSequence - rightSequence;
+    }
+    return threadSyncEventTime(left) - threadSyncEventTime(right);
+  });
+}
+
 function mergeThreadSyncEntries(
   currentEntries: TimelineEntry[],
   message: Extract<ServerMessage, { type: 'thread_sync' }>,
@@ -2131,6 +2326,8 @@ export const useAppStore = create<AppStore>((set) => ({
   },
   timeline: {
     entriesBySessionId: {},
+    historyCursorBySessionId: {},
+    hasMoreHistoryBySessionId: {},
   },
   assistantStreams: {
     bySessionId: {},
@@ -2286,10 +2483,14 @@ export const useAppStore = create<AppStore>((set) => ({
     const nextTurns = { ...state.turns.activeBySessionId };
     const nextUsage = { ...state.tokenUsage.bySessionId };
     const nextEntries = { ...state.timeline.entriesBySessionId };
+    const nextHistoryCursors = { ...state.timeline.historyCursorBySessionId };
+    const nextHasMoreHistory = { ...state.timeline.hasMoreHistoryBySessionId };
     const nextStreams = { ...state.assistantStreams.bySessionId };
     delete nextTurns[threadId];
     delete nextUsage[threadId];
     delete nextEntries[threadId];
+    delete nextHistoryCursors[threadId];
+    delete nextHasMoreHistory[threadId];
     delete nextStreams[threadId];
 
     const nextItems = state.sessions.items.filter((item) => item.threadId !== threadId);
@@ -2300,6 +2501,8 @@ export const useAppStore = create<AppStore>((set) => ({
       },
       timeline: {
         entriesBySessionId: nextEntries,
+        historyCursorBySessionId: nextHistoryCursors,
+        hasMoreHistoryBySessionId: nextHasMoreHistory,
       },
       assistantStreams: {
         bySessionId: nextStreams,
@@ -2473,6 +2676,7 @@ export const useAppStore = create<AppStore>((set) => ({
 
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: entries,
@@ -2529,6 +2733,7 @@ export const useAppStore = create<AppStore>((set) => ({
     const nextEntries = [...currentEntries, normalizeTimelineEntry(entry)];
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: nextEntries,
@@ -2544,6 +2749,7 @@ export const useAppStore = create<AppStore>((set) => ({
     }
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: nextEntries,
@@ -2616,6 +2822,7 @@ export const useAppStore = create<AppStore>((set) => ({
       ...(entriesChanged
         ? {
           timeline: {
+            ...state.timeline,
             entriesBySessionId: {
               ...state.timeline.entriesBySessionId,
               [threadId]: entries,
@@ -2656,6 +2863,7 @@ export const useAppStore = create<AppStore>((set) => ({
     }
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: dedupedEntries,
@@ -2732,6 +2940,7 @@ export const useAppStore = create<AppStore>((set) => ({
 
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: nextEntries,
@@ -2762,15 +2971,28 @@ export const useAppStore = create<AppStore>((set) => ({
     const entriesUnchanged = mergedEntries === currentEntries || areTimelineEntryListsEqual(currentEntries, mergedEntries);
     const turnsUnchanged = nextTurns === state.turns.activeBySessionId;
     const usageUnchanged = isEqualUnknown(state.tokenUsage.bySessionId[threadId], nextUsage);
-    if (entriesUnchanged && turnsUnchanged && usageUnchanged) {
+    const nextHistoryCursor = message.historyCursor ?? null;
+    const nextHasMoreHistory = Boolean(message.hasMoreHistory || nextHistoryCursor);
+    const historyUnchanged = state.timeline.historyCursorBySessionId[threadId] === nextHistoryCursor
+      && state.timeline.hasMoreHistoryBySessionId[threadId] === nextHasMoreHistory;
+    if (entriesUnchanged && turnsUnchanged && usageUnchanged && historyUnchanged) {
       return state;
     }
 
     return {
       timeline: {
+        ...state.timeline,
         entriesBySessionId: {
           ...state.timeline.entriesBySessionId,
           [threadId]: mergedEntries,
+        },
+        historyCursorBySessionId: {
+          ...state.timeline.historyCursorBySessionId,
+          [threadId]: nextHistoryCursor,
+        },
+        hasMoreHistoryBySessionId: {
+          ...state.timeline.hasMoreHistoryBySessionId,
+          [threadId]: nextHasMoreHistory,
         },
       },
       tokenUsage: {
@@ -2781,6 +3003,42 @@ export const useAppStore = create<AppStore>((set) => ({
       },
       turns: {
         activeBySessionId: nextTurns,
+      },
+    };
+  }),
+  mergeThreadHistory: (threadId, message) => set((state) => {
+    const currentEntries = state.timeline.entriesBySessionId[threadId] || [];
+    const mergedEntries = mergeThreadSyncEntries(currentEntries, {
+      type: 'thread_sync',
+      threadId,
+      turns: message.turns,
+      turnPlans: message.turnPlans,
+      turnDiffs: message.turnDiffs,
+      timelineEvents: [],
+    });
+    const nextHistoryCursor = message.historyCursor ?? null;
+    const nextHasMoreHistory = Boolean(message.hasMoreHistory || nextHistoryCursor);
+    const entriesUnchanged = mergedEntries === currentEntries || areTimelineEntryListsEqual(currentEntries, mergedEntries);
+    const historyUnchanged = state.timeline.historyCursorBySessionId[threadId] === nextHistoryCursor
+      && state.timeline.hasMoreHistoryBySessionId[threadId] === nextHasMoreHistory;
+    if (entriesUnchanged && historyUnchanged) {
+      return state;
+    }
+    return {
+      timeline: {
+        ...state.timeline,
+        entriesBySessionId: {
+          ...state.timeline.entriesBySessionId,
+          [threadId]: mergedEntries,
+        },
+        historyCursorBySessionId: {
+          ...state.timeline.historyCursorBySessionId,
+          [threadId]: nextHistoryCursor,
+        },
+        hasMoreHistoryBySessionId: {
+          ...state.timeline.hasMoreHistoryBySessionId,
+          [threadId]: nextHasMoreHistory,
+        },
       },
     };
   }),
@@ -2873,11 +3131,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
       && !entry.partial
       && entry.status !== 'running'
     ));
-    for (const event of Array.isArray(message.timelineEvents) ? message.timelineEvents : []) {
-      if (!event || typeof event !== 'object') {
-        continue;
-      }
-      const typedEvent = event as Record<string, unknown>;
+    for (const typedEvent of compactThreadSyncTimelineEvents(message.timelineEvents, message.threadId)) {
       const itemId = typeof typedEvent.itemId === 'string' ? typedEvent.itemId : '';
       const item = typedEvent.item && typeof typedEvent.item === 'object' ? typedEvent.item as Record<string, unknown> : null;
       const resolvedItemId = itemId || (typeof item?.id === 'string' ? item.id : '');
@@ -2895,6 +3149,11 @@ export function mapServerMessageToStore(message: ServerMessage) {
       }
       mapServerMessageToStore(typedEvent as ServerMessage);
     }
+    return;
+  }
+
+  if (message.type === 'thread_history') {
+    store.mergeThreadHistory(message.threadId, message);
     return;
   }
 
@@ -2975,6 +3234,7 @@ export function mapServerMessageToStore(message: ServerMessage) {
     useAppStore.setState((prev) => ({
       ...prev,
       timeline: {
+        ...prev.timeline,
         entriesBySessionId: {
           ...prev.timeline.entriesBySessionId,
           [message.threadId]: mergedEntries,

@@ -714,26 +714,43 @@ class _TimelineViewState extends State<TimelineView> {
     final visibleEntries = hiddenCount > 0
         ? entries.sublist(entries.length - _renderLimit)
         : entries;
+    final hasMoreRemoteHistory = widget.state.activeHasMoreHistory;
     return ListView.builder(
       controller: widget.controller,
       padding: const EdgeInsets.only(top: 8, bottom: 8),
-      itemCount: visibleEntries.length + (hiddenCount > 0 ? 1 : 0),
+      itemCount:
+          visibleEntries.length + (hiddenCount > 0 || hasMoreRemoteHistory ? 1 : 0),
       itemBuilder: (context, index) {
-        if (hiddenCount > 0 && index == 0) {
+        if ((hiddenCount > 0 || hasMoreRemoteHistory) && index == 0) {
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: OutlinedButton.icon(
               onPressed: () {
+                if (hasMoreRemoteHistory) {
+                  widget.state.loadMoreHistory(
+                    widget.state.activeSessionId,
+                    widget.state.activeHistoryCursor,
+                  );
+                  setState(() {
+                    _renderLimit += _renderablePageSize;
+                  });
+                  return;
+                }
                 setState(() {
                   _renderLimit += _renderablePageSize;
                 });
               },
               icon: const Icon(Icons.keyboard_arrow_up),
-              label: Text('加载更早 ${min(hiddenCount, _renderablePageSize)} 条'),
+              label: Text(
+                hasMoreRemoteHistory
+                    ? '加载更早历史'
+                    : '加载更早 ${min(hiddenCount, _renderablePageSize)} 条',
+              ),
             ),
           );
         }
-        final entryIndex = hiddenCount > 0 ? index - 1 : index;
+        final entryIndex =
+            (hiddenCount > 0 || hasMoreRemoteHistory) ? index - 1 : index;
         return TimelineCard(
           state: widget.state,
           entry: visibleEntries[entryIndex],

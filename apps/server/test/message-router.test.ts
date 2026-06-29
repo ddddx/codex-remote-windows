@@ -178,6 +178,19 @@ function createAppStub() {
           tokenUsage: { totalTokens: 12 },
         };
       },
+      async listThreadTurns(threadId: string, options?: unknown) {
+        return {
+          data: [
+            {
+              id: 'turn-older',
+              input: [{ type: 'text', text: `older ${threadId}` }],
+              output: 'older output',
+            },
+          ],
+          nextCursor: null,
+          backwardsCursor: 'backwards',
+        };
+      },
       async updateThreadSettings(threadId: string, options?: unknown) {
         calls.updateThreadSettings.push({ threadId, options });
         return {
@@ -330,7 +343,7 @@ test('thread_sync returns tab update and thread snapshot', async () => {
       {
         type: 'agent_delta',
         threadId: '00000000-0000-0000-0000-000000000999',
-        turnId: 'turn-live',
+        turnId: 'turn-1',
         itemId: 'assistant-live',
         delta: 'partial',
         startedAt: 1,
@@ -393,6 +406,27 @@ test('thread_sync preserves nested usage payloads for header display', async () 
     prompt_tokens: 21,
     completion_tokens: 12,
   });
+});
+
+test('thread_history_load returns an older turn page with cursor metadata', async () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_history_load',
+    threadId: 'thread-history',
+    cursor: 'cursor-1',
+    limit: 30,
+  });
+
+  assert.equal(socket.sent.length, 1);
+  const message = socket.sent[0] as any;
+  assert.equal(message.type, 'thread_history');
+  assert.equal(message.threadId, 'thread-history');
+  assert.equal(message.turns.length, 1);
+  assert.equal(message.turns[0].id, 'turn-older');
+  assert.equal(message.hasMoreHistory, false);
+  assert.equal(message.historyCursor, null);
 });
 
 test('thread_sync preserves existing permission preset when codex resume omits it', async () => {
@@ -1061,7 +1095,7 @@ test('thread_sync replays timeline events persisted while clients are disconnect
     method: 'item/agentMessage/delta',
     params: {
       threadId: 'thread-offline',
-      turnId: 'turn-offline',
+      turnId: 'turn-1',
       itemId: 'assistant-offline',
       delta: 'hel',
     },
@@ -1070,7 +1104,7 @@ test('thread_sync replays timeline events persisted while clients are disconnect
     method: 'item/completed',
     params: {
       threadId: 'thread-offline',
-      turnId: 'turn-offline',
+      turnId: 'turn-1',
       completedAtMs: 1234,
       item: {
         id: 'assistant-offline',
@@ -1091,11 +1125,81 @@ test('thread_sync replays timeline events persisted while clients are disconnect
     (message) => message.type === 'thread_sync',
   );
   assert.ok(sync);
+  assert.equal(sync.timelineEvents.length, 1);
+  assert.equal(sync.timelineEvents[0].type, 'item_completed');
+  assert.equal(sync.timelineEvents[0].sequence, 2);
+});
+
+test('thread_sync compacts high-frequency timeline deltas before replay', async () => {
+  const { app } = createAppStub();
+  app.runtimeState.tabsById.set('thread-compact-events', {
+    threadId: 'thread-compact-events',
+    name: 'Compact events',
+    cwd: 'C:\\workspace',
+    status: 'running',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+  });
+  app.runtimeState.timelineEventsByThread.set('thread-compact-events', [
+    {
+      type: 'item_delta',
+      threadId: 'thread-compact-events',
+      turnId: 'turn-1',
+      itemId: 'cmd-running',
+      method: 'item/commandExecution/outputDelta',
+      delta: 'a',
+      sequence: 1,
+    },
+    {
+      type: 'item_delta',
+      threadId: 'thread-compact-events',
+      turnId: 'turn-1',
+      itemId: 'cmd-running',
+      method: 'item/commandExecution/outputDelta',
+      delta: 'b',
+      sequence: 2,
+    },
+    {
+      type: 'item_delta',
+      threadId: 'thread-compact-events',
+      turnId: 'turn-1',
+      itemId: 'cmd-completed',
+      method: 'item/commandExecution/outputDelta',
+      delta: 'skip',
+      sequence: 3,
+    },
+    {
+      type: 'item_completed',
+      threadId: 'thread-compact-events',
+      turnId: 'turn-1',
+      item: {
+        id: 'cmd-completed',
+        type: 'commandExecution',
+        command: 'npm test',
+        output: 'final output',
+      },
+      sequence: 4,
+    },
+  ] as any);
+
+  const socket = createSocket();
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_sync',
+    threadId: 'thread-compact-events',
+  });
+
+  const sync = (socket.sent as Array<any>).find(
+    (message) => message.type === 'thread_sync',
+  );
+  assert.ok(sync);
   assert.equal(sync.timelineEvents.length, 2);
-  assert.equal(sync.timelineEvents[0].type, 'agent_delta');
-  assert.equal(sync.timelineEvents[0].sequence, 1);
-  assert.equal(sync.timelineEvents[1].type, 'item_completed');
-  assert.equal(sync.timelineEvents[1].sequence, 2);
+  assert.deepEqual(sync.timelineEvents.map((event: any) => event.type), [
+    'item_delta',
+    'item_completed',
+  ]);
+  assert.equal(sync.timelineEvents[0].itemId, 'cmd-running');
+  assert.equal(sync.timelineEvents[0].delta, 'ab');
 });
 
 test('file change patch updates refresh pending request snapshot', async () => {

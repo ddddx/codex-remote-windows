@@ -42,6 +42,7 @@ type RequestResponseMap = {
   'thread/list': v2.ThreadListResponse;
   'thread/start': v2.ThreadStartResponse;
   'thread/resume': v2.ThreadResumeResponse;
+  'thread/turns/list': v2.ThreadTurnsListResponse;
   'thread/settings/update': v2.ThreadSettingsUpdateResponse;
   'turn/start': v2.TurnStartResponse;
   'thread/realtime/appendSpeech': v2.ThreadRealtimeAppendSpeechResponse;
@@ -83,6 +84,7 @@ type ThreadSetNameResponse = v2.ThreadSetNameResponse;
 type ThreadShellCommandResponse = v2.ThreadShellCommandResponse;
 type ThreadStartResponse = v2.ThreadStartResponse;
 type Turn = v2.Turn;
+type TurnsPage = v2.TurnsPage;
 type UserInput = v2.UserInput;
 
 type SupportedRequestMethod = keyof RequestResponseMap;
@@ -125,6 +127,11 @@ export type ThreadOptions = {
   cwd?: string | null;
 };
 
+export type ThreadTurnsPageOptions = {
+  cursor?: string | null;
+  limit?: number | null;
+};
+
 export type ThreadSettingsSnapshot = {
   cwd?: string;
   model?: string;
@@ -150,6 +157,7 @@ export type RuntimeThread = Thread & {
   reasoningEffort?: ReasoningEffort | null;
   sandboxMode?: v2.SandboxMode;
   sandboxPolicy?: v2.SandboxPolicy;
+  turnsPage?: TurnsPage | null;
 };
 
 type CodexClientOptions = {
@@ -346,11 +354,19 @@ export class CodexAppServerClient extends EventEmitter {
 
   async resumeThread(
     threadId: string,
-    options: { excludeTurns?: boolean } & ThreadOptions = {},
+    options: { excludeTurns?: boolean; initialTurnsLimit?: number | null } & ThreadOptions = {},
   ): Promise<RuntimeThread> {
+    const initialTurnsLimit = normalizePositiveInteger(options.initialTurnsLimit);
     const result = await this.request('thread/resume', {
       threadId,
-      excludeTurns: options.excludeTurns === true,
+      excludeTurns: options.excludeTurns === true || Boolean(initialTurnsLimit),
+      initialTurnsPage: initialTurnsLimit
+        ? {
+          limit: initialTurnsLimit,
+          sortDirection: 'desc',
+          itemsView: 'full',
+        }
+        : null,
       model: options.model || null,
       approvalPolicy: normalizeApprovalPolicy(options.approvalPolicy),
       sandbox: normalizeSandboxMode(options.sandbox),
@@ -358,6 +374,20 @@ export class CodexAppServerClient extends EventEmitter {
       config: buildReasoningConfig(options.effort),
     });
     return projectRuntimeThread(result.thread, result);
+  }
+
+  async listThreadTurns(
+    threadId: string,
+    options: ThreadTurnsPageOptions = {},
+  ): Promise<TurnsPage> {
+    const limit = normalizePositiveInteger(options.limit) || 60;
+    return this.request('thread/turns/list', {
+      threadId,
+      cursor: options.cursor || null,
+      limit,
+      sortDirection: 'desc',
+      itemsView: 'full',
+    });
   }
 
   async updateThreadSettings(
@@ -782,6 +812,11 @@ function parsePositiveInteger(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function normalizePositiveInteger(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? Math.floor(value) : parsePositiveInteger(value);
+  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function normalizeReasoningEffort(value: string | null | undefined): ReasoningEffort | null {
   return value && REASONING_EFFORTS.has(value as ReasoningEffort)
     ? value as ReasoningEffort
@@ -807,10 +842,14 @@ function buildReasoningConfig(effort: string | null | undefined): Record<string,
 
 function projectRuntimeThread(
   thread: Thread,
-  response: Pick<ThreadStartResponse | ThreadResumeResponse, 'model' | 'serviceTier' | 'approvalPolicy' | 'reasoningEffort' | 'cwd' | 'sandbox'>,
+  response: Pick<ThreadStartResponse | ThreadResumeResponse, 'model' | 'serviceTier' | 'approvalPolicy' | 'reasoningEffort' | 'cwd' | 'sandbox'> & {
+    initialTurnsPage?: TurnsPage | null;
+  },
 ): RuntimeThread {
+  const pageTurns = response.initialTurnsPage?.data;
   return {
     ...thread,
+    turns: Array.isArray(pageTurns) ? [...pageTurns].reverse() : thread.turns,
     model: response.model,
     serviceTier: response.serviceTier,
     approvalPolicy: stringifyApprovalPolicy(response.approvalPolicy),
@@ -819,6 +858,7 @@ function projectRuntimeThread(
     cwd: response.cwd || thread.cwd,
     sandboxMode: normalizeSandboxModeFromPolicy(response.sandbox) || undefined,
     sandboxPolicy: response.sandbox,
+    turnsPage: response.initialTurnsPage || null,
   };
 }
 

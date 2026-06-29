@@ -9,7 +9,11 @@ function resetStore() {
     connection: { status: 'idle', error: null },
     auth: { token: '' },
     sessions: { items: [], activeSessionId: null },
-    timeline: { entriesBySessionId: {} },
+    timeline: {
+      entriesBySessionId: {},
+      historyCursorBySessionId: {},
+      hasMoreHistoryBySessionId: {},
+    },
     assistantStreams: { bySessionId: {} },
     approvals: { items: [] },
     notifications: { items: [] },
@@ -376,6 +380,105 @@ test('thread sync replays all assistant delta events for the same live item', ()
   assert.equal(assistant?.text, '');
   assert.equal(assistant?.partial, true);
   assert.equal(useAppStore.getState().assistantStreams.bySessionId['thread-live-deltas']?.['assistant-live-deltas'], 'hello world');
+});
+
+test('thread sync compacts command output deltas during replay', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-command-deltas',
+    turns: [],
+    tokenUsage: null,
+    timelineEvents: [
+      {
+        type: 'item_delta',
+        threadId: 'thread-command-deltas',
+        turnId: 'turn-command-deltas',
+        itemId: 'cmd-running',
+        method: 'item/commandExecution/outputDelta',
+        delta: 'run ',
+        startedAt: 1,
+      },
+      {
+        type: 'item_delta',
+        threadId: 'thread-command-deltas',
+        turnId: 'turn-command-deltas',
+        itemId: 'cmd-running',
+        method: 'item/commandExecution/outputDelta',
+        delta: 'more',
+        startedAt: 2,
+      },
+      {
+        type: 'item_delta',
+        threadId: 'thread-command-deltas',
+        turnId: 'turn-command-deltas',
+        itemId: 'cmd-completed',
+        method: 'item/commandExecution/outputDelta',
+        delta: 'skip this',
+        startedAt: 3,
+      },
+      {
+        type: 'item_completed',
+        threadId: 'thread-command-deltas',
+        turnId: 'turn-command-deltas',
+        item: {
+          id: 'cmd-completed',
+          type: 'commandExecution',
+          command: 'npm test',
+          output: 'final output',
+          status: 'completed',
+        },
+        completedAt: 4,
+      },
+    ],
+  } as any);
+
+  const entries = useAppStore.getState().timeline.entriesBySessionId['thread-command-deltas'] || [];
+  const running = entries.find((entry) => entry.id === 'cmd-running');
+  const completed = entries.find((entry) => entry.id === 'cmd-completed');
+  assert.equal((running?.details as any)?.output, 'run more');
+  assert.equal((completed?.details as any)?.output, 'final output');
+  assert.equal((completed?.details as any)?.output?.includes('skip this'), false);
+});
+
+test('thread history pages merge older turns and update pagination cursor', () => {
+  resetStore();
+
+  mapServerMessageToStore({
+    type: 'thread_sync',
+    threadId: 'thread-paged-history',
+    turns: [
+      {
+        id: 'turn-new',
+        input: [{ type: 'text', text: 'new prompt' }],
+        output: 'new response',
+      },
+    ],
+    historyCursor: 'cursor-older',
+    hasMoreHistory: true,
+  } as any);
+
+  mapServerMessageToStore({
+    type: 'thread_history',
+    threadId: 'thread-paged-history',
+    turns: [
+      {
+        id: 'turn-old',
+        input: [{ type: 'text', text: 'old prompt' }],
+        output: 'old response',
+      },
+    ],
+    historyCursor: null,
+    hasMoreHistory: false,
+  } as any);
+
+  const state = useAppStore.getState();
+  const entries = state.timeline.entriesBySessionId['thread-paged-history'] || [];
+  assert.ok(entries.some((entry) => entry.text === 'old prompt'));
+  assert.ok(entries.some((entry) => entry.text === 'new prompt'));
+  assert.equal(state.timeline.historyCursorBySessionId['thread-paged-history'], null);
+  assert.equal(state.timeline.hasMoreHistoryBySessionId['thread-paged-history'], false);
 });
 
 test('reasoning, turn updates and notices are normalized into timeline semantics', () => {
