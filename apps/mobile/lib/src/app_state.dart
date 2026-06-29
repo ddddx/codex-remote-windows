@@ -3324,16 +3324,26 @@ class CodexAppState extends ChangeNotifier {
   ) {
     final currentIsLocal = current.id.startsWith('local-user:');
     final incomingIsLocal = incoming.id.startsWith('local-user:');
+    final currentSettled = !current.partial && current.status != 'running';
+    final incomingSettled = !incoming.partial && incoming.status != 'running';
     final preferIncoming = !currentIsLocal && incomingIsLocal
         ? false
-        : (currentIsLocal && !incomingIsLocal) ||
-              (!incoming.partial && current.partial) ||
-              incoming.text.length >= current.text.length ||
-              incoming.createdAt >= current.createdAt;
+        : currentIsLocal && !incomingIsLocal
+        ? true
+        : currentSettled != incomingSettled
+        ? incomingSettled
+        : incoming.text.length != current.text.length
+        ? incoming.text.length > current.text.length
+        : incoming.createdAt >= current.createdAt;
     final primary = preferIncoming ? incoming : current;
     final secondary = preferIncoming ? current : incoming;
+    final text = primary.text.isEmpty
+        ? secondary.text
+        : secondary.text.length > primary.text.length
+        ? secondary.text
+        : primary.text;
     return primary.copyWith(
-      text: primary.text.isNotEmpty ? primary.text : secondary.text,
+      text: text,
       status: primary.status.isNotEmpty ? primary.status : secondary.status,
       patch: primary.patch.isNotEmpty ? primary.patch : secondary.patch,
       meta: primary.meta.isNotEmpty

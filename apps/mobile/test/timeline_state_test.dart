@@ -748,6 +748,55 @@ void main() {
     state.dispose();
   });
 
+  test('thread sync keeps completed assistant text over replayed deltas', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-completed-over-delta';
+    const fullText = '这是完整的助手回复，不能被后续流式片段覆盖。';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'timelineEvents': [
+        {
+          'type': 'item_completed',
+          'threadId': threadId,
+          'turnId': 'turn-completed-over-delta',
+          'itemId': 'assistant-completed-over-delta',
+          'completedAt': 3000,
+          'item': {
+            'id': 'assistant-completed-over-delta',
+            'type': 'agentMessage',
+            'status': 'completed',
+            'startedAt': 1000,
+            'text': fullText,
+          },
+        },
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-completed-over-delta',
+          'itemId': 'assistant-completed-over-delta',
+          'delta': '覆盖',
+          'createdAt': 2000,
+        },
+      ],
+    });
+
+    final assistantEntries = state.activeTimeline
+        .where(
+          (entry) =>
+              entry.type == 'message' &&
+              entry.role == 'assistant' &&
+              entry.itemId == 'assistant-completed-over-delta',
+        )
+        .toList(growable: false);
+
+    expect(assistantEntries, hasLength(1));
+    expect(assistantEntries.single.text, fullText);
+    expect(assistantEntries.single.partial, isFalse);
+    state.dispose();
+  });
+
   test('restores alternate message item names and loose map payloads', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-alternate-message';
