@@ -2352,7 +2352,11 @@ class CodexAppState extends ChangeNotifier {
     const labels = {
       'process/outputDelta': '进程输出',
       'command/exec/outputDelta': '命令输出',
+      'thread/deleted': '会话已删除',
       'thread/realtime/transcript/delta': '实时转录',
+      'model/safetyBuffering/updated': '安全缓冲',
+      'externalAgentConfig/import/progress': '外部代理导入进度',
+      'externalAgentConfig/import/completed': '外部代理导入完成',
       'item/reasoning/summaryTextDelta': '推理',
       'item/reasoning/summaryPartAdded': '推理',
       'item/reasoning/textDelta': '推理',
@@ -3592,6 +3596,15 @@ class CodexAppState extends ChangeNotifier {
     if (method == 'externalAgentConfig/import/completed') {
       return '外部代理配置导入完成';
     }
+    if (method == 'externalAgentConfig/import/progress') {
+      return '外部代理配置导入进度';
+    }
+    if (method == 'thread/deleted') {
+      return '会话已删除';
+    }
+    if (method == 'model/safetyBuffering/updated') {
+      return '安全缓冲';
+    }
     if (method == 'fs/changed') {
       return '文件系统更新';
     }
@@ -3602,6 +3615,34 @@ class CodexAppState extends ChangeNotifier {
       return '模糊搜索完成';
     }
     return method;
+  }
+
+  String _summarizeImportResults(JsonMap params) {
+    final results = params['itemTypeResults'];
+    var successes = 0;
+    var failures = 0;
+    if (results is List) {
+      for (final result in results) {
+        if (result is! JsonMap) {
+          continue;
+        }
+        final successItems = result['successes'];
+        final failureItems = result['failures'];
+        if (successItems is List) {
+          successes += successItems.length;
+        }
+        if (failureItems is List) {
+          failures += failureItems.length;
+        }
+      }
+    }
+    return [
+      readString(params, 'importId').isNotEmpty
+          ? 'ID ${readString(params, 'importId')}'
+          : '',
+      successes > 0 ? '成功 $successes' : '',
+      failures > 0 ? '失败 $failures' : '',
+    ].where((item) => item.isNotEmpty).join(' · ');
   }
 
   String _notificationMessage(String method, JsonMap params) {
@@ -3669,7 +3710,22 @@ class CodexAppState extends ChangeNotifier {
       return data is List ? '共 ${data.length} 个应用' : '应用列表已更新';
     }
     if (method == 'externalAgentConfig/import/completed') {
-      return '外部代理配置已导入';
+      return _summarizeImportResults(params).ifEmpty('外部代理配置已导入');
+    }
+    if (method == 'externalAgentConfig/import/progress') {
+      return _summarizeImportResults(params).ifEmpty('外部代理配置导入中');
+    }
+    if (method == 'thread/deleted') {
+      return readString(params, 'threadId', '会话已删除');
+    }
+    if (method == 'model/safetyBuffering/updated') {
+      return [
+        readString(params, 'model'),
+        params['showBufferingUi'] == true ? '缓冲中' : '已结束',
+        readString(params, 'fasterModel').isNotEmpty
+            ? '可切换 ${readString(params, 'fasterModel')}'
+            : '',
+      ].where((item) => item.isNotEmpty).join(' · ');
     }
     if (method == 'fs/changed') {
       final changed = params['changedPaths'];

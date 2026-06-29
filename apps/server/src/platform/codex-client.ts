@@ -47,12 +47,18 @@ type RequestResponseMap = {
   'thread/shellCommand': v2.ThreadShellCommandResponse;
   'thread/compact/start': v2.ThreadCompactStartResponse;
   'thread/backgroundTerminals/clean': v2.ThreadBackgroundTerminalsCleanResponse;
+  'thread/backgroundTerminals/list': v2.ThreadBackgroundTerminalsListResponse;
+  'thread/backgroundTerminals/terminate': v2.ThreadBackgroundTerminalsTerminateResponse;
+  'thread/delete': v2.ThreadDeleteResponse;
   'thread/name/set': v2.ThreadSetNameResponse;
   'thread/goal/set': v2.ThreadGoalSetResponse;
   'thread/goal/get': v2.ThreadGoalGetResponse;
   'thread/goal/clear': v2.ThreadGoalClearResponse;
   'model/list': v2.ModelListResponse;
   'config/read': v2.ConfigReadResponse;
+  'account/workspaceMessages/read': v2.GetWorkspaceMessagesResponse;
+  'account/rateLimitResetCredit/consume': v2.ConsumeAccountRateLimitResetCreditResponse;
+  'externalAgentConfig/import/readHistories': v2.ExternalAgentConfigImportHistoriesReadResponse;
 };
 
 type AskForApproval = v2.AskForApproval;
@@ -61,8 +67,12 @@ type Model = v2.Model;
 type SandboxMode = v2.SandboxMode;
 type SandboxPolicy = v2.SandboxPolicy;
 type Thread = v2.Thread;
+type ThreadBackgroundTerminal = v2.ThreadBackgroundTerminal;
 type ThreadBackgroundTerminalsCleanResponse = v2.ThreadBackgroundTerminalsCleanResponse;
+type ThreadBackgroundTerminalsListResponse = v2.ThreadBackgroundTerminalsListResponse;
+type ThreadBackgroundTerminalsTerminateResponse = v2.ThreadBackgroundTerminalsTerminateResponse;
 type ThreadCompactStartResponse = v2.ThreadCompactStartResponse;
+type ThreadDeleteResponse = v2.ThreadDeleteResponse;
 type ThreadGoalClearResponse = v2.ThreadGoalClearResponse;
 type ThreadGoalGetResponse = v2.ThreadGoalGetResponse;
 type ThreadGoalSetResponse = v2.ThreadGoalSetResponse;
@@ -422,6 +432,45 @@ export class CodexAppServerClient extends EventEmitter {
     return this.request('thread/backgroundTerminals/clean', { threadId });
   }
 
+  async listBackgroundTerminals(
+    threadId: string,
+    options: { cursor?: string | null; limit?: number | null } = {},
+  ): Promise<ThreadBackgroundTerminalsListResponse> {
+    return this.request('thread/backgroundTerminals/list', {
+      threadId,
+      cursor: options.cursor ?? null,
+      limit: options.limit ?? null,
+    });
+  }
+
+  async listAllBackgroundTerminals(threadId: string, limit = 100): Promise<ThreadBackgroundTerminal[]> {
+    const data: ThreadBackgroundTerminal[] = [];
+    let cursor: string | null = null;
+
+    do {
+      const pageLimit = Math.max(1, Math.min(limit - data.length, 100));
+      const result = await this.listBackgroundTerminals(threadId, {
+        cursor,
+        limit: pageLimit,
+      });
+      data.push(...result.data);
+      cursor = result.nextCursor;
+    } while (cursor && data.length < limit);
+
+    return data.slice(0, limit);
+  }
+
+  async terminateBackgroundTerminal(
+    threadId: string,
+    processId: string,
+  ): Promise<ThreadBackgroundTerminalsTerminateResponse> {
+    return this.request('thread/backgroundTerminals/terminate', { threadId, processId });
+  }
+
+  async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
+    return this.request('thread/delete', { threadId });
+  }
+
   async setThreadName(threadId: string, name: string): Promise<ThreadSetNameResponse> {
     return this.request('thread/name/set', { threadId, name });
   }
@@ -473,6 +522,20 @@ export class CodexAppServerClient extends EventEmitter {
       includeLayers: false,
       cwd: cwd || null,
     });
+  }
+
+  async readWorkspaceMessages(): Promise<v2.GetWorkspaceMessagesResponse> {
+    return this.request('account/workspaceMessages/read', undefined);
+  }
+
+  async consumeRateLimitResetCredit(
+    idempotencyKey: string,
+  ): Promise<v2.ConsumeAccountRateLimitResetCreditResponse> {
+    return this.request('account/rateLimitResetCredit/consume', { idempotencyKey });
+  }
+
+  async readExternalAgentImportHistories(): Promise<v2.ExternalAgentConfigImportHistoriesReadResponse> {
+    return this.request('externalAgentConfig/import/readHistories', undefined);
   }
 
   private async startStdio(): Promise<void> {
@@ -566,6 +629,7 @@ export class CodexAppServerClient extends EventEmitter {
     const capabilities: InitializeCapabilities = {
       experimentalApi: true,
       requestAttestation: true,
+      mcpServerOpenaiFormElicitation: true,
     };
     const params: InitializeParams = {
       clientInfo: {

@@ -512,6 +512,27 @@ export function summarizeUnknownObject(value: unknown, max = 3): string {
   return parts.join(' · ');
 }
 
+function summarizeImportResults(params: Record<string, unknown>): string {
+  const results = Array.isArray(params.itemTypeResults) ? params.itemTypeResults : [];
+  let successes = 0;
+  let failures = 0;
+  for (const result of results) {
+    if (!result || typeof result !== 'object') {
+      continue;
+    }
+    const record = result as Record<string, unknown>;
+    successes += Array.isArray(record.successes) ? record.successes.length : 0;
+    failures += Array.isArray(record.failures) ? record.failures.length : 0;
+  }
+  const importId = typeof params.importId === 'string' ? params.importId : '';
+  const summary = [
+    importId ? `ID ${importId}` : '',
+    successes ? `成功 ${successes}` : '',
+    failures ? `失败 ${failures}` : '',
+  ].filter(Boolean).join(' · ');
+  return summary || summarizeUnknownObject(params, 4);
+}
+
 export function formatNotificationTitle(method: string, params: Record<string, unknown>): string {
   if (method === 'mcpServer/startupStatus/updated') {
     return 'MCP 服务状态';
@@ -560,6 +581,15 @@ export function formatNotificationTitle(method: string, params: Record<string, u
   }
   if (method === 'externalAgentConfig/import/completed') {
     return '外部代理配置导入完成';
+  }
+  if (method === 'externalAgentConfig/import/progress') {
+    return '外部代理配置导入进度';
+  }
+  if (method === 'thread/deleted') {
+    return '会话已删除';
+  }
+  if (method === 'model/safetyBuffering/updated') {
+    return '安全缓冲';
   }
   if (method === 'fs/changed') {
     return '文件系统更新';
@@ -667,7 +697,19 @@ export function formatNotificationMessage(method: string, params: Record<string,
     return `共 ${data.length} 个应用`;
   }
   if (method === 'externalAgentConfig/import/completed') {
-    return '外部代理配置已导入';
+    return summarizeImportResults(params) || '外部代理配置已导入';
+  }
+  if (method === 'externalAgentConfig/import/progress') {
+    return summarizeImportResults(params) || '外部代理配置导入中';
+  }
+  if (method === 'thread/deleted') {
+    return typeof params.threadId === 'string' ? params.threadId : '会话已删除';
+  }
+  if (method === 'model/safetyBuffering/updated') {
+    const model = typeof params.model === 'string' ? params.model : '';
+    const fasterModel = typeof params.fasterModel === 'string' ? params.fasterModel : '';
+    const show = params.showBufferingUi === true ? '缓冲中' : '已结束';
+    return [model, show, fasterModel ? `可切换 ${fasterModel}` : ''].filter(Boolean).join(' · ');
   }
   if (method === 'fs/changed') {
     const watchId = typeof params.watchId === 'string' ? params.watchId : '';

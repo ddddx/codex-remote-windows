@@ -72,6 +72,13 @@ export async function ensureCodexReady(app: FastifyInstance): Promise<void> {
 
   app.codexClient.on('server_request', (msg: ServerRequest) => {
     try {
+      if (msg.method === 'currentTime/read') {
+        app.codexClient.respond(msg.id, {
+          currentTimeAt: Math.floor(Date.now() / 1000),
+        });
+        return;
+      }
+
       const request = createServerRequestRecord(msg);
       app.runtimeState.serverRequestsById.set(request.requestId, request);
       persistServerRequest(app, request);

@@ -84,6 +84,19 @@ type CodexClientLike = {
   ) => Promise<unknown>;
   compactThread: (threadId: string) => Promise<unknown>;
   stopBackgroundTerminals: (threadId: string) => Promise<unknown>;
+  listBackgroundTerminals: (
+    threadId: string,
+    options?: { cursor?: string | null; limit?: number | null },
+  ) => Promise<unknown>;
+  listAllBackgroundTerminals: (
+    threadId: string,
+    limit?: number,
+  ) => Promise<Array<Record<string, unknown>>>;
+  terminateBackgroundTerminal: (
+    threadId: string,
+    processId: string,
+  ) => Promise<unknown>;
+  deleteThread: (threadId: string) => Promise<unknown>;
   setThreadName: (threadId: string, name: string) => Promise<unknown>;
   setThreadGoal: (
     threadId: string,
@@ -102,6 +115,9 @@ type CodexClientLike = {
   readConfig: (options?: {
     cwd?: string;
   }) => Promise<{ config?: Record<string, unknown> }>;
+  readWorkspaceMessages: () => Promise<unknown>;
+  consumeRateLimitResetCredit: (idempotencyKey: string) => Promise<unknown>;
+  readExternalAgentImportHistories: () => Promise<unknown>;
   respond: (id: string | number, result?: unknown) => void;
   respondError: (id: string | number, error: unknown) => void;
   on: (event: string, listener: (...args: any[]) => void) => unknown;

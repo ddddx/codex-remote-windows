@@ -718,6 +718,7 @@ function compactText(value: unknown, max = 280): string {
 function formatMethodLabel(method: string): string {
   const labels: Record<string, string> = {
     'thread/closed': '会话已关闭',
+    'thread/deleted': '会话已删除',
     'thread/archived': '会话已归档',
     'thread/unarchived': '会话已取消归档',
     'thread/compacted': '上下文压缩',
@@ -736,6 +737,9 @@ function formatMethodLabel(method: string): string {
     'command/exec/outputDelta': '命令输出',
     'rawResponseItem/completed': '原始响应项',
     'model/verification': '模型校验',
+    'model/safetyBuffering/updated': '安全缓冲',
+    'externalAgentConfig/import/progress': '外部代理导入进度',
+    'externalAgentConfig/import/completed': '外部代理导入完成',
   };
   return labels[method] || method || '事件';
 }

@@ -204,6 +204,21 @@ export function createServerRequestRecord(msg: ServerRequest): RuntimeServerRequ
         message: '生成 attestation token',
         raw: toRecord(msg.params),
       };
+    case 'currentTime/read':
+      return {
+        requestId,
+        rawRequestId: msg.id,
+        method: msg.method,
+        kind: 'current_time',
+        status: 'pending',
+        createdAt,
+        submittedAt: null,
+        threadId: msg.params.threadId,
+        turnId: null,
+        itemId: null,
+        message: '读取当前时间',
+        raw: toRecord(msg.params),
+      };
     default:
       return assertNever(msg);
   }

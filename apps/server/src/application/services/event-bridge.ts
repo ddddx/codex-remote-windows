@@ -206,6 +206,21 @@ function broadcastGenericThreadEvent(
   return true;
 }
 
+function removeRuntimeThread(app: FastifyInstance, threadId: string): void {
+  app.runtimeState.tabsById.delete(threadId);
+  app.runtimeState.turnPlansByThread.delete(threadId);
+  app.runtimeState.turnDiffsByThread.delete(threadId);
+  app.runtimeState.supplementalItemsByThread.delete(threadId);
+  app.runtimeState.timelineEventsByThread.delete(threadId);
+  for (const [requestId, request] of [...app.runtimeState.serverRequestsById]) {
+    if (request.threadId === threadId) {
+      app.runtimeState.serverRequestsById.delete(requestId);
+      app.repositories.pendingRequests.removePendingRequest(requestId);
+    }
+  }
+  app.repositories.sessions.removeSession(threadId);
+}
+
 function flushAgentDeltaByKey(app: FastifyInstance, key: string): void {
   const pending = pendingAgentDeltas.get(key);
   if (!pending) {
@@ -620,6 +635,32 @@ export function handleCodexNotification(
     return;
   }
 
+  if (method === 'model/safetyBuffering/updated') {
+    const notification = msg.params as v2.ModelSafetyBufferingUpdatedNotification;
+    const current = app.runtimeState.tabsById.get(notification.threadId);
+    if (current && notification.showBufferingUi) {
+      const tab = upsertRuntimeTab(app, {
+        ...current,
+        status: current.status === 'idle' ? 'running' : current.status,
+        updatedAt: nowUnix(),
+      });
+      broadcastMessage(app, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
+    }
+    broadcastThreadTimelineMessage(app, {
+      type: 'thread_event',
+      threadId: notification.threadId,
+      turnId: notification.turnId,
+      method,
+      params: notification as unknown as Record<string, unknown>,
+      message: notification.showBufferingUi
+        ? `安全缓冲中${notification.fasterModel ? `，可切换到 ${notification.fasterModel}` : ''}`
+        : '安全缓冲已结束',
+      status: notification.showBufferingUi ? 'running' : 'completed',
+      createdAt: Date.now(),
+    });
+    return;
+  }
+
   if (method === 'thread/closed' && typeof params.threadId === 'string') {
     const current = app.runtimeState.tabsById.get(params.threadId);
     if (current) {
@@ -634,8 +675,28 @@ export function handleCodexNotification(
     return;
   }
 
+  if (method === 'thread/deleted' && typeof params.threadId === 'string') {
+    removeRuntimeThread(app, params.threadId);
+    broadcastMessage(app, { type: 'tab_removed', threadId: params.threadId });
+    broadcastMessage(app, {
+      type: 'notification',
+      method,
+      params,
+    });
+    return;
+  }
+
   if (method === 'thread/archived' || method === 'thread/unarchived') {
     broadcastGenericThreadEvent(app, method, params);
+    return;
+  }
+
+  if (method === 'externalAgentConfig/import/progress') {
+    broadcastMessage(app, {
+      type: 'notification',
+      method,
+      params,
+    });
     return;
   }
 

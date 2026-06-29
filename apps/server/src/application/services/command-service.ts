@@ -93,6 +93,24 @@ function summarizeGoal(goal: unknown): string {
   return `目标：${objective || '未命名'}${status ? ` (${status})` : ''}${tokenBudget}`;
 }
 
+function summarizeBackgroundTerminals(terminals: unknown): string {
+  if (!Array.isArray(terminals) || !terminals.length) {
+    return '当前没有后台终端。';
+  }
+  return terminals
+    .slice(0, 8)
+    .map((terminal) => {
+      const source = terminal && typeof terminal === 'object' ? terminal as Record<string, unknown> : {};
+      const processId = typeof source.processId === 'string' ? source.processId : '';
+      const command = typeof source.command === 'string' ? source.command : '';
+      const cwd = typeof source.cwd === 'string' ? source.cwd : '';
+      const cpu = typeof source.cpuPercent === 'number' ? `CPU ${source.cpuPercent.toFixed(1)}%` : '';
+      const memory = typeof source.rssKb === 'number' ? `${Math.round(source.rssKb / 1024)} MB` : '';
+      return [processId, command, cwd, cpu, memory].filter(Boolean).join(' · ');
+    })
+    .join('\n');
+}
+
 function notifyCommandResult(app: FastifyInstance, threadId: string, text: string, status: 'completed' | 'failed' = 'completed'): void {
   broadcastMessage(app, {
     type: 'thread_event',
@@ -154,6 +172,28 @@ export function createCommandService(app: FastifyInstance) {
       if (parsed.name === 'stop' || parsed.name === 'clean') {
         await app.codexClient.stopBackgroundTerminals(message.threadId);
         notifyCommandResult(app, message.threadId, '已停止后台终端。');
+        return;
+      }
+
+      if (parsed.name === 'bg' || parsed.name === 'background') {
+        const [subcommand, ...rest] = parsed.args.split(/\s+/).filter(Boolean);
+        if (subcommand === 'stop' || subcommand === 'terminate' || subcommand === 'kill') {
+          const processId = rest.join(' ').trim();
+          if (!processId) {
+            throw new Error('请输入要终止的 processId。');
+          }
+          const result = await app.codexClient.terminateBackgroundTerminal(message.threadId, processId) as { terminated?: boolean };
+          notifyCommandResult(app, message.threadId, result.terminated ? `已终止后台终端：${processId}` : `没有找到后台终端：${processId}`);
+          return;
+        }
+        const terminals = await app.codexClient.listAllBackgroundTerminals(message.threadId);
+        notifyCommandResult(app, message.threadId, summarizeBackgroundTerminals(terminals));
+        return;
+      }
+
+      if (parsed.name === 'delete') {
+        await app.codexClient.deleteThread(message.threadId);
+        notifyCommandResult(app, message.threadId, '会话已删除。');
         return;
       }
 

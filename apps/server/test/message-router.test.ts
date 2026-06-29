@@ -29,8 +29,12 @@ function createAppStub() {
     closeWindowForThread: [] as unknown[],
     refreshTabWindowStatus: [] as unknown[],
     upsertSession: [] as unknown[],
+    removeSession: [] as unknown[],
     upsertPendingRequest: [] as unknown[],
     removePendingRequest: [] as unknown[],
+    listBackgroundTerminals: [] as unknown[],
+    terminateBackgroundTerminal: [] as unknown[],
+    deleteThread: [] as unknown[],
     upsertThreadPreference: [] as unknown[],
     appendTimelineEvent: [] as Array<{
       threadId: string;
@@ -53,7 +57,9 @@ function createAppStub() {
         upsertSession(record: unknown) {
           calls.upsertSession.push(record);
         },
-        removeSession() {},
+        removeSession(threadId: string) {
+          calls.removeSession.push(threadId);
+        },
       },
       pendingRequests: {
         listPendingRequests() {
@@ -193,6 +199,50 @@ function createAppStub() {
       },
       async readConfig() {
         return { config: {} };
+      },
+      async listBackgroundTerminals(threadId: string, options?: unknown) {
+        calls.listBackgroundTerminals.push({ threadId, options });
+        return {
+          data: [
+            {
+              processId: 'proc-1',
+              command: 'npm start',
+              cwd: 'C:\\workspace',
+              cpuPercent: 2,
+              rssKb: 2048,
+            },
+          ],
+          nextCursor: null,
+        };
+      },
+      async listAllBackgroundTerminals(threadId: string) {
+        calls.listBackgroundTerminals.push({ threadId, all: true });
+        return [
+          {
+            processId: 'proc-1',
+            command: 'npm start',
+            cwd: 'C:\\workspace',
+            cpuPercent: 2,
+            rssKb: 2048,
+          },
+        ];
+      },
+      async terminateBackgroundTerminal(threadId: string, processId: string) {
+        calls.terminateBackgroundTerminal.push({ threadId, processId });
+        return { terminated: true };
+      },
+      async deleteThread(threadId: string) {
+        calls.deleteThread.push(threadId);
+        return {};
+      },
+      async readWorkspaceMessages() {
+        return { featureEnabled: true, messages: [] };
+      },
+      async consumeRateLimitResetCredit() {
+        return { outcome: 'nothingToReset' };
+      },
+      async readExternalAgentImportHistories() {
+        return { data: [] };
       },
       respond(id: string | number, result: unknown) {
         calls.respond.push({ id, result });
@@ -617,6 +667,36 @@ test('turn_send failure returns correlated error payload', async () => {
   assert.equal((socket.sent[0] as any).clientMessageId, 'web-123');
 });
 
+test('command_send supports background terminal list and terminate', async () => {
+  const { app, calls } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  await routeClientMessage(app, socket as any, {
+    type: 'command_send',
+    threadId: 'thread-bg',
+    text: '/bg',
+  });
+  await routeClientMessage(app, socket as any, {
+    type: 'command_send',
+    threadId: 'thread-bg',
+    text: '/bg stop proc-1',
+  });
+
+  assert.deepEqual(calls.listBackgroundTerminals[0], {
+    threadId: 'thread-bg',
+    all: true,
+  });
+  assert.deepEqual(calls.terminateBackgroundTerminal[0], {
+    threadId: 'thread-bg',
+    processId: 'proc-1',
+  });
+  assert.equal((socket.sent[0] as any)?.type, 'thread_event');
+  assert.match((socket.sent[0] as any)?.message, /proc-1/);
+  assert.equal((socket.sent[1] as any)?.type, 'thread_event');
+  assert.match((socket.sent[1] as any)?.message, /已终止/);
+});
+
 test('server_request_respond replies through codex client', async () => {
   const { app, calls } = createAppStub();
   const socket = createSocket();
@@ -683,6 +763,110 @@ test('server_request_respond preserves structured approval decisions under decis
       },
     },
   });
+});
+
+test('bridge answers currentTime/read server requests without user approval', async () => {
+  const { app, calls, listeners } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+
+  await ensureCodexReady(app);
+  const serverRequestListener = listeners.get('server_request')?.[0];
+  assert.ok(serverRequestListener);
+
+  const before = Math.floor(Date.now() / 1000);
+  serverRequestListener?.({
+    method: 'currentTime/read',
+    id: 'time-1',
+    params: { threadId: 'thread-time' },
+  });
+  const after = Math.floor(Date.now() / 1000);
+
+  assert.equal(calls.respond.length, 1);
+  assert.equal((calls.respond[0] as any).id, 'time-1');
+  const currentTimeAt = (calls.respond[0] as any).result.currentTimeAt;
+  assert.equal(typeof currentTimeAt, 'number');
+  assert.ok(currentTimeAt >= before && currentTimeAt <= after);
+  assert.equal(socket.sent.length, 0);
+  assert.equal(app.runtimeState.serverRequestsById.size, 0);
+});
+
+test('thread/deleted notifications remove local tab and pending thread requests', () => {
+  const { app, calls } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+  app.runtimeState.tabsById.set('thread-delete', {
+    threadId: 'thread-delete',
+    name: 'Delete me',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+  });
+  app.runtimeState.turnPlansByThread.set('thread-delete', new Map());
+  app.runtimeState.serverRequestsById.set('request-delete', {
+    requestId: 'request-delete',
+    rawRequestId: 'raw-delete',
+    method: 'item/tool/requestUserInput',
+    kind: 'user_input',
+    status: 'pending',
+    createdAt: Date.now(),
+    threadId: 'thread-delete',
+    turnId: null,
+    itemId: null,
+  });
+
+  handleCodexNotification(app, {
+    method: 'thread/deleted',
+    params: { threadId: 'thread-delete' },
+  });
+
+  assert.equal(app.runtimeState.tabsById.has('thread-delete'), false);
+  assert.equal(app.runtimeState.turnPlansByThread.has('thread-delete'), false);
+  assert.equal(app.runtimeState.serverRequestsById.has('request-delete'), false);
+  assert.deepEqual(calls.removeSession, ['thread-delete']);
+  assert.deepEqual(calls.removePendingRequest, ['request-delete']);
+  assert.equal((socket.sent[0] as any)?.type, 'tab_removed');
+  assert.equal((socket.sent[0] as any)?.threadId, 'thread-delete');
+});
+
+test('model/safetyBuffering/updated is reflected as running timeline state', () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  app.runtimeState.clients.add(socket as any);
+  app.runtimeState.tabsById.set('thread-buffer', {
+    threadId: 'thread-buffer',
+    name: 'Buffer',
+    cwd: 'C:\\workspace',
+    status: 'idle',
+    createdAt: 1,
+    updatedAt: 1,
+    windowStatus: 'attached',
+  });
+
+  handleCodexNotification(app, {
+    method: 'model/safetyBuffering/updated',
+    params: {
+      threadId: 'thread-buffer',
+      turnId: 'turn-buffer',
+      model: 'gpt-5.4',
+      useCases: ['coding'],
+      reasons: ['safety'],
+      showBufferingUi: true,
+      fasterModel: 'gpt-5.4-mini',
+    },
+  });
+
+  assert.equal(app.runtimeState.tabsById.get('thread-buffer')?.status, 'running');
+  assert.equal((socket.sent[0] as any)?.type, 'tab_updated');
+  assert.equal((socket.sent[1] as any)?.type, 'thread_event');
+  assert.equal((socket.sent[1] as any)?.method, 'model/safetyBuffering/updated');
+  assert.equal((socket.sent[1] as any)?.status, 'running');
+  const cachedEvents =
+    app.runtimeState.timelineEventsByThread.get('thread-buffer') || [];
+  assert.equal(cachedEvents.length, 1);
+  assert.equal(cachedEvents[0]?.type, 'thread_event');
 });
 
 test('bridge forwards plan, progress, hook and guardian notifications', async () => {
