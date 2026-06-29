@@ -313,6 +313,86 @@ void main() {
     state.dispose();
   });
 
+  test('thread sync replays assistant deltas into one live message', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-live-deltas';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'timelineEvents': [
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-live-deltas',
+          'itemId': 'assistant-live-deltas',
+          'delta': 'hello ',
+          'startedAt': 1,
+          'sequence': 1,
+        },
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-live-deltas',
+          'itemId': 'assistant-live-deltas',
+          'delta': 'world',
+          'startedAt': 2,
+          'sequence': 2,
+        },
+      ],
+    });
+
+    final assistant = state.timelineByThread[threadId]!.singleWhere(
+      (entry) => entry.id == 'assistant-live-deltas',
+    );
+    expect(assistant.text, 'hello world');
+    expect(assistant.partial, isTrue);
+    state.dispose();
+  });
+
+  test('thread sync replaces stale partial assistant text while replaying', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-stale-live-deltas';
+
+    state.handleServerMessage({
+      'type': 'agent_delta',
+      'threadId': threadId,
+      'turnId': 'turn-stale-live-deltas',
+      'itemId': 'assistant-stale-live-deltas',
+      'delta': 'hello ',
+    });
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'timelineEvents': [
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-stale-live-deltas',
+          'itemId': 'assistant-stale-live-deltas',
+          'delta': 'hello ',
+          'startedAt': 1,
+          'sequence': 1,
+        },
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-stale-live-deltas',
+          'itemId': 'assistant-stale-live-deltas',
+          'delta': 'world',
+          'startedAt': 2,
+          'sequence': 2,
+        },
+      ],
+    });
+
+    final assistant = state.timelineByThread[threadId]!.singleWhere(
+      (entry) => entry.id == 'assistant-stale-live-deltas',
+    );
+    expect(assistant.text, 'hello world');
+    state.dispose();
+  });
+
   test('dedupes optimistic user message after thread sync', () async {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
@@ -794,6 +874,53 @@ void main() {
     expect(assistantEntries, hasLength(1));
     expect(assistantEntries.single.text, fullText);
     expect(assistantEntries.single.partial, isFalse);
+    state.dispose();
+  });
+
+  test('thread sync uses deltas when completed assistant item has no text', () {
+    final state = CodexAppState(_TestBridge());
+    const threadId = 'thread-empty-completed-fallback';
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': threadId,
+      'timelineEvents': [
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-empty-completed-fallback',
+          'itemId': 'assistant-empty-completed-fallback',
+          'delta': '流式',
+          'sequence': 1,
+        },
+        {
+          'type': 'agent_delta',
+          'threadId': threadId,
+          'turnId': 'turn-empty-completed-fallback',
+          'itemId': 'assistant-empty-completed-fallback',
+          'delta': '兜底',
+          'sequence': 2,
+        },
+        {
+          'type': 'item_completed',
+          'threadId': threadId,
+          'turnId': 'turn-empty-completed-fallback',
+          'itemId': 'assistant-empty-completed-fallback',
+          'sequence': 3,
+          'item': {
+            'id': 'assistant-empty-completed-fallback',
+            'type': 'agentMessage',
+            'status': 'completed',
+          },
+        },
+      ],
+    });
+
+    final assistant = state.activeTimeline.singleWhere(
+      (entry) => entry.itemId == 'assistant-empty-completed-fallback',
+    );
+    expect(assistant.text, '流式兜底');
+    expect(assistant.partial, isFalse);
     state.dispose();
   });
 
