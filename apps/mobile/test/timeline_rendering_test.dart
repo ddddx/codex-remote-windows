@@ -116,6 +116,45 @@ void main() {
     expect(find.text('运行中'), findsOneWidget);
     expect(find.text('完成'), findsOneWidget);
   });
+
+  testWidgets('renders codex notification messages by type', (tester) async {
+    final state = CodexAppState(_TestBridge())
+      ..cookie = 'cookie'
+      ..serverUrl = 'http://192.168.2.15:18637'
+      ..token = 'token'
+      ..connectionStatus = 'connected'
+      ..activeSessionId = 'thread-1'
+      ..sessions = [SessionItem(threadId: 'thread-1', name: '测试会话')]
+      ..notices = [
+        {
+          'kind': 'codex_notification',
+          'level': 'warning',
+          'category': 'deprecation',
+          'method': 'deprecationNotice',
+          'title': '弃用通知',
+          'message': 'persistExtendedHistory is deprecated',
+        },
+        {
+          'kind': 'codex_notification',
+          'level': 'error',
+          'category': 'mcp',
+          'method': 'mcpServer/startupStatus/updated',
+          'title': 'MCP 服务状态',
+          'message': 'github · failed',
+        },
+      ];
+    addTearDown(state.dispose);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(state: state)));
+    await tester.tap(find.byTooltip('通知'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Codex · 弃用'), findsOneWidget);
+    expect(find.text('Codex · MCP'), findsOneWidget);
+    expect(find.text('deprecationNotice'), findsOneWidget);
+    expect(find.text('mcpServer/startupStatus/updated'), findsOneWidget);
+  });
 }
 
 class _TestBridge extends NativeBridge {

@@ -758,6 +758,29 @@ void main() {
     state.dispose();
   });
 
+  test(
+    'stores codex notification method and category for app notice styling',
+    () {
+      final state = CodexAppState(_TestBridge());
+      addTearDown(state.dispose);
+
+      state.handleServerMessage({
+        'type': 'notification',
+        'method': 'mcpServer/startupStatus/updated',
+        'params': {'name': 'github', 'status': 'failed', 'error': '启动失败'},
+      });
+
+      expect(state.notices, hasLength(1));
+      expect(readString(state.notices.single, 'kind'), 'codex_notification');
+      expect(
+        readString(state.notices.single, 'method'),
+        'mcpServer/startupStatus/updated',
+      );
+      expect(readString(state.notices.single, 'category'), 'mcp');
+      expect(readString(state.notices.single, 'level'), 'error');
+    },
+  );
+
   test('restores turn plans from loose maps and replayed updates', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-plan';

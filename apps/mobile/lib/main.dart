@@ -3785,24 +3785,205 @@ Future<void> showNoticesSheet(BuildContext context, CodexAppState state) async {
           Text('通知', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           if (state.notices.isEmpty) const ListTile(title: Text('暂无通知')),
-          for (var i = 0; i < state.notices.length; i++)
-            ListTile(
-              leading: Icon(
-                state.notices[i]['level'] == 'error'
-                    ? Icons.error_outline
-                    : Icons.info_outline,
-              ),
-              title: Text('${state.notices[i]['title'] ?? '通知'}'),
-              subtitle: Text('${state.notices[i]['message'] ?? ''}'),
-              trailing: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => state.dismissNotice(i),
-              ),
+          for (var i = 0; i < state.notices.length; i++) ...[
+            _NoticeTile(
+              notice: state.notices[i],
+              onDismiss: () => state.dismissNotice(i),
             ),
+            const SizedBox(height: 8),
+          ],
         ],
       ),
     ),
   );
+}
+
+class _NoticeTile extends StatelessWidget {
+  const _NoticeTile({required this.notice, required this.onDismiss});
+
+  final JsonMap notice;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _noticeStyle(context, notice);
+    final method = readString(notice, 'method');
+    final message = readString(notice, 'message');
+    return Container(
+      decoration: BoxDecoration(
+        color: style.background,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: style.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 9, 6, 9),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: style.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(style.icon, color: style.accent, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          readString(notice, 'title', '通知'),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: style.accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(
+                          style.label,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: style.accent,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (message.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      message,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: style.foreground),
+                    ),
+                  ],
+                  if (method.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      method,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: style.foreground.withValues(alpha: 0.72),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close),
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoticeStyle {
+  const _NoticeStyle({
+    required this.icon,
+    required this.label,
+    required this.accent,
+    required this.background,
+    required this.foreground,
+    required this.border,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color accent;
+  final Color background;
+  final Color foreground;
+  final Color border;
+}
+
+_NoticeStyle _noticeStyle(BuildContext context, JsonMap notice) {
+  final colors = Theme.of(context).colorScheme;
+  final category = readString(notice, 'category');
+  final level = readString(notice, 'level', 'info');
+  final (icon, label, accent) = switch (category) {
+    'guardian' => (Icons.security_outlined, 'Codex · 安全', colors.tertiary),
+    'deprecation' => (Icons.event_busy_outlined, 'Codex · 弃用', colors.tertiary),
+    'config' => (Icons.tune_outlined, 'Codex · 配置', colors.tertiary),
+    'warning' => (Icons.warning_amber_outlined, 'Codex · 警告', colors.tertiary),
+    'mcp' => (Icons.hub_outlined, 'Codex · MCP', colors.primary),
+    'account' => (
+      Icons.account_circle_outlined,
+      'Codex · 账户',
+      Colors.green.shade700,
+    ),
+    'account_error' => (
+      Icons.account_circle_outlined,
+      'Codex · 账户',
+      colors.error,
+    ),
+    'remote' => (Icons.settings_remote_outlined, 'Codex · 远程', colors.primary),
+    'remote_error' => (
+      Icons.settings_remote_outlined,
+      'Codex · 远程',
+      colors.error,
+    ),
+    'agent_config' => (Icons.extension_outlined, 'Codex · 代理', colors.primary),
+    'search' => (Icons.manage_search_outlined, 'Codex · 搜索', colors.primary),
+    'filesystem' => (
+      Icons.folder_outlined,
+      'Codex · 文件',
+      Colors.green.shade700,
+    ),
+    'thread' => (Icons.forum_outlined, 'Codex · 会话', colors.primary),
+    'model' => (Icons.psychology_outlined, 'Codex · 模型', colors.primary),
+    'app' => (Icons.apps_outlined, 'Codex · 应用', colors.primary),
+    'system' => (Icons.notifications_outlined, 'Codex · 系统', colors.primary),
+    _ => _fallbackNoticeStyleParts(colors, level),
+  };
+  final background = level == 'error'
+      ? colors.errorContainer.withValues(alpha: 0.34)
+      : level == 'warning'
+      ? colors.tertiaryContainer.withValues(alpha: 0.28)
+      : colors.surfaceContainerLow;
+  return _NoticeStyle(
+    icon: icon,
+    label: label,
+    accent: accent,
+    background: background,
+    foreground: colors.onSurfaceVariant,
+    border: accent.withValues(alpha: 0.24),
+  );
+}
+
+(IconData, String, Color) _fallbackNoticeStyleParts(
+  ColorScheme colors,
+  String level,
+) {
+  if (level == 'error') {
+    return (Icons.error_outline, '错误', colors.error);
+  }
+  if (level == 'warning') {
+    return (Icons.warning_amber_outlined, '警告', colors.tertiary);
+  }
+  return (Icons.info_outline, '通知', colors.primary);
 }
 
 Future<void> showUsageSheet(BuildContext context, UsageDisplay usage) async {

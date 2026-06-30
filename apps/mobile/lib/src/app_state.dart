@@ -1293,6 +1293,7 @@ class CodexAppState extends ChangeNotifier {
                   type == 'backend_error'
               ? 'error'
               : 'warning',
+          'kind': 'server_notice',
           'title': readString(
             message,
             'noticeKind',
@@ -1429,6 +1430,7 @@ class CodexAppState extends ChangeNotifier {
             : kind == 'warning'
             ? 'warning'
             : 'info',
+        'kind': 'global_notice',
         'title': kind.isEmpty ? '通知' : kind,
         'message': text,
         'threadId': readString(item, 'threadId'),
@@ -3304,6 +3306,9 @@ class CodexAppState extends ChangeNotifier {
     final paramsMap = params is JsonMap ? params : const <String, dynamic>{};
     _pushNotice({
       'level': _notificationLevel(method, paramsMap),
+      'kind': 'codex_notification',
+      'method': method,
+      'category': _notificationCategory(method, paramsMap),
       'title': _notificationTitle(method),
       'message': params is JsonMap
           ? _notificationMessage(method, params)
@@ -3996,6 +4001,48 @@ class CodexAppState extends ChangeNotifier {
       return 'error';
     }
     return 'info';
+  }
+
+  String _notificationCategory(String method, JsonMap params) {
+    if (method == 'guardianWarning') {
+      return 'guardian';
+    }
+    if (method == 'deprecationNotice' || method == 'deprecated') {
+      return 'deprecation';
+    }
+    if (method == 'configWarning' || method == 'windows/worldWritableWarning') {
+      return 'config';
+    }
+    if (method.startsWith('mcpServer/')) {
+      return 'mcp';
+    }
+    if (method.startsWith('account/')) {
+      return params['success'] == false ? 'account_error' : 'account';
+    }
+    if (method.startsWith('remoteControl/')) {
+      return readString(params, 'status') == 'errored'
+          ? 'remote_error'
+          : 'remote';
+    }
+    if (method.startsWith('externalAgentConfig/')) {
+      return 'agent_config';
+    }
+    if (method.startsWith('fuzzyFileSearch/')) {
+      return 'search';
+    }
+    if (method.startsWith('fs/')) {
+      return 'filesystem';
+    }
+    if (method.startsWith('thread/')) {
+      return 'thread';
+    }
+    if (method.startsWith('model/')) {
+      return 'model';
+    }
+    if (method.startsWith('app/')) {
+      return 'app';
+    }
+    return 'system';
   }
 
   String _summarizeMap(JsonMap map) {
