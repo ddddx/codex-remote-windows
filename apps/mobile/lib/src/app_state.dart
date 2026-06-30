@@ -1330,6 +1330,7 @@ class CodexAppState extends ChangeNotifier {
   void _scheduleUiNotify({required bool shell, required bool timeline}) {
     if (shell) {
       _scheduleShellNotify();
+      return;
     }
     if (timeline) {
       _scheduleTimelineNotify();
@@ -2793,55 +2794,32 @@ class CodexAppState extends ChangeNotifier {
     if (threadId.isEmpty || delta.isEmpty) {
       return;
     }
-    final entries = [
-      ...(timelineByThread[threadId] ?? const <TimelineEntry>[]),
-    ];
-    final index = entries.indexWhere(
-      (entry) =>
-          entry.id == entryId ||
-          (rawItemId.isNotEmpty && entry.id == 'agent-$rawItemId') ||
-          (entry.type == 'message' &&
-              entry.itemId == itemId &&
-              entry.role == 'assistant'),
-    );
-    if (index >= 0) {
-      final current = entries[index];
-      entries[index] = TimelineEntry(
+    final current =
+        _findEntry(threadId, entryId) ??
+        (rawItemId.isEmpty ? null : _findEntry(threadId, 'agent-$rawItemId')) ??
+        _findEntryByItem(threadId, itemId);
+    _upsertStreamingEntry(
+      threadId,
+      TimelineEntry(
         id: entryId,
         type: 'message',
         title: 'Codex',
         role: 'assistant',
-        text: current.text + delta,
-        status: current.status,
-        turnId: current.turnId.ifEmpty(turnId),
+        text: '${current?.text ?? ''}$delta',
+        status: current?.status ?? '',
+        turnId: current?.turnId.ifEmpty(turnId) ?? turnId,
         itemId: itemId,
-        meta: current.meta,
-        patch: current.patch,
-        changes: current.changes,
-        attachments: current.attachments,
-        createdAt: current.createdAt,
-        sequence: current.sequence,
+        meta: current?.meta ?? const [],
+        patch: current?.patch ?? '',
+        changes: current?.changes ?? const [],
+        attachments: current?.attachments ?? const [],
+        createdAt: current?.createdAt ?? _eventTime(event),
+        sequence: current?.sequence ?? 0,
         partial: true,
-        details: current.details,
-        raw: current.raw,
-      );
-    } else {
-      entries.add(
-        TimelineEntry(
-          id: entryId,
-          type: 'message',
-          title: 'Codex',
-          role: 'assistant',
-          text: delta,
-          turnId: turnId,
-          itemId: itemId,
-          createdAt: _eventTime(event),
-          partial: true,
-          raw: event,
-        ),
-      );
-    }
-    timelineByThread[threadId] = _dedupeEntries(entries);
+        details: current?.details,
+        raw: current?.raw ?? event,
+      ),
+    );
   }
 
   void _appendPlan(JsonMap event) {
@@ -2861,7 +2839,7 @@ class CodexAppState extends ChangeNotifier {
     );
     final id = 'plan:$itemId';
     final current = _findEntry(threadId, id);
-    _appendEntry(
+    _upsertStreamingEntry(
       threadId,
       TimelineEntry(
         id: id,
@@ -2984,7 +2962,7 @@ class CodexAppState extends ChangeNotifier {
     if (method == 'item/reasoning/summaryTextDelta' ||
         method == 'item/reasoning/summaryPartAdded' ||
         method == 'item/reasoning/textDelta') {
-      _appendEntry(
+      _upsertStreamingEntry(
         threadId,
         TimelineEntry(
           id: id,
@@ -3010,7 +2988,7 @@ class CodexAppState extends ChangeNotifier {
       final details = _entryDetails(current);
       final nextOutput = '${_entryOutput(details)}$delta';
       final nextDetails = _detailsWithOutput(details, nextOutput);
-      _appendEntry(
+      _upsertStreamingEntry(
         threadId,
         TimelineEntry(
           id: id,
@@ -3049,7 +3027,7 @@ class CodexAppState extends ChangeNotifier {
         nextOutput.trim().isNotEmpty ? nextOutput : current?.patch ?? '',
       );
       final nextDetails = _detailsWithOutput(details, nextOutput);
-      _appendEntry(
+      _upsertStreamingEntry(
         threadId,
         TimelineEntry(
           id: id,
@@ -3076,7 +3054,7 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
 
-    _appendEntry(
+    _upsertStreamingEntry(
       threadId,
       TimelineEntry(
         id: id,
@@ -3129,7 +3107,7 @@ class CodexAppState extends ChangeNotifier {
         .ifEmpty(_summarizeMap(params));
     final currentDetails = _entryDetails(current);
     final nextText = streaming ? '${current?.text ?? ''}$delta' : delta;
-    _appendEntry(
+    _upsertStreamingEntry(
       threadId,
       TimelineEntry(
         id: id,
@@ -3166,7 +3144,7 @@ class CodexAppState extends ChangeNotifier {
       'id',
       '$threadId:${readString(event, 'turnId', 'turn')}:${readString(event, 'type')}',
     );
-    _appendEntry(
+    _upsertStreamingEntry(
       threadId,
       TimelineEntry(
         id: id,
@@ -3227,7 +3205,7 @@ class CodexAppState extends ChangeNotifier {
       ...(current?.meta ?? const <String>[]),
       readString(event, 'message'),
     ]).takeLast(6);
-    _appendEntry(
+    _upsertStreamingEntry(
       threadId,
       TimelineEntry(
         id: id,
@@ -3268,6 +3246,50 @@ class CodexAppState extends ChangeNotifier {
     }
     entries.sort(_compareTimelineEntries);
     timelineByThread[threadId] = _dedupeEntries(entries);
+  }
+
+  void _upsertStreamingEntry(String threadId, TimelineEntry entry) {
+    if (threadId.isEmpty) {
+      return;
+    }
+    final current = timelineByThread[threadId] ?? const <TimelineEntry>[];
+    if (current.isEmpty) {
+      timelineByThread[threadId] = [entry];
+      return;
+    }
+    final index = _streamingEntryIndex(current, entry);
+    final next = List<TimelineEntry>.of(current, growable: true);
+    if (index >= 0) {
+      next[index] = entry;
+      timelineByThread[threadId] = next;
+      return;
+    }
+    next.add(entry);
+    if (_compareTimelineEntries(current.last, entry) > 0) {
+      next.sort(_compareTimelineEntries);
+    }
+    timelineByThread[threadId] = next;
+  }
+
+  int _streamingEntryIndex(List<TimelineEntry> entries, TimelineEntry entry) {
+    for (var index = 0; index < entries.length; index += 1) {
+      final candidate = entries[index];
+      if (candidate.id == entry.id) {
+        return index;
+      }
+      if (entry.itemId.isEmpty) {
+        continue;
+      }
+      if (candidate.id == 'agent-${entry.itemId}') {
+        return index;
+      }
+      if (candidate.itemId == entry.itemId &&
+          candidate.type == entry.type &&
+          candidate.role == entry.role) {
+        return index;
+      }
+    }
+    return -1;
   }
 
   ({bool shell, bool timeline}) _handleNotification(JsonMap message) {

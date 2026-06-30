@@ -627,6 +627,77 @@ void main() {
     expect(state.timelineByThread['thread-1']?.single.text, 'hello world');
   });
 
+  test('routes mixed shell and timeline changes through one rebuild', () async {
+    final state = CodexAppState(_TestBridge());
+    addTearDown(state.dispose);
+    var shellNotifications = 0;
+    var timelineNotifications = 0;
+    state.addListener(() {
+      shellNotifications += 1;
+    });
+    state.timelineNotifier.addListener(() {
+      timelineNotifications += 1;
+    });
+
+    state.handleServerMessage({
+      'type': 'thread_sync',
+      'threadId': 'thread-1',
+      'turns': [
+        {
+          'id': 'turn-1',
+          'createdAt': 1,
+          'items': [
+            {
+              'id': 'message-1',
+              'type': 'message',
+              'role': 'assistant',
+              'content': [
+                {'type': 'output_text', 'text': 'hello'},
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(shellNotifications, 1);
+    expect(timelineNotifications, 0);
+    expect(state.timelineByThread['thread-1']?.single.text, 'hello');
+  });
+
+  test('keeps streaming command output in one timeline entry', () async {
+    final state = CodexAppState(_TestBridge());
+    addTearDown(state.dispose);
+
+    state.handleServerMessage({
+      'type': 'item_delta',
+      'method': 'item/commandExecution/outputDelta',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'itemId': 'cmd-1',
+      'delta': 'line 1\n',
+      'createdAt': 1,
+    });
+    state.handleServerMessage({
+      'type': 'item_delta',
+      'method': 'item/commandExecution/outputDelta',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'itemId': 'cmd-1',
+      'delta': 'line 2\n',
+      'createdAt': 2,
+    });
+
+    final entries = state.timelineByThread['thread-1'] ?? const [];
+    expect(entries, hasLength(1));
+    expect(entries.single.type, 'command');
+    expect(
+      readString(entries.single.details ?? const {}, 'output'),
+      'line 1\nline 2\n',
+    );
+  });
+
   test('coalesces background timeline refreshes until resume', () async {
     final state = CodexAppState(_TestBridge());
     addTearDown(state.dispose);
