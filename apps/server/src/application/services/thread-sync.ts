@@ -40,6 +40,7 @@ export type RuntimeThread = v2.Thread & {
 };
 
 const DEFAULT_THREAD_SYNC_TURN_LIMIT = 60;
+const MAX_THREAD_SYNC_TURN_LIMIT = 60;
 const MAX_THREAD_SYNC_UNSCOPED_EVENTS = 200;
 
 export function hydratePersistedRuntimeState(app: FastifyInstance): void {
@@ -167,6 +168,13 @@ export function buildThreadHistoryMessage(
 
 export function defaultThreadSyncTurnLimit(): number {
   return DEFAULT_THREAD_SYNC_TURN_LIMIT;
+}
+
+export function normalizeThreadSyncTurnLimit(limit?: number | null): number {
+  if (!Number.isFinite(limit) || !limit) {
+    return DEFAULT_THREAD_SYNC_TURN_LIMIT;
+  }
+  return Math.max(1, Math.min(Math.floor(limit), MAX_THREAD_SYNC_TURN_LIMIT));
 }
 
 function collectTurnIds(turns: ThreadTurnPayload[]): Set<string> {

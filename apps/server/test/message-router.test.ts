@@ -408,6 +408,20 @@ test('thread_sync preserves nested usage payloads for header display', async () 
   });
 });
 
+test('thread_sync forwards requested initial turn limit', async () => {
+  const { app, calls } = createAppStub();
+  const socket = createSocket();
+
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_sync',
+    threadId: '00000000-0000-0000-0000-000000000778',
+    limit: 20,
+  });
+
+  assert.equal(calls.resumeThread.length, 1);
+  assert.equal((calls.resumeThread[0] as any).options.initialTurnsLimit, 20);
+});
+
 test('thread_history_load returns an older turn page with cursor metadata', async () => {
   const { app } = createAppStub();
   const socket = createSocket();

@@ -402,6 +402,7 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('thread_sync'),
     threadId: z.string(),
+    limit: z.number().optional(),
   }),
   z.object({
     type: z.literal('thread_history_load'),

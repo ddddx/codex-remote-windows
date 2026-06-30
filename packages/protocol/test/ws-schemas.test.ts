@@ -36,6 +36,16 @@ test('client message schema accepts thread_options_update payload', () => {
   assert.equal(result.success, true);
 });
 
+test('client message schema accepts thread_sync limit', () => {
+  const result = clientMessageSchema.safeParse({
+    type: 'thread_sync',
+    threadId: 'thread-1',
+    limit: 20,
+  });
+
+  assert.equal(result.success, true);
+});
+
 test('server message schema accepts thread_sync payload', () => {
   const result = serverMessageSchema.safeParse({
     type: 'thread_sync',

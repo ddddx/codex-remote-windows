@@ -60,7 +60,10 @@ export async function routeClientMessage(app: FastifyInstance, socket: WsLike, m
   }
 
   if (message.type === 'thread_sync') {
-    const { tab, message: snapshot } = await app.services.sessions.syncThread(message.threadId);
+    const { tab, message: snapshot } = await app.services.sessions.syncThread(
+      message.threadId,
+      message.limit,
+    );
     sendMessage(app, socket, { type: 'tab_updated', tab: toSessionTabPayload(tab) });
     sendMessage(app, socket, snapshot);
     return;

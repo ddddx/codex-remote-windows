@@ -32,6 +32,7 @@ export type ClientMessage =
   | {
     type: 'thread_sync';
     threadId: string;
+    limit?: number;
   }
   | {
     type: 'thread_history_load';

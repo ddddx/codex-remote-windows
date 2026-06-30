@@ -9,8 +9,8 @@ import 'src/app_state.dart';
 import 'src/models.dart';
 import 'src/native_bridge.dart';
 
-const int _initialRenderableLimit = 120;
-const int _renderablePageSize = 120;
+const int _initialRenderableLimit = 40;
+const int _renderablePageSize = 40;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -255,12 +255,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _syncTimelineScrollState(String? sessionId) {
-    final entries = sessionId == null
-        ? const <TimelineEntry>[]
-        : state.activeTimeline
-              .where(_shouldRenderTimelineEntry)
-              .toList(growable: false);
-    final signature = _timelineSignature(sessionId, entries);
+    final slice = sessionId == null
+        ? _RenderableTimelineSlice.empty()
+        : _renderableTimelineSlice(state.activeTimeline, 8);
+    final signature = _timelineSignature(
+      sessionId,
+      slice.visibleEntries,
+      totalCount: slice.totalCount,
+    );
     if (_lastSessionId != sessionId) {
       _lastSessionId = sessionId;
       _lastTimelineSignature = signature;
@@ -287,10 +289,11 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  String _timelineSignature(String? sessionId, List<TimelineEntry> entries) {
-    final tail = entries.length <= 8
-        ? entries
-        : entries.sublist(entries.length - 8);
+  String _timelineSignature(
+    String? sessionId,
+    List<TimelineEntry> tail, {
+    required int totalCount,
+  }) {
     final itemSignature = tail
         .map(
           (entry) => [
@@ -306,7 +309,7 @@ class _AppShellState extends State<AppShell> {
           ].join(':'),
         )
         .join('|');
-    return '${sessionId ?? ''}:${entries.length}:$itemSignature';
+    return '${sessionId ?? ''}:$totalCount:$itemSignature';
   }
 
   void _handleTimelineScroll() {
@@ -380,6 +383,45 @@ int _entryDetailsSize(TimelineEntry entry) {
     return 0;
   }
   return jsonEncode(details).length;
+}
+
+_RenderableTimelineSlice _renderableTimelineSlice(
+  List<TimelineEntry> entries,
+  int limit,
+) {
+  final visible = <TimelineEntry>[];
+  var totalCount = 0;
+  final normalizedLimit = max(0, limit);
+  for (var index = entries.length - 1; index >= 0; index -= 1) {
+    final entry = entries[index];
+    if (!_shouldRenderTimelineEntry(entry)) {
+      continue;
+    }
+    totalCount += 1;
+    if (visible.length < normalizedLimit) {
+      visible.add(entry);
+    }
+  }
+  return _RenderableTimelineSlice(
+    visibleEntries: visible.reversed.toList(growable: false),
+    totalCount: totalCount,
+  );
+}
+
+class _RenderableTimelineSlice {
+  const _RenderableTimelineSlice({
+    required this.visibleEntries,
+    required this.totalCount,
+  });
+
+  const _RenderableTimelineSlice.empty()
+    : visibleEntries = const <TimelineEntry>[],
+      totalCount = 0;
+
+  final List<TimelineEntry> visibleEntries;
+  final int totalCount;
+
+  int get hiddenCount => max(0, totalCount - visibleEntries.length);
 }
 
 class SetupScreen extends StatefulWidget {
@@ -702,24 +744,24 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
-    final entries = widget.state.activeTimeline
-        .where(_shouldRenderTimelineEntry)
-        .toList(growable: false);
-    if (entries.isEmpty) {
+    final slice = _renderableTimelineSlice(
+      widget.state.activeTimeline,
+      _renderLimit,
+    );
+    if (slice.totalCount == 0) {
       return Center(
         child: Text('还没有消息', style: Theme.of(context).textTheme.bodyLarge),
       );
     }
-    final hiddenCount = max(0, entries.length - _renderLimit);
-    final visibleEntries = hiddenCount > 0
-        ? entries.sublist(entries.length - _renderLimit)
-        : entries;
+    final hiddenCount = slice.hiddenCount;
+    final visibleEntries = slice.visibleEntries;
     final hasMoreRemoteHistory = widget.state.activeHasMoreHistory;
     return ListView.builder(
       controller: widget.controller,
       padding: const EdgeInsets.only(top: 8, bottom: 8),
       itemCount:
-          visibleEntries.length + (hiddenCount > 0 || hasMoreRemoteHistory ? 1 : 0),
+          visibleEntries.length +
+          (hiddenCount > 0 || hasMoreRemoteHistory ? 1 : 0),
       itemBuilder: (context, index) {
         if ((hiddenCount > 0 || hasMoreRemoteHistory) && index == 0) {
           return Padding(
@@ -749,8 +791,9 @@ class _TimelineViewState extends State<TimelineView> {
             ),
           );
         }
-        final entryIndex =
-            (hiddenCount > 0 || hasMoreRemoteHistory) ? index - 1 : index;
+        final entryIndex = (hiddenCount > 0 || hasMoreRemoteHistory)
+            ? index - 1
+            : index;
         return TimelineCard(
           state: widget.state,
           entry: visibleEntries[entryIndex],

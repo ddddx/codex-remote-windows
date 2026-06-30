@@ -7,6 +7,7 @@ import {
   buildThreadSyncMessage,
   bootstrapTabs,
   defaultThreadSyncTurnLimit,
+  normalizeThreadSyncTurnLimit,
   type RuntimeThread,
 } from './thread-sync.js';
 import { toSessionTabPayload, upsertRuntimeTab, type RuntimeTab } from './session-tabs.js';
@@ -80,7 +81,7 @@ export function createSessionService(app: FastifyInstance) {
       return nextTab;
     },
 
-    async syncThread(threadId: string): Promise<{
+    async syncThread(threadId: string, limit?: number): Promise<{
       tab: RuntimeTab;
       message: Extract<ServerMessage, { type: 'thread_sync' }>;
     }> {
@@ -93,7 +94,7 @@ export function createSessionService(app: FastifyInstance) {
         effort: current?.reasoningEffort || null,
         approvalPolicy: current?.approvalPolicy || null,
         sandbox: current?.sandboxMode || null,
-        initialTurnsLimit: defaultThreadSyncTurnLimit(),
+        initialTurnsLimit: normalizeThreadSyncTurnLimit(limit),
       });
       const tab = upsertRuntimeTab(app, {
         ...(current || {}),
@@ -121,7 +122,7 @@ export function createSessionService(app: FastifyInstance) {
       await ensureCodexReady(app);
       const page = await app.codexClient.listThreadTurns(threadId, {
         cursor: cursor || null,
-        limit: limit || defaultThreadSyncTurnLimit(),
+        limit: normalizeThreadSyncTurnLimit(limit || defaultThreadSyncTurnLimit()),
       });
       return buildThreadHistoryMessage(app, threadId, page as any);
     },

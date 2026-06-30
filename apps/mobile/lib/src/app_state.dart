@@ -11,6 +11,9 @@ import 'api.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 
+const int mobileInitialThreadSyncLimit = 20;
+const int mobileHistoryPageLimit = 20;
+
 const String githubReleaseApiUrl =
     'https://api.github.com/repos/ddddx/codex-remote-windows/releases/latest';
 const String githubReleasePageUrl =
@@ -899,7 +902,11 @@ class CodexAppState extends ChangeNotifier {
     if (activeSessionId.isEmpty) {
       return;
     }
-    _socket?.send({'type': 'thread_sync', 'threadId': activeSessionId});
+    _socket?.send({
+      'type': 'thread_sync',
+      'threadId': activeSessionId,
+      'limit': mobileInitialThreadSyncLimit,
+    });
   }
 
   void loadMoreHistory(String threadId, String? cursor) {
@@ -914,6 +921,7 @@ class CodexAppState extends ChangeNotifier {
     _socket?.send({
       'type': 'thread_history_load',
       'threadId': threadId,
+      'limit': mobileHistoryPageLimit,
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     });
     Future<void>.delayed(const Duration(seconds: 5), () {
@@ -1408,7 +1416,9 @@ class CodexAppState extends ChangeNotifier {
     }
     _ensureThreadVisible(threadId);
     final historyCursor = readString(message, 'historyCursor');
-    historyCursorByThread[threadId] = historyCursor.isEmpty ? null : historyCursor;
+    historyCursorByThread[threadId] = historyCursor.isEmpty
+        ? null
+        : historyCursor;
     hasMoreHistoryByThread[threadId] =
         readBool(message, 'hasMoreHistory') || historyCursor.isNotEmpty;
     var entries = <TimelineEntry>[
@@ -1580,7 +1590,9 @@ class CodexAppState extends ChangeNotifier {
     entries.sort(_compareTimelineEntries);
     timelineByThread[threadId] = _dedupeEntries(entries);
     final historyCursor = readString(message, 'historyCursor');
-    historyCursorByThread[threadId] = historyCursor.isEmpty ? null : historyCursor;
+    historyCursorByThread[threadId] = historyCursor.isEmpty
+        ? null
+        : historyCursor;
     hasMoreHistoryByThread[threadId] =
         readBool(message, 'hasMoreHistory') || historyCursor.isNotEmpty;
     _pendingHistoryLoads.removeWhere((key) => key.startsWith('$threadId:'));
