@@ -39,7 +39,7 @@ class MainActivity : FlutterActivity() {
     private val preferencesName = "codex_remote_mobile"
     private val pickImageRequestCode = 42017
     private val notificationPermissionRequestCode = 42019
-    private val taskNotificationChannelId = "codex_remote_task_events"
+    private val taskNotificationChannelId = "codex_remote_task_events_heads_up"
     private val downloadExecutor = Executors.newSingleThreadExecutor()
     private val maxDownloadConnections = 64
     private val acceleratedDownloadMinBytes = 8L * 1024L * 1024L
@@ -345,9 +345,12 @@ class MainActivity : FlutterActivity() {
         val channel = NotificationChannel(
             taskNotificationChannelId,
             "Codex Remote 任务通知",
-            NotificationManager.IMPORTANCE_DEFAULT,
+            NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "Codex 任务完成提醒"
+            description = "Codex 任务完成顶部横幅提醒"
+            enableVibration(true)
+            setShowBadge(true)
+            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         }
         manager.createNotificationChannel(channel)
     }
@@ -373,6 +376,10 @@ class MainActivity : FlutterActivity() {
             .setContentText(body)
             .setSmallIcon(android.R.drawable.stat_notify_more)
             .setContentIntent(pendingIntent)
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE or Notification.DEFAULT_LIGHTS)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .build()
     }
