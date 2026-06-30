@@ -422,6 +422,43 @@ test('thread_sync forwards requested initial turn limit', async () => {
   assert.equal((calls.resumeThread[0] as any).options.initialTurnsLimit, 20);
 });
 
+test('thread_sync caps unscoped supplemental items in initial snapshot', async () => {
+  const { app } = createAppStub();
+  const socket = createSocket();
+  const items = new Map<string, any>();
+  for (let index = 0; index < 50; index += 1) {
+    items.set(`unscoped-${index}`, {
+      id: `unscoped-${index}`,
+      type: 'hookEvent',
+      status: 'completed',
+      createdAt: index,
+    });
+  }
+  items.set('scoped-turn-1', {
+    id: 'scoped-turn-1',
+    type: 'hookEvent',
+    status: 'completed',
+    _turnId: 'turn-1',
+    createdAt: 100,
+  });
+  app.runtimeState.supplementalItemsByThread.set(
+    '00000000-0000-0000-0000-000000000779',
+    items,
+  );
+
+  await routeClientMessage(app, socket as any, {
+    type: 'thread_sync',
+    threadId: '00000000-0000-0000-0000-000000000779',
+    limit: 20,
+  });
+
+  const supplementalItems = (socket.sent[1] as any).supplementalItems;
+  assert.equal(supplementalItems.length, 41);
+  assert.equal(supplementalItems[0].id, 'scoped-turn-1');
+  assert.equal(supplementalItems[1].id, 'unscoped-10');
+  assert.equal(supplementalItems[40].id, 'unscoped-49');
+});
+
 test('thread_history_load returns an older turn page with cursor metadata', async () => {
   const { app } = createAppStub();
   const socket = createSocket();

@@ -120,11 +120,22 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _scroll.addListener(_handleTimelineScroll);
+    state.timelineNotifier.addListener(_handleTimelineChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant AppShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.timelineNotifier.removeListener(_handleTimelineChanged);
+      state.timelineNotifier.addListener(_handleTimelineChanged);
+    }
   }
 
   @override
   void dispose() {
     _scroll.removeListener(_handleTimelineScroll);
+    state.timelineNotifier.removeListener(_handleTimelineChanged);
     _prompt.dispose();
     _scroll.dispose();
     super.dispose();
@@ -254,45 +265,57 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  void _syncTimelineScrollState(String? sessionId) {
+  void _handleTimelineChanged() {
+    final needsRebuild = _syncTimelineScrollState(state.activeSessionId);
+    if (needsRebuild && mounted) {
+      setState(() {});
+    }
+  }
+
+  bool _syncTimelineScrollState(String? sessionId) {
     final slice = sessionId == null
         ? _RenderableTimelineSlice.empty()
         : _renderableTimelineSlice(state.activeTimeline, 8);
     final signature = _timelineSignature(
       sessionId,
       slice.visibleEntries,
-      totalCount: slice.totalCount,
+      hasHidden: slice.hasHidden,
     );
     if (_lastSessionId != sessionId) {
       _lastSessionId = sessionId;
       _lastTimelineSignature = signature;
       _stickToBottom = true;
+      final changed = _showJumpToBottom || _hasUnreadBelow;
       _showJumpToBottom = false;
       _hasUnreadBelow = false;
       _scheduleScrollToBottom(animated: false);
-      return;
+      return changed;
     }
     if (_lastTimelineSignature == signature) {
-      return;
+      return false;
     }
     final wasNearBottom = _stickToBottom || _isNearBottom();
     _lastTimelineSignature = signature;
     if (wasNearBottom) {
       _stickToBottom = true;
+      final changed = _showJumpToBottom || _hasUnreadBelow;
       _showJumpToBottom = false;
       _hasUnreadBelow = false;
       _scheduleScrollToBottom();
+      return changed;
     } else {
       _stickToBottom = false;
+      final changed = !_showJumpToBottom || !_hasUnreadBelow;
       _showJumpToBottom = true;
       _hasUnreadBelow = true;
+      return changed;
     }
   }
 
   String _timelineSignature(
     String? sessionId,
     List<TimelineEntry> tail, {
-    required int totalCount,
+    required bool hasHidden,
   }) {
     final itemSignature = tail
         .map(
@@ -309,7 +332,7 @@ class _AppShellState extends State<AppShell> {
           ].join(':'),
         )
         .join('|');
-    return '${sessionId ?? ''}:$totalCount:$itemSignature';
+    return '${sessionId ?? ''}:$hasHidden:${tail.length}:$itemSignature';
   }
 
   void _handleTimelineScroll() {
@@ -390,38 +413,38 @@ _RenderableTimelineSlice _renderableTimelineSlice(
   int limit,
 ) {
   final visible = <TimelineEntry>[];
-  var totalCount = 0;
+  var hasHidden = false;
   final normalizedLimit = max(0, limit);
   for (var index = entries.length - 1; index >= 0; index -= 1) {
     final entry = entries[index];
     if (!_shouldRenderTimelineEntry(entry)) {
       continue;
     }
-    totalCount += 1;
     if (visible.length < normalizedLimit) {
       visible.add(entry);
+    } else {
+      hasHidden = true;
+      break;
     }
   }
   return _RenderableTimelineSlice(
     visibleEntries: visible.reversed.toList(growable: false),
-    totalCount: totalCount,
+    hasHidden: hasHidden,
   );
 }
 
 class _RenderableTimelineSlice {
   const _RenderableTimelineSlice({
     required this.visibleEntries,
-    required this.totalCount,
+    required this.hasHidden,
   });
 
   const _RenderableTimelineSlice.empty()
     : visibleEntries = const <TimelineEntry>[],
-      totalCount = 0;
+      hasHidden = false;
 
   final List<TimelineEntry> visibleEntries;
-  final int totalCount;
-
-  int get hiddenCount => max(0, totalCount - visibleEntries.length);
+  final bool hasHidden;
 }
 
 class SetupScreen extends StatefulWidget {
@@ -731,14 +754,31 @@ class _TimelineViewState extends State<TimelineView> {
   void initState() {
     super.initState();
     _sessionId = widget.state.activeSessionId;
+    widget.state.timelineNotifier.addListener(_handleTimelineChanged);
   }
 
   @override
   void didUpdateWidget(TimelineView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.timelineNotifier.removeListener(_handleTimelineChanged);
+      widget.state.timelineNotifier.addListener(_handleTimelineChanged);
+    }
     if (_sessionId != widget.state.activeSessionId) {
       _sessionId = widget.state.activeSessionId;
       _renderLimit = _initialRenderableLimit;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.state.timelineNotifier.removeListener(_handleTimelineChanged);
+    super.dispose();
+  }
+
+  void _handleTimelineChanged() {
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -748,22 +788,21 @@ class _TimelineViewState extends State<TimelineView> {
       widget.state.activeTimeline,
       _renderLimit,
     );
-    if (slice.totalCount == 0) {
+    if (slice.visibleEntries.isEmpty) {
       return Center(
         child: Text('还没有消息', style: Theme.of(context).textTheme.bodyLarge),
       );
     }
-    final hiddenCount = slice.hiddenCount;
+    final hasHidden = slice.hasHidden;
     final visibleEntries = slice.visibleEntries;
     final hasMoreRemoteHistory = widget.state.activeHasMoreHistory;
     return ListView.builder(
       controller: widget.controller,
       padding: const EdgeInsets.only(top: 8, bottom: 8),
       itemCount:
-          visibleEntries.length +
-          (hiddenCount > 0 || hasMoreRemoteHistory ? 1 : 0),
+          visibleEntries.length + (hasHidden || hasMoreRemoteHistory ? 1 : 0),
       itemBuilder: (context, index) {
-        if ((hiddenCount > 0 || hasMoreRemoteHistory) && index == 0) {
+        if ((hasHidden || hasMoreRemoteHistory) && index == 0) {
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: OutlinedButton.icon(
@@ -783,18 +822,15 @@ class _TimelineViewState extends State<TimelineView> {
                 });
               },
               icon: const Icon(Icons.keyboard_arrow_up),
-              label: Text(
-                hasMoreRemoteHistory
-                    ? '加载更早历史'
-                    : '加载更早 ${min(hiddenCount, _renderablePageSize)} 条',
-              ),
+              label: Text(hasMoreRemoteHistory ? '加载更早历史' : '加载更早消息'),
             ),
           );
         }
-        final entryIndex = (hiddenCount > 0 || hasMoreRemoteHistory)
+        final entryIndex = (hasHidden || hasMoreRemoteHistory)
             ? index - 1
             : index;
         return TimelineCard(
+          key: ValueKey(visibleEntries[entryIndex].id),
           state: widget.state,
           entry: visibleEntries[entryIndex],
         );

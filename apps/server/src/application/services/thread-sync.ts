@@ -41,6 +41,7 @@ export type RuntimeThread = v2.Thread & {
 
 const DEFAULT_THREAD_SYNC_TURN_LIMIT = 60;
 const MAX_THREAD_SYNC_TURN_LIMIT = 60;
+const MAX_THREAD_SYNC_UNSCOPED_SUPPLEMENTAL_ITEMS = 40;
 const MAX_THREAD_SYNC_UNSCOPED_EVENTS = 200;
 
 export function hydratePersistedRuntimeState(app: FastifyInstance): void {
@@ -199,10 +200,22 @@ function filterSupplementalItemsForTurns(
   items: SupplementalItemPayload[],
   turnIds: Set<string>,
 ): SupplementalItemPayload[] {
-  return items.filter((item) => {
+  const scoped: SupplementalItemPayload[] = [];
+  const unscoped: SupplementalItemPayload[] = [];
+  for (const item of items) {
     const turnId = typeof item._turnId === 'string' ? item._turnId : '';
-    return !turnId || turnIds.has(turnId);
-  });
+    if (turnId && turnIds.has(turnId)) {
+      scoped.push(item);
+      continue;
+    }
+    if (!turnId) {
+      unscoped.push(item);
+    }
+  }
+  return [
+    ...scoped,
+    ...unscoped.slice(-MAX_THREAD_SYNC_UNSCOPED_SUPPLEMENTAL_ITEMS),
+  ];
 }
 
 function filterTimelineEventsForTurns(

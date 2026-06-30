@@ -47,14 +47,17 @@ class CodexAppState extends ChangeNotifier {
   }
 
   final NativeBridge bridge;
+  final ChangeNotifier timelineNotifier = ChangeNotifier();
   CodexApi? _api;
   CodexSocket? _socket;
   StreamSubscription<JsonMap>? _messageSub;
   StreamSubscription<String>? _statusSub;
   StreamSubscription<UpdateDownloadProgress>? _downloadProgressSub;
   Timer? _workingTimer;
-  Timer? _serverMessageNotifyTimer;
-  bool _hasDeferredBackgroundNotify = false;
+  Timer? _shellNotifyTimer;
+  Timer? _timelineNotifyTimer;
+  bool _hasDeferredShellNotify = false;
+  bool _hasDeferredTimelineNotify = false;
   bool _reauthenticating = false;
   final Set<String> _completedTurnNotifications = {};
 
@@ -1025,7 +1028,7 @@ class CodexAppState extends ChangeNotifier {
         'text': trimmed,
         'clientMessageId': clientMessageId,
       });
-      notifyListeners();
+      _scheduleUiNotify(shell: true, timeline: true);
       return;
     }
     final prefs = activePrefs;
@@ -1044,7 +1047,7 @@ class CodexAppState extends ChangeNotifier {
       'approvalPolicy': prefs.approvalPolicy,
       'sandboxMode': prefs.sandboxMode,
     });
-    notifyListeners();
+    _scheduleUiNotify(shell: true, timeline: true);
   }
 
   Future<void> pickAndUploadImage() async {
@@ -1119,19 +1122,25 @@ class CodexAppState extends ChangeNotifier {
       return;
     }
     appInForeground = value;
-    if (value && _hasDeferredBackgroundNotify) {
-      _hasDeferredBackgroundNotify = false;
-      _scheduleServerMessageNotify();
+    if (value) {
+      final shellChanged = _hasDeferredShellNotify;
+      final timelineChanged = _hasDeferredTimelineNotify;
+      _hasDeferredShellNotify = false;
+      _hasDeferredTimelineNotify = false;
+      _scheduleUiNotify(shell: shellChanged, timeline: timelineChanged);
     }
   }
 
   void handleServerMessage(JsonMap message) {
     final type = readString(message, 'type');
+    var shellChanged = false;
+    var timelineChanged = false;
     switch (type) {
       case 'state':
         _replaceSessions(message['tabs']);
         _replaceApprovals(message['serverRequests']);
         _replaceGlobalNotices(message['globalSupplementalItems']);
+        shellChanged = true;
         break;
       case 'tab_created':
         final tab = message['tab'];
@@ -1141,42 +1150,53 @@ class CodexAppState extends ChangeNotifier {
             readString(message, 'threadId', readString(tab, 'threadId')),
           );
         }
+        shellChanged = true;
         break;
       case 'tab_updated':
         final tab = message['tab'];
         if (tab is JsonMap) {
           _upsertSession(SessionItem.fromJson(tab));
         }
+        shellChanged = true;
         break;
       case 'tab_removed':
         _removeSession(readString(message, 'threadId'));
+        shellChanged = true;
+        timelineChanged = true;
         break;
       case 'unread':
         final threadId = readString(message, 'threadId');
         if (threadId.isNotEmpty && threadId != activeSessionId) {
           unreadThreadIds = {...unreadThreadIds, threadId};
+          shellChanged = true;
         }
         break;
       case 'thread_sync':
         _applyThreadSync(message);
+        shellChanged = true;
+        timelineChanged = true;
         break;
       case 'thread_history':
         _applyThreadHistory(message);
+        timelineChanged = true;
         break;
       case 'server_request_required':
       case 'server_request_updated':
         final request = message['request'];
         if (request is JsonMap) {
           _upsertApproval(ServerRequestItem(request));
+          shellChanged = true;
         }
         break;
       case 'server_request_resolved':
         approvals = approvals
             .where((item) => item.requestId != readString(message, 'requestId'))
             .toList(growable: false);
+        shellChanged = true;
         break;
       case 'server_request_reset':
         approvals = [];
+        shellChanged = true;
         break;
       case 'turn_started':
         _setTurnStarted(
@@ -1184,58 +1204,75 @@ class CodexAppState extends ChangeNotifier {
           readString(message, 'turnId'),
           readInt(message, 'startedAt'),
         );
+        shellChanged = true;
+        timelineChanged = true;
         break;
       case 'turn_completed':
         _setTurnCompleted(
           readString(message, 'threadId'),
           readString(message, 'turnId'),
         );
+        shellChanged = true;
+        timelineChanged = true;
         break;
       case 'agent_delta':
         _appendAgentDelta(message);
+        timelineChanged = true;
         break;
       case 'plan_delta':
         _appendPlanDelta(message);
+        timelineChanged = true;
         break;
       case 'turn_plan_updated':
         _appendPlan(message);
+        timelineChanged = true;
         break;
       case 'item_started':
         _appendItemStarted(message);
+        timelineChanged = true;
         break;
       case 'item_completed':
         _appendItemCompleted(message);
+        timelineChanged = true;
         break;
       case 'item_delta':
         _appendItemDelta(message);
+        timelineChanged = true;
         break;
       case 'thread_event':
         if (_shouldDisplayThreadEvent(readString(message, 'method'))) {
           _appendThreadEvent(message);
+          timelineChanged = true;
         }
         break;
       case 'hook_started':
       case 'hook_completed':
         _appendHookEvent(message);
+        timelineChanged = true;
         break;
       case 'guardian_review_started':
       case 'guardian_review_completed':
         _appendGuardianEvent(message);
+        timelineChanged = true;
         break;
       case 'mcp_tool_progress':
         _appendMcpProgress(message);
+        timelineChanged = true;
         break;
       case 'turn_diff_updated':
         _appendTurnDiff(message);
+        timelineChanged = true;
         break;
       case 'model_rerouted':
         _applyModelReroute(message);
+        shellChanged = true;
         break;
       case 'token_usage':
         final threadId = readString(message, 'threadId');
         final usage = message['usage'];
         if (threadId.isNotEmpty && usage is JsonMap) {
           tokenUsageByThread[threadId] = usage;
+          shellChanged = true;
         }
         break;
       case 'codex_error':
@@ -1245,6 +1282,7 @@ class CodexAppState extends ChangeNotifier {
           _extractText(message['error']).ifEmpty('发生了 Codex 错误'),
           'error',
         );
+        timelineChanged = true;
         break;
       case 'warning':
       case 'error_notice':
@@ -1264,6 +1302,7 @@ class CodexAppState extends ChangeNotifier {
           'threadId': readString(message, 'threadId'),
           'dismissKey': _dismissKeyForMessage(message),
         });
+        shellChanged = true;
         break;
       case 'backend_error':
         _appendNoticeEvent(
@@ -1272,28 +1311,56 @@ class CodexAppState extends ChangeNotifier {
           readString(message, 'message', jsonEncode(message)),
           'error',
         );
+        timelineChanged = true;
         break;
       case 'error':
         _handleErrorMessage(message);
+        shellChanged = true;
+        timelineChanged = true;
         break;
       case 'notification':
-        _handleNotification(message);
+        final changed = _handleNotification(message);
+        shellChanged = changed.shell;
+        timelineChanged = changed.timeline;
         break;
     }
-    _scheduleServerMessageNotify();
+    _scheduleUiNotify(shell: shellChanged, timeline: timelineChanged);
   }
 
-  void _scheduleServerMessageNotify() {
+  void _scheduleUiNotify({required bool shell, required bool timeline}) {
+    if (shell) {
+      _scheduleShellNotify();
+    }
+    if (timeline) {
+      _scheduleTimelineNotify();
+    }
+  }
+
+  void _scheduleShellNotify() {
     if (!appInForeground) {
-      _hasDeferredBackgroundNotify = true;
+      _hasDeferredShellNotify = true;
       return;
     }
-    if (_serverMessageNotifyTimer != null) {
+    if (_shellNotifyTimer != null) {
       return;
     }
-    _serverMessageNotifyTimer = Timer(const Duration(milliseconds: 50), () {
-      _serverMessageNotifyTimer = null;
+    _shellNotifyTimer = Timer(const Duration(milliseconds: 50), () {
+      _shellNotifyTimer = null;
       notifyListeners();
+    });
+  }
+
+  void _scheduleTimelineNotify() {
+    if (!appInForeground) {
+      _hasDeferredTimelineNotify = true;
+      return;
+    }
+    if (_timelineNotifyTimer != null) {
+      return;
+    }
+    _timelineNotifyTimer = Timer(const Duration(milliseconds: 50), () {
+      _timelineNotifyTimer = null;
+      timelineNotifier.notifyListeners();
     });
   }
 
@@ -3203,14 +3270,14 @@ class CodexAppState extends ChangeNotifier {
     timelineByThread[threadId] = _dedupeEntries(entries);
   }
 
-  void _handleNotification(JsonMap message) {
+  ({bool shell, bool timeline}) _handleNotification(JsonMap message) {
     final method = readString(message, 'method');
     final params = message['params'];
     if (method == 'account/rateLimits/updated' ||
         method == 'skills/changed' ||
         method == 'thread/settings/updated' ||
         method == 'externalAgentConfig/import/progress') {
-      return;
+      return (shell: false, timeline: false);
     }
     final paramsMap = params is JsonMap ? params : const <String, dynamic>{};
     _pushNotice({
@@ -3223,6 +3290,7 @@ class CodexAppState extends ChangeNotifier {
       'dismissKey': _dismissKeyForMessage(message),
     });
     final threadId = readString(paramsMap, 'threadId');
+    var timelineChanged = false;
     if (threadId.isNotEmpty &&
         (method == 'guardianWarning' || method.startsWith('turn/'))) {
       _appendNoticeEvent(
@@ -3231,7 +3299,9 @@ class CodexAppState extends ChangeNotifier {
         _notificationMessage(method, paramsMap),
         _notificationLevel(method, paramsMap),
       );
+      timelineChanged = true;
     }
+    return (shell: true, timeline: timelineChanged);
   }
 
   void _handleErrorMessage(JsonMap message) {
@@ -3966,7 +4036,9 @@ class CodexAppState extends ChangeNotifier {
   @override
   void dispose() {
     _workingTimer?.cancel();
-    _serverMessageNotifyTimer?.cancel();
+    _shellNotifyTimer?.cancel();
+    _timelineNotifyTimer?.cancel();
+    timelineNotifier.dispose();
     unawaited(_messageSub?.cancel());
     unawaited(_statusSub?.cancel());
     unawaited(_downloadProgressSub?.cancel());

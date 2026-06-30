@@ -592,6 +592,68 @@ void main() {
     },
   );
 
+  test('routes streaming timeline updates away from shell rebuilds', () async {
+    final state = CodexAppState(_TestBridge());
+    addTearDown(state.dispose);
+    var shellNotifications = 0;
+    var timelineNotifications = 0;
+    state.addListener(() {
+      shellNotifications += 1;
+    });
+    state.timelineNotifier.addListener(() {
+      timelineNotifications += 1;
+    });
+
+    state.handleServerMessage({
+      'type': 'agent_delta',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'itemId': 'assistant-1',
+      'delta': 'hello',
+      'createdAt': 1,
+    });
+    state.handleServerMessage({
+      'type': 'agent_delta',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'itemId': 'assistant-1',
+      'delta': ' world',
+      'createdAt': 2,
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(shellNotifications, 0);
+    expect(timelineNotifications, 1);
+    expect(state.timelineByThread['thread-1']?.single.text, 'hello world');
+  });
+
+  test('coalesces background timeline refreshes until resume', () async {
+    final state = CodexAppState(_TestBridge());
+    addTearDown(state.dispose);
+    var timelineNotifications = 0;
+    state.timelineNotifier.addListener(() {
+      timelineNotifications += 1;
+    });
+
+    state.setAppForeground(false);
+    state.handleServerMessage({
+      'type': 'agent_delta',
+      'threadId': 'thread-1',
+      'turnId': 'turn-1',
+      'itemId': 'assistant-1',
+      'delta': 'background',
+      'createdAt': 1,
+    });
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(timelineNotifications, 0);
+
+    state.setAppForeground(true);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(timelineNotifications, 1);
+  });
+
   test('filters non-rendered thread sync timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';
