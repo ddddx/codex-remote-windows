@@ -546,6 +546,52 @@ void main() {
     expect(bridge.notifications.single['body'], contains('测试会话'));
   });
 
+  test(
+    'coalesces server message UI notifications around background resume',
+    () async {
+      final state = CodexAppState(_TestBridge());
+      addTearDown(state.dispose);
+      var notifications = 0;
+      state.addListener(() {
+        notifications += 1;
+      });
+
+      state.setAppForeground(false);
+      state.handleServerMessage({
+        'type': 'token_usage',
+        'threadId': 'thread-1',
+        'usage': {'totalTokens': 1},
+      });
+      state.handleServerMessage({
+        'type': 'token_usage',
+        'threadId': 'thread-1',
+        'usage': {'totalTokens': 2},
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(notifications, 0);
+
+      state.setAppForeground(true);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(notifications, 1);
+
+      state.handleServerMessage({
+        'type': 'token_usage',
+        'threadId': 'thread-1',
+        'usage': {'totalTokens': 3},
+      });
+      state.handleServerMessage({
+        'type': 'token_usage',
+        'threadId': 'thread-1',
+        'usage': {'totalTokens': 4},
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(notifications, 2);
+    },
+  );
+
   test('filters non-rendered thread sync timeline events like web', () {
     final state = CodexAppState(_TestBridge());
     const threadId = 'thread-1';

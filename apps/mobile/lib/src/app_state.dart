@@ -53,6 +53,8 @@ class CodexAppState extends ChangeNotifier {
   StreamSubscription<String>? _statusSub;
   StreamSubscription<UpdateDownloadProgress>? _downloadProgressSub;
   Timer? _workingTimer;
+  Timer? _serverMessageNotifyTimer;
+  bool _hasDeferredBackgroundNotify = false;
   bool _reauthenticating = false;
   final Set<String> _completedTurnNotifications = {};
 
@@ -1113,7 +1115,14 @@ class CodexAppState extends ChangeNotifier {
   }
 
   void setAppForeground(bool value) {
+    if (appInForeground == value) {
+      return;
+    }
     appInForeground = value;
+    if (value && _hasDeferredBackgroundNotify) {
+      _hasDeferredBackgroundNotify = false;
+      _scheduleServerMessageNotify();
+    }
   }
 
   void handleServerMessage(JsonMap message) {
@@ -1271,7 +1280,21 @@ class CodexAppState extends ChangeNotifier {
         _handleNotification(message);
         break;
     }
-    notifyListeners();
+    _scheduleServerMessageNotify();
+  }
+
+  void _scheduleServerMessageNotify() {
+    if (!appInForeground) {
+      _hasDeferredBackgroundNotify = true;
+      return;
+    }
+    if (_serverMessageNotifyTimer != null) {
+      return;
+    }
+    _serverMessageNotifyTimer = Timer(const Duration(milliseconds: 50), () {
+      _serverMessageNotifyTimer = null;
+      notifyListeners();
+    });
   }
 
   void _configureApi() {
@@ -3943,6 +3966,7 @@ class CodexAppState extends ChangeNotifier {
   @override
   void dispose() {
     _workingTimer?.cancel();
+    _serverMessageNotifyTimer?.cancel();
     unawaited(_messageSub?.cancel());
     unawaited(_statusSub?.cancel());
     unawaited(_downloadProgressSub?.cancel());
